@@ -1,0 +1,41 @@
+server:
+  port: 8080
+  mode: debug
+
+database:
+  host: ${DB_HOST:localhost}
+  port: ${DB_PORT:3306}
+  username: ${DB_USERNAME:root}
+  password: ${DB_PASSWORD:your_password}
+  database: ${DB_DATABASE:steellink}
+  charset: utf8mb4
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600
+
+redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  password: ${REDIS_PASSWORD:}
+  db: ${REDIS_DB:0}
+  pool_size: 10
+
+jwt:
+  secret: ${JWT_SECRET:your-jwt-secret-key-change-in-production}
+  expire: 86400
+  refresh_expire: 604800
+  issuer: steellink
+
+log:
+  level: ${LOG_LEVEL:debug}
+  format: json
+  output: stdout
+  max_size: 100
+  max_backups: 5
+  max_age: 30
+  compress: true
+
+kafka:
+  brokers:
+    - ${KAFKA_BROKER:localhost:9092}
+  group_id: steellink-backend

@@ -1,0 +1,46 @@
+# SteelLink Backend Configuration
+#
+# 加载顺序：config.yaml → .env 覆盖 → 系统环境变量覆盖
+# 敏感信息（密码、密钥、服务器IP）请写在 .env 文件中
+
+server:
+  port: 8080
+  mode: debug  # debug, release, test
+
+database:
+  host: localhost          # 被 DATABASE_HOST 覆盖
+  port: 3306               # 被 DATABASE_PORT 覆盖
+  username: root           # 被 DATABASE_USERNAME 覆盖
+  password: ""             # 被 DATABASE_PASSWORD 覆盖
+  database: steellink      # 被 DATABASE_NAME 覆盖
+  charset: utf8mb4
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600  # seconds
+
+redis:
+  host: localhost          # 被 REDIS_HOST 覆盖
+  port: 6379               # 被 REDIS_PORT 覆盖
+  password: ""             # 被 REDIS_PASSWORD 覆盖
+  db: 0                    # 被 REDIS_DB 覆盖
+  pool_size: 10
+
+jwt:
+  secret: change-me        # 被 JWT_SECRET 覆盖
+  expire: 86400            # seconds (24 hours)
+  refresh_expire: 604800   # seconds (7 days)
+  issuer: steellink
+
+log:
+  level: debug             # 被 LOG_LEVEL 覆盖
+  format: json             # 被 LOG_FORMAT 覆盖
+  output: stdout           # 被 LOG_OUTPUT 覆盖
+  max_size: 100
+  max_backups: 5
+  max_age: 30
+  compress: true
+
+kafka:
+  brokers:                 # 被 KAFKA_BROKERS (逗号分隔) 覆盖
+    - localhost:9092
+  group_id: steellink-backend
