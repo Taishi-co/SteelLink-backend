@@ -8,7 +8,7 @@ server:
   mode: debug  # debug, release, test
 
 database:
-  host: host.docker.internal          # 被 DATABASE_HOST 覆盖
+  host: 172.16.0.6          # 被 DATABASE_HOST 覆盖
   port: 3306               # 被 DATABASE_PORT 覆盖
   username: root           # 被 DATABASE_USERNAME 覆盖
   password: "Steellink2026"             # 被 DATABASE_PASSWORD 覆盖
@@ -19,7 +19,7 @@ database:
   conn_max_lifetime: 3600  # seconds
 
 redis:
-  host: host.docker.internal          # 被 REDIS_HOST 覆盖
+  host: 172.16.0.6          # 被 REDIS_HOST 覆盖
   port: 6379               # 被 REDIS_PORT 覆盖
   password: "Steellink2026"             # 被 REDIS_PASSWORD 覆盖
   db: 0                    # 被 REDIS_DB 覆盖
