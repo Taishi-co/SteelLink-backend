@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/steellink/backend/pkg/ecode"
+	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 )
 
 // Response represents the standard API response structure

@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/steellink/backend/config"
-	"github.com/steellink/backend/pkg/logger"
+	"github.com/Taishi-co/SteelLink-backend/config"
+	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
 	"go.uber.org/zap"
 )
 

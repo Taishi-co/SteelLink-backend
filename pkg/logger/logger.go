@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/steellink/backend/config"
+	"github.com/Taishi-co/SteelLink-backend/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"

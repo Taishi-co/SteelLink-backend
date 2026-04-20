@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/steellink/backend/config"
-	"github.com/steellink/backend/pkg/ecode"
+	"github.com/Taishi-co/SteelLink-backend/config"
+	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 )
 
 type Claims struct {

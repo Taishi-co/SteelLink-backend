@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/steellink/backend/pkg/logger"
+	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
 	"go.uber.org/zap"
 )
 

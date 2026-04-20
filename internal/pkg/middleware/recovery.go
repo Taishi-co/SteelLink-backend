@@ -5,8 +5,8 @@ import (
 	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
-	"github.com/steellink/backend/pkg/logger"
-	"github.com/steellink/backend/pkg/response"
+	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
+	"github.com/Taishi-co/SteelLink-backend/pkg/response"
 	"go.uber.org/zap"
 )
 

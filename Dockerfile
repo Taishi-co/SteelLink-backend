@@ -8,6 +8,11 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 # Copy go mod files
 COPY go.mod go.sum ./
+
+# 🔥 关键修复：国内 Go 代理，解决下载超时
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GO111MODULE=on
+
 RUN go mod download
 
 # Copy source code

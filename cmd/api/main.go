@@ -12,11 +12,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/steellink/backend/config"
-	"github.com/steellink/backend/internal/pkg/database"
-	"github.com/steellink/backend/internal/pkg/handler"
-	"github.com/steellink/backend/internal/pkg/middleware"
-	"github.com/steellink/backend/pkg/logger"
+	"github.com/Taishi-co/SteelLink-backend/config"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/handler"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
 	"go.uber.org/zap"
 )
 
@@ -51,12 +52,14 @@ func main() {
 	)
 
 	// Initialize database
+	logger.Info("Connecting to MySQL...")
 	if err := database.InitMySQL(&cfg.Database); err != nil {
 		logger.Fatal("Failed to init MySQL", zap.Error(err))
 	}
 	defer database.CloseMySQL()
 
 	// Initialize redis
+	logger.Info("Connecting to Redis...")
 	if err := database.InitRedis(&cfg.Redis); err != nil {
 		logger.Fatal("Failed to init Redis", zap.Error(err))
 	}
@@ -67,29 +70,34 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	router := gin.New()
-	router.Use(
+	ginRouter := gin.New()
+	ginRouter.Use(
 		middleware.Recovery(),
 		middleware.Logger(),
 		middleware.CORS(),
 	)
 
 	// Health check endpoints (no auth required)
-	router.GET("/health", handler.Health)
-	router.GET("/ready", handler.Ready)
-	router.GET("/live", handler.Live)
+	ginRouter.GET("/health", handler.Health)
+	ginRouter.GET("/ready", handler.Ready)
+	ginRouter.GET("/live", handler.Live)
 
 	// API v1 routes
-	v1 := router.Group("/api/v1")
+	v1 := ginRouter.Group("/api/v1")
 	{
 		// Health check under API
 		v1.GET("/health", handler.Health)
 	}
 
+	// 用户模块路由
+	logger.Info("Registering user routes...")
+	router.RegisterRoutes(v1)
+	logger.Info("User routes registered")
+
 	// Start server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      router,
+		Handler:      ginRouter,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

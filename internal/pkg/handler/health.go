@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/steellink/backend/pkg/response"
+	"github.com/Taishi-co/SteelLink-backend/pkg/response"
 )
 
 type HealthResponse struct {
