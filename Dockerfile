@@ -9,7 +9,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# 🔥 关键修复：国内 Go 代理，解决下载超时
+# 国内 GOPROXY
 ENV GOPROXY=https://goproxy.cn,direct
 ENV GO111MODULE=on
 
@@ -26,17 +26,21 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install ca-certificates and timezone data
+# Time & Cert
 RUN apk --no-cache add ca-certificates tzdata && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
     apk del tzdata
 
-# Copy binary from builder
+# Copy binary
 COPY --from=builder /steellink-backend /app/steellink-backend
-COPY --from=builder /app/config/config.example.yaml /app/config/config.yaml
 
-# Create non-root user
+# ==============================
+# ✅ 关键：直接复制你正确的 config.yaml
+# ==============================
+COPY config.yaml /app/config/config.yaml
+
+# User
 RUN adduser -D -g '' appuser
 USER appuser
 

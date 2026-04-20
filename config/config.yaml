@@ -8,10 +8,10 @@ server:
   mode: debug  # debug, release, test
 
 database:
-  host: localhost          # 被 DATABASE_HOST 覆盖
+  host: 117.72.123.14          # 被 DATABASE_HOST 覆盖
   port: 3306               # 被 DATABASE_PORT 覆盖
   username: root           # 被 DATABASE_USERNAME 覆盖
-  password: ""             # 被 DATABASE_PASSWORD 覆盖
+  password: "Steellink2026"             # 被 DATABASE_PASSWORD 覆盖
   database: steellink      # 被 DATABASE_NAME 覆盖
   charset: utf8mb4
   max_idle_conns: 10
@@ -19,9 +19,9 @@ database:
   conn_max_lifetime: 3600  # seconds
 
 redis:
-  host: localhost          # 被 REDIS_HOST 覆盖
+  host: 117.72.123.14          # 被 REDIS_HOST 覆盖
   port: 6379               # 被 REDIS_PORT 覆盖
-  password: ""             # 被 REDIS_PASSWORD 覆盖
+  password: "Steellink2026"             # 被 REDIS_PASSWORD 覆盖
   db: 0                    # 被 REDIS_DB 覆盖
   pool_size: 10
 
