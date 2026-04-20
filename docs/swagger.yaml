@@ -1,0 +1,564 @@
+basePath: /api/v1
+definitions:
+  dto.ChangePasswordRequest:
+    properties:
+      new_password:
+        maxLength: 20
+        minLength: 6
+        type: string
+      old_password:
+        maxLength: 20
+        minLength: 6
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
+  dto.JoinEnterpriseRequest:
+    properties:
+      enterprise_code:
+        type: string
+    required:
+    - enterprise_code
+    type: object
+  dto.LoginRequest:
+    properties:
+      account:
+        description: 手机号或邮箱
+        type: string
+      password:
+        maxLength: 20
+        minLength: 6
+        type: string
+    required:
+    - account
+    - password
+    type: object
+  dto.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      user:
+        $ref: '#/definitions/dto.UserInfo'
+    type: object
+  dto.RefreshTokenRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  dto.RegisterRequest:
+    properties:
+      email:
+        type: string
+      password:
+        maxLength: 20
+        minLength: 6
+        type: string
+      phone:
+        type: string
+      qq:
+        type: string
+    required:
+    - password
+    - phone
+    type: object
+  dto.ResetPasswordRequest:
+    properties:
+      code:
+        type: string
+      new_password:
+        maxLength: 20
+        minLength: 6
+        type: string
+      phone:
+        type: string
+    required:
+    - code
+    - new_password
+    - phone
+    type: object
+  dto.SendSmsRequest:
+    properties:
+      phone:
+        type: string
+      type:
+        description: register, login, reset
+        enum:
+        - register
+        - login
+        - reset
+        type: string
+    required:
+    - phone
+    - type
+    type: object
+  dto.SmsLoginRequest:
+    properties:
+      code:
+        type: string
+      phone:
+        type: string
+    required:
+    - code
+    - phone
+    type: object
+  dto.UpdateUserRequest:
+    properties:
+      email:
+        type: string
+      qq:
+        type: string
+    type: object
+  dto.UserInfo:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      enterprise_code:
+        type: string
+      id:
+        type: integer
+      personal_code:
+        type: string
+      phone:
+        type: string
+      platform_id:
+        type: string
+      qq:
+        type: string
+      role:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+      user_no:
+        type: string
+    type: object
+  dto.UserListResponse:
+    properties:
+      list:
+        items:
+          $ref: '#/definitions/dto.UserInfo'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  response.Response:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@steellink.com
+    name: API Support
+  description: B2B钢材交易平台API文档
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: SteelLink API
+  version: "1.0"
+paths:
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 通过手机号/邮箱和密码登录
+      parameters:
+      - description: 登录请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginResponse'
+              type: object
+      summary: 用户登录
+      tags:
+      - 认证
+  /api/v1/auth/logout:
+    post:
+      description: 用户登出（客户端清除Token即可）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 用户登出
+      tags:
+      - 认证
+  /api/v1/auth/password/change:
+    put:
+      consumes:
+      - application/json
+      description: 用户修改密码
+      parameters:
+      - description: 修改密码请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 修改密码
+      tags:
+      - 认证
+  /api/v1/auth/password/reset:
+    post:
+      consumes:
+      - application/json
+      description: 通过手机验证码重置密码
+      parameters:
+      - description: 重置密码请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 重置密码
+      tags:
+      - 认证
+  /api/v1/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: 使用RefreshToken获取新的AccessToken
+      parameters:
+      - description: 刷新Token请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RefreshTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginResponse'
+              type: object
+      summary: 刷新Token
+      tags:
+      - 认证
+  /api/v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: 通过手机号注册新用户
+      parameters:
+      - description: 注册请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginResponse'
+              type: object
+      summary: 用户注册
+      tags:
+      - 认证
+  /api/v1/auth/sms/login:
+    post:
+      consumes:
+      - application/json
+      description: 通过手机号和验证码登录
+      parameters:
+      - description: 短信登录请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SmsLoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginResponse'
+              type: object
+      summary: 短信验证码登录
+      tags:
+      - 认证
+  /api/v1/auth/sms/send:
+    post:
+      consumes:
+      - application/json
+      description: 发送短信验证码
+      parameters:
+      - description: 发送验证码请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SendSmsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 发送短信验证码
+      tags:
+      - 认证
+  /api/v1/users:
+    get:
+      description: 获取用户列表（管理员）
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      - description: 手机号
+        in: query
+        name: phone
+        type: string
+      - description: 邮箱
+        in: query
+        name: email
+        type: string
+      - description: 角色
+        in: query
+        name: role
+        type: string
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      - description: 关键词
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UserListResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取用户列表
+      tags:
+      - 用户
+  /api/v1/users/{id}:
+    get:
+      description: 根据用户ID获取用户信息
+      parameters:
+      - description: 用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UserInfo'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取用户信息
+      tags:
+      - 用户
+  /api/v1/users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: 更新用户状态（管理员）
+      parameters:
+      - description: 用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态请求 {\
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties:
+            type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新用户状态
+      tags:
+      - 用户
+  /api/v1/users/me:
+    get:
+      description: 获取当前登录用户的信息
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UserInfo'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取当前用户信息
+      tags:
+      - 用户
+    put:
+      consumes:
+      - application/json
+      description: 更新当前登录用户的信息
+      parameters:
+      - description: 更新请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新当前用户信息
+      tags:
+      - 用户
+  /api/v1/users/me/enterprise/join:
+    post:
+      consumes:
+      - application/json
+      description: 用户加入企业
+      parameters:
+      - description: 加入企业请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.JoinEnterpriseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 加入企业
+      tags:
+      - 用户
+  /api/v1/users/me/enterprise/leave:
+    post:
+      description: 用户离开当前企业
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 离开企业
+      tags:
+      - 用户
+securityDefinitions:
+  Bearer:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

@@ -12,12 +12,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/handler"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +29,23 @@ var (
 	version    = "1.0.0"
 )
 
+// @title SteelLink API
+// @version 1.0
+// @description B2B钢材交易平台API文档
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.email support@steellink.com
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host localhost:8080
+// @BasePath /api/v1
+// @securityDefinitions.apikey Bearer
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 func main() {
 	flag.Parse()
 
@@ -76,6 +96,9 @@ func main() {
 		middleware.Logger(),
 		middleware.CORS(),
 	)
+
+	// Swagger documentation
+	ginRouter.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Health check endpoints (no auth required)
 	ginRouter.GET("/health", handler.Health)
