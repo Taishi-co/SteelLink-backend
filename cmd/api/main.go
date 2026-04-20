@@ -14,6 +14,9 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	"github.com/Taishi-co/SteelLink-backend/config"
+	tradepersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/persistence"
+	traderouter "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/router"
+	userpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/handler"
@@ -77,6 +80,12 @@ func main() {
 		logger.Fatal("Failed to init MySQL", zap.Error(err))
 	}
 	defer database.CloseMySQL()
+	if err := userpersistence.AutoMigrate(); err != nil {
+		logger.Fatal("Failed to auto migrate user tables", zap.Error(err))
+	}
+	if err := tradepersistence.AutoMigrate(); err != nil {
+		logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
+	}
 
 	// Initialize redis
 	logger.Info("Connecting to Redis...")
@@ -116,6 +125,9 @@ func main() {
 	logger.Info("Registering user routes...")
 	router.RegisterRoutes(v1)
 	logger.Info("User routes registered")
+	logger.Info("Registering trade routes...")
+	traderouter.RegisterRoutes(v1)
+	logger.Info("Trade routes registered")
 
 	// Start server
 	srv := &http.Server{

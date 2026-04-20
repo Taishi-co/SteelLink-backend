@@ -125,8 +125,8 @@ func (r *userRepository) List(ctx context.Context, query *repository.UserQuery) 
 		db = db.Where("enterprise_code = ?", query.EnterpriseCode)
 	}
 	if query.Keyword != "" {
-		db = db.Where("phone LIKE ? OR email LIKE ? OR user_no LIKE ?",
-			"%"+query.Keyword+"%", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
+		db = db.Where("phone LIKE ? OR email LIKE ? OR user_no LIKE ? OR uid LIKE ?",
+			"%"+query.Keyword+"%", "%"+query.Keyword+"%", "%"+query.Keyword+"%", "%"+query.Keyword+"%")
 	}
 
 	// 统计总数
