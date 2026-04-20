@@ -38,7 +38,7 @@ COPY --from=builder /steellink-backend /app/steellink-backend
 # ==============================
 # ✅ 关键：直接复制你正确的 config.yaml
 # ==============================
-COPY config.yaml /app/config/config.yaml
+COPY config/config.yaml /app/config/config.yaml
 
 # User
 RUN adduser -D -g '' appuser
