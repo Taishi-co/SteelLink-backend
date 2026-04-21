@@ -12,5 +12,8 @@ func AutoMigrate() error {
 		&tradeentity.ProductAuditLog{},
 		&tradeentity.Order{},
 		&tradeentity.OrderItem{},
+		&tradeentity.OrderContract{},
+		&tradeentity.PaymentReceipt{},
+		&tradeentity.PickupCode{},
 	)
 }

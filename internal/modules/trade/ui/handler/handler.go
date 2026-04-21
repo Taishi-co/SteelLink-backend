@@ -3,11 +3,11 @@ package handler
 import (
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	tradeservice "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/application/service"
 	tradedto "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 type TradeHandler struct {
@@ -170,7 +170,7 @@ func (h *TradeHandler) CreateOrder(c *gin.Context) {
 
 func (h *TradeHandler) ListOrders(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	var req tradedto.ProductListRequest
+	var req tradedto.OrderListRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.BadRequest(c, "invalid query")
 		return
@@ -198,6 +198,158 @@ func (h *TradeHandler) GetOrder(c *gin.Context) {
 			return
 		}
 		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
+func (h *TradeHandler) SubmitOrderContract(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	var req tradedto.SubmitContractRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid payload")
+		return
+	}
+
+	order, err := h.service.SubmitOrderContract(c.Request.Context(), userID, id, &req)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
+func (h *TradeHandler) SubmitPaymentReceipt(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	var req tradedto.SubmitPaymentReceiptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid payload")
+		return
+	}
+
+	order, err := h.service.SubmitPaymentReceipt(c.Request.Context(), userID, id, &req)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
+func (h *TradeHandler) GetOrderPickupCode(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	pickupCode, err := h.service.GetOrderPickupCode(c.Request.Context(), userID, id)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "pickup code not found")
+			return
+		}
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, pickupCode)
+}
+
+func (h *TradeHandler) VerifyPickupCode(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	var req tradedto.VerifyPickupCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid payload")
+		return
+	}
+
+	order, err := h.service.VerifyPickupCode(c.Request.Context(), userID, id, &req)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
+func (h *TradeHandler) ListAdminOrders(c *gin.Context) {
+	var req tradedto.OrderListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+
+	result, err := h.service.ListAdminOrders(c.Request.Context(), &req)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *TradeHandler) GetAdminOrder(c *gin.Context) {
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	order, err := h.service.GetAdminOrder(c.Request.Context(), id)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
+func (h *TradeHandler) AuditOrderPayment(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	var req tradedto.AuditPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid payload")
+		return
+	}
+
+	order, err := h.service.AuditOrderPayment(c.Request.Context(), userID, id, &req)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
 		return
 	}
 	response.Success(c, order)

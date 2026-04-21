@@ -56,7 +56,7 @@ func (s *TradeService) ListAdminProducts(ctx context.Context, req *tradedto.Prod
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Order("id DESC").Offset((req.Page-1)*req.PageSize).Limit(req.PageSize).Find(&products).Error; err != nil {
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&products).Error; err != nil {
 		return nil, err
 	}
 
@@ -243,7 +243,7 @@ func (s *TradeService) CreateOrder(ctx context.Context, buyerID uint64, req *tra
 			ProductSKUID:  product.SKUID,
 			TotalAmount:   float64(req.Quantity) * product.Price,
 			TotalQuantity: req.Quantity,
-			Status:        tradeentity.OrderStatusPendingPayment,
+			Status:        tradeentity.OrderStatusPendingContract,
 		}
 		if err := tx.Create(&order).Error; err != nil {
 			return err
@@ -276,7 +276,80 @@ func (s *TradeService) CreateOrder(ctx context.Context, buyerID uint64, req *tra
 	return s.GetOrder(ctx, buyerID, order.ID)
 }
 
-func (s *TradeService) ListOrders(ctx context.Context, buyerID uint64, req *tradedto.ProductListRequest) (*tradedto.OrderListResponse, error) {
+func (s *TradeService) SubmitOrderContract(ctx context.Context, buyerID, orderRefID uint64, req *tradedto.SubmitContractRequest) (*tradedto.OrderInfo, error) {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order tradeentity.Order
+		if err := tx.Where("id = ? AND buyer_id = ?", orderRefID, buyerID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != tradeentity.OrderStatusPendingContract {
+			return fmt.Errorf("order status does not allow contract submission")
+		}
+
+		contract := tradeentity.OrderContract{
+			OrderRefID:   order.ID,
+			OrderID:      order.OrderID,
+			BuyerID:      buyerID,
+			ContractURL:  strings.TrimSpace(req.ContractURL),
+			ContractHash: strings.TrimSpace(req.ContractHash),
+			Status:       tradeentity.OrderContractStatusSubmitted,
+			SubmittedBy:  buyerID,
+			SubmittedAt:  time.Now(),
+		}
+		if err := tx.Where("order_ref_id = ?", order.ID).Assign(contract).FirstOrCreate(&contract).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&order).Update("status", tradeentity.OrderStatusPendingPayment).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetOrder(ctx, buyerID, orderRefID)
+}
+
+func (s *TradeService) SubmitPaymentReceipt(ctx context.Context, buyerID, orderRefID uint64, req *tradedto.SubmitPaymentReceiptRequest) (*tradedto.OrderInfo, error) {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order tradeentity.Order
+		if err := tx.Where("id = ? AND buyer_id = ?", orderRefID, buyerID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != tradeentity.OrderStatusPendingPayment {
+			return fmt.Errorf("order status does not allow payment receipt submission")
+		}
+		if req.Amount != order.TotalAmount {
+			return fmt.Errorf("payment receipt amount does not match order amount")
+		}
+
+		receipt := tradeentity.PaymentReceipt{
+			OrderRefID:  order.ID,
+			OrderID:     order.OrderID,
+			BuyerID:     buyerID,
+			ReceiptURL:  strings.TrimSpace(req.ReceiptURL),
+			VoucherNo:   strings.TrimSpace(req.VoucherNo),
+			Amount:      req.Amount,
+			Status:      tradeentity.PaymentReceiptStatusPending,
+			AuditRemark: "",
+			SubmittedBy: buyerID,
+			SubmittedAt: time.Now(),
+			AuditorID:   nil,
+			AuditedAt:   nil,
+		}
+		if err := tx.Where("order_ref_id = ?", order.ID).Assign(receipt).FirstOrCreate(&receipt).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&order).Update("status", tradeentity.OrderStatusPendingPaymentAudit).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetOrder(ctx, buyerID, orderRefID)
+}
+
+func (s *TradeService) ListOrders(ctx context.Context, buyerID uint64, req *tradedto.OrderListRequest) (*tradedto.OrderListResponse, error) {
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -287,10 +360,21 @@ func (s *TradeService) ListOrders(ctx context.Context, buyerID uint64, req *trad
 	var orders []tradeentity.Order
 	var total int64
 	query := s.db.WithContext(ctx).Model(&tradeentity.Order{}).Where("buyer_id = ?", buyerID)
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Preload("Items").Order("id DESC").Offset((req.Page-1)*req.PageSize).Limit(req.PageSize).Find(&orders).Error; err != nil {
+	if err := query.
+		Preload("Items").
+		Preload("Contract").
+		Preload("PaymentReceipt").
+		Preload("PickupCode").
+		Order("id DESC").
+		Offset((req.Page - 1) * req.PageSize).
+		Limit(req.PageSize).
+		Find(&orders).Error; err != nil {
 		return nil, err
 	}
 
@@ -304,11 +388,193 @@ func (s *TradeService) ListOrders(ctx context.Context, buyerID uint64, req *trad
 
 func (s *TradeService) GetOrder(ctx context.Context, buyerID, orderRefID uint64) (*tradedto.OrderInfo, error) {
 	var order tradeentity.Order
-	if err := s.db.WithContext(ctx).Preload("Items").Where("id = ? AND buyer_id = ?", orderRefID, buyerID).First(&order).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Preload("Items").
+		Preload("Contract").
+		Preload("PaymentReceipt").
+		Preload("PickupCode").
+		Where("id = ? AND buyer_id = ?", orderRefID, buyerID).
+		First(&order).Error; err != nil {
 		return nil, err
 	}
 	info := toOrderInfo(order)
 	return &info, nil
+}
+
+func (s *TradeService) ListAdminOrders(ctx context.Context, req *tradedto.OrderListRequest) (*tradedto.OrderListResponse, error) {
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+
+	var orders []tradeentity.Order
+	var total int64
+	query := s.db.WithContext(ctx).Model(&tradeentity.Order{})
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if err := query.
+		Preload("Items").
+		Preload("Contract").
+		Preload("PaymentReceipt").
+		Preload("PickupCode").
+		Order("id DESC").
+		Offset((req.Page - 1) * req.PageSize).
+		Limit(req.PageSize).
+		Find(&orders).Error; err != nil {
+		return nil, err
+	}
+
+	list := make([]tradedto.OrderInfo, 0, len(orders))
+	for _, order := range orders {
+		list = append(list, toOrderInfo(order))
+	}
+	return &tradedto.OrderListResponse{List: list, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
+func (s *TradeService) GetAdminOrder(ctx context.Context, orderRefID uint64) (*tradedto.OrderInfo, error) {
+	var order tradeentity.Order
+	if err := s.db.WithContext(ctx).
+		Preload("Items").
+		Preload("Contract").
+		Preload("PaymentReceipt").
+		Preload("PickupCode").
+		Where("id = ?", orderRefID).
+		First(&order).Error; err != nil {
+		return nil, err
+	}
+	info := toOrderInfo(order)
+	return &info, nil
+}
+
+func (s *TradeService) AuditOrderPayment(ctx context.Context, operatorID, orderRefID uint64, req *tradedto.AuditPaymentRequest) (*tradedto.OrderInfo, error) {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order tradeentity.Order
+		if err := tx.Where("id = ?", orderRefID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != tradeentity.OrderStatusPendingPaymentAudit {
+			return fmt.Errorf("order status does not allow payment audit")
+		}
+
+		var receipt tradeentity.PaymentReceipt
+		if err := tx.Where("order_ref_id = ?", order.ID).First(&receipt).Error; err != nil {
+			return err
+		}
+		if receipt.Status != tradeentity.PaymentReceiptStatusPending {
+			return fmt.Errorf("payment receipt is not pending audit")
+		}
+
+		now := time.Now()
+		operatorIDCopy := operatorID
+		receipt.AuditRemark = strings.TrimSpace(req.Remark)
+		receipt.AuditorID = &operatorIDCopy
+		receipt.AuditedAt = &now
+
+		switch req.Status {
+		case string(tradeentity.PaymentReceiptStatusApproved):
+			receipt.Status = tradeentity.PaymentReceiptStatusApproved
+			order.Status = tradeentity.OrderStatusPendingPickup
+		case string(tradeentity.PaymentReceiptStatusRejected):
+			receipt.Status = tradeentity.PaymentReceiptStatusRejected
+			order.Status = tradeentity.OrderStatusPendingPayment
+		default:
+			return fmt.Errorf("invalid payment audit status")
+		}
+
+		if err := tx.Save(&receipt).Error; err != nil {
+			return err
+		}
+
+		if order.Status == tradeentity.OrderStatusPendingPickup {
+			var pickupCode tradeentity.PickupCode
+			if err := tx.Where("order_ref_id = ?", order.ID).First(&pickupCode).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				pickupCode = tradeentity.PickupCode{
+					OrderRefID:  order.ID,
+					OrderID:     order.OrderID,
+					Code:        generatePickupCode(),
+					Status:      tradeentity.PickupCodeStatusActive,
+					GeneratedBy: operatorID,
+					GeneratedAt: now,
+				}
+				if err := tx.Create(&pickupCode).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return tx.Save(&order).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetAdminOrder(ctx, orderRefID)
+}
+
+func (s *TradeService) GetOrderPickupCode(ctx context.Context, buyerID, orderRefID uint64) (*tradedto.PickupCodeInfo, error) {
+	var order tradeentity.Order
+	if err := s.db.WithContext(ctx).Preload("PickupCode").Where("id = ? AND buyer_id = ?", orderRefID, buyerID).First(&order).Error; err != nil {
+		return nil, err
+	}
+	if order.PickupCode == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	info := toPickupCodeInfo(*order.PickupCode)
+	return &info, nil
+}
+
+func (s *TradeService) VerifyPickupCode(ctx context.Context, operatorID, orderRefID uint64, req *tradedto.VerifyPickupCodeRequest) (*tradedto.OrderInfo, error) {
+	var buyerID uint64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order tradeentity.Order
+		if err := tx.Where("id = ?", orderRefID).First(&order).Error; err != nil {
+			return err
+		}
+		if order.Status != tradeentity.OrderStatusPendingPickup {
+			return fmt.Errorf("order status does not allow pickup verification")
+		}
+		buyerID = order.BuyerID
+		if operatorID != order.SellerID && operatorID != order.BuyerID {
+			return fmt.Errorf("current user cannot verify this pickup code")
+		}
+
+		var pickupCode tradeentity.PickupCode
+		if err := tx.Where("order_ref_id = ?", order.ID).First(&pickupCode).Error; err != nil {
+			return err
+		}
+		if pickupCode.Status != tradeentity.PickupCodeStatusActive {
+			return fmt.Errorf("pickup code is not active")
+		}
+		if strings.TrimSpace(req.Code) != pickupCode.Code {
+			return fmt.Errorf("invalid pickup code")
+		}
+
+		now := time.Now()
+		operatorIDCopy := operatorID
+		pickupCode.Status = tradeentity.PickupCodeStatusVerified
+		pickupCode.VerifiedBy = &operatorIDCopy
+		pickupCode.VerifiedAt = &now
+		if err := tx.Save(&pickupCode).Error; err != nil {
+			return err
+		}
+
+		order.Status = tradeentity.OrderStatusCompleted
+		return tx.Save(&order).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetOrder(ctx, buyerID, orderRefID)
 }
 
 func (s *TradeService) listProducts(ctx context.Context, req *tradedto.ProductListRequest, sellerScope bool, sellerID uint64) (*tradedto.ProductListResponse, error) {
@@ -342,7 +608,7 @@ func (s *TradeService) listProducts(ctx context.Context, req *tradedto.ProductLi
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Order("id DESC").Offset((req.Page-1)*req.PageSize).Limit(req.PageSize).Find(&products).Error; err != nil {
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&products).Error; err != nil {
 		return nil, err
 	}
 
@@ -423,21 +689,80 @@ func toOrderInfo(order tradeentity.Order) tradedto.OrderInfo {
 	}
 
 	return tradedto.OrderInfo{
-		ID:            order.ID,
-		OrderID:       order.OrderID,
-		BuyerID:       order.BuyerID,
-		BuyerUID:      order.BuyerUID,
-		SellerID:      order.SellerID,
-		SellerUID:     order.SellerUID,
-		ProductID:     order.ProductID,
-		ProductSKUID:  order.ProductSKUID,
-		Status:        string(order.Status),
-		TotalAmount:   order.TotalAmount,
-		TotalQuantity: order.TotalQuantity,
-		CreatedAt:     order.CreatedAt,
-		UpdatedAt:     order.UpdatedAt,
-		Items:         items,
+		ID:             order.ID,
+		OrderID:        order.OrderID,
+		BuyerID:        order.BuyerID,
+		BuyerUID:       order.BuyerUID,
+		SellerID:       order.SellerID,
+		SellerUID:      order.SellerUID,
+		ProductID:      order.ProductID,
+		ProductSKUID:   order.ProductSKUID,
+		Status:         string(order.Status),
+		TotalAmount:    order.TotalAmount,
+		TotalQuantity:  order.TotalQuantity,
+		CreatedAt:      order.CreatedAt,
+		UpdatedAt:      order.UpdatedAt,
+		Items:          items,
+		Contract:       toOrderContractInfo(order.Contract),
+		PaymentReceipt: toPaymentReceiptInfo(order.PaymentReceipt),
+		PickupCode:     toPickupCodeInfoPtr(order.PickupCode),
 	}
+}
+
+func toOrderContractInfo(contract *tradeentity.OrderContract) *tradedto.OrderContractInfo {
+	if contract == nil {
+		return nil
+	}
+	return &tradedto.OrderContractInfo{
+		ID:           contract.ID,
+		ContractURL:  contract.ContractURL,
+		ContractHash: contract.ContractHash,
+		Status:       string(contract.Status),
+		SubmittedBy:  contract.SubmittedBy,
+		SubmittedAt:  contract.SubmittedAt,
+	}
+}
+
+func toPaymentReceiptInfo(receipt *tradeentity.PaymentReceipt) *tradedto.PaymentReceiptInfo {
+	if receipt == nil {
+		return nil
+	}
+	return &tradedto.PaymentReceiptInfo{
+		ID:          receipt.ID,
+		ReceiptURL:  receipt.ReceiptURL,
+		VoucherNo:   receipt.VoucherNo,
+		Amount:      receipt.Amount,
+		Status:      string(receipt.Status),
+		AuditRemark: receipt.AuditRemark,
+		SubmittedBy: receipt.SubmittedBy,
+		SubmittedAt: receipt.SubmittedAt,
+		AuditorID:   receipt.AuditorID,
+		AuditedAt:   receipt.AuditedAt,
+	}
+}
+
+func toPickupCodeInfoPtr(code *tradeentity.PickupCode) *tradedto.PickupCodeInfo {
+	if code == nil {
+		return nil
+	}
+	info := toPickupCodeInfo(*code)
+	return &info
+}
+
+func toPickupCodeInfo(code tradeentity.PickupCode) tradedto.PickupCodeInfo {
+	return tradedto.PickupCodeInfo{
+		ID:          code.ID,
+		Code:        code.Code,
+		Status:      string(code.Status),
+		GeneratedBy: code.GeneratedBy,
+		GeneratedAt: code.GeneratedAt,
+		VerifiedBy:  code.VerifiedBy,
+		VerifiedAt:  code.VerifiedAt,
+	}
+}
+
+func generatePickupCode() string {
+	return "PK" + time.Now().Format("20060102150405") + fmt.Sprintf("%04d", time.Now().Nanosecond()%10000)
 }
 
 func IsNotFound(err error) bool {
