@@ -7,19 +7,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Taishi-co/SteelLink-backend/config"
 	tradeentity "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/domain/entity"
-	tradedto "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/ui/dto"
 	userentity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
+	userrepo "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
+	userpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
+	tradedto "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
+	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"gorm.io/gorm"
 )
 
 type TradeService struct {
-	db *gorm.DB
+	db             *gorm.DB
+	enterpriseRepo userrepo.EnterpriseRepository
 }
 
 func NewTradeService() *TradeService {
-	return &TradeService{db: database.GetDB()}
+	return &TradeService{
+		db:             database.GetDB(),
+		enterpriseRepo: userpersistence.NewEnterpriseRepository(),
+	}
 }
 
 func (s *TradeService) ListPublicProducts(ctx context.Context, req *tradedto.ProductListRequest) (*tradedto.ProductListResponse, error) {
@@ -86,23 +94,29 @@ func (s *TradeService) SaveSellerProduct(ctx context.Context, sellerID uint64, r
 	if err := s.db.WithContext(ctx).First(&seller, sellerID).Error; err != nil {
 		return nil, err
 	}
+	enterpriseID, err := s.resolveSellerEnterpriseID(ctx, &seller)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now()
 	var product tradeentity.Product
 
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if productID != nil {
 			if err := tx.Where("id = ? AND seller_id = ?", *productID, sellerID).First(&product).Error; err != nil {
 				return err
 			}
 		} else {
 			product = tradeentity.Product{
-				SellerID:   seller.ID,
-				SellerUID:  seller.UID,
-				SellerName: seller.Username,
+				SellerID:     seller.ID,
+				EnterpriseID: enterpriseID,
+				SellerUID:    seller.UID,
+				SellerName:   seller.Username,
 			}
 		}
 
+		product.EnterpriseID = enterpriseID
 		product.Name = req.Name
 		product.Category = req.Category
 		product.Specs = req.Specs
@@ -161,6 +175,34 @@ func (s *TradeService) SaveSellerProduct(ctx context.Context, sellerID uint64, r
 		return nil, err
 	}
 	return &items[0], nil
+}
+
+func (s *TradeService) resolveSellerEnterpriseID(ctx context.Context, seller *userentity.User) (uint64, error) {
+	if seller == nil || !seller.IsInEnterprise() {
+		if config.Get().Server.Mode == "release" {
+			return 0, ecode.ErrBadRequest.WithMessage("请先加入已认证企业后再提交商品")
+		}
+		return 0, nil
+	}
+
+	enterprise, err := s.enterpriseRepo.FindByEnterpriseCode(ctx, seller.EnterpriseCode)
+	if err != nil {
+		return 0, err
+	}
+	if enterprise == nil {
+		if config.Get().Server.Mode == "release" {
+			return 0, ecode.ErrEnterpriseNotFound
+		}
+		return 0, nil
+	}
+	if !enterprise.IsApproved() {
+		if config.Get().Server.Mode == "release" {
+			return 0, ecode.ErrBadRequest.WithMessage("当前企业未通过认证，暂不能提交商品")
+		}
+		return 0, nil
+	}
+
+	return enterprise.ID, nil
 }
 
 func (s *TradeService) AuditProduct(ctx context.Context, operatorID, productID uint64, req *tradedto.AuditProductRequest) (*tradedto.ProductItem, error) {

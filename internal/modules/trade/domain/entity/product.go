@@ -22,6 +22,7 @@ type Product struct {
 	ID                uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
 	SKUID             string         `gorm:"column:sku_id;type:varchar(40);uniqueIndex;comment:商品SKU" json:"sku_id"`
 	SellerID          uint64         `gorm:"index;comment:卖家用户ID" json:"seller_id"`
+	EnterpriseID      uint64         `gorm:"column:enterprise_id;index;comment:企业ID" json:"enterprise_id"`
 	SellerUID         string         `gorm:"type:varchar(32);index;comment:卖家UID" json:"seller_uid"`
 	SellerName        string         `gorm:"type:varchar(100);comment:卖家名称" json:"seller_name"`
 	Name              string         `gorm:"type:varchar(200);index;comment:商品名称" json:"name"`
