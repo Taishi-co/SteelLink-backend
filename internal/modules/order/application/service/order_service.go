@@ -71,10 +71,11 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 	}
 
 	order := &orderEntity.Order{
-		BuyerID:    buyerEnterprise.ID,
-		BuyerName:  buyerEnterprise.Name,
-		SellerID:   sellerEnterprise.ID,
-		SellerName: sellerEnterprise.Name,
+		BuyerID:            buyerEnterprise.ID,
+		BuyerName:          buyerEnterprise.Name,
+		SellerID:           sellerEnterprise.ID,
+		SellerEnterpriseID: sellerEnterprise.ID,
+		SellerName:         sellerEnterprise.Name,
 		Items: orderEntity.OrderItems{
 			{
 				ProductID:   product.ID,
