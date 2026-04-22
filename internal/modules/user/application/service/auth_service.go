@@ -18,15 +18,17 @@ import (
 
 // AuthService 认证服务
 type AuthService struct {
-	userRepo repository.UserRepository
-	redis    *redis.Client
+	userRepo       repository.UserRepository
+	enterpriseRepo repository.EnterpriseRepository
+	redis          *redis.Client
 }
 
 // NewAuthService 创建认证服务实例
 func NewAuthService() *AuthService {
 	return &AuthService{
-		userRepo: persistence.NewUserRepository(),
-		redis:    database.GetRedis(),
+		userRepo:       persistence.NewUserRepository(),
+		enterpriseRepo: persistence.NewEnterpriseRepository(),
+		redis:          database.GetRedis(),
 	}
 }
 
@@ -123,9 +125,9 @@ func (s *AuthService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Lo
 	}
 
 	// 获取企业ID（如果已加入企业）
-	var enterpriseID uint64
-	if user.EnterpriseCode != "" {
-		// TODO: 查询企业ID
+	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	if err != nil {
+		return nil, err
 	}
 
 	// 生成Token
@@ -169,9 +171,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	}
 
 	// 生成新Token
-	var enterpriseID uint64
-	if user.EnterpriseCode != "" {
-		// TODO: 查询企业ID
+	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	if err != nil {
+		return nil, err
 	}
 
 	var email string
@@ -257,9 +259,9 @@ func (s *AuthService) SmsLogin(ctx context.Context, req *dto.SmsLoginRequest) (*
 	}
 
 	// 生成Token
-	var enterpriseID uint64
-	if user.EnterpriseCode != "" {
-		// TODO: 查询企业ID
+	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	if err != nil {
+		return nil, err
 	}
 
 	var email string
@@ -306,6 +308,22 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *dto.ResetPasswordR
 	}
 
 	return nil
+}
+
+func (s *AuthService) resolveEnterpriseID(ctx context.Context, user *entity.User) (uint64, error) {
+	if user == nil || user.EnterpriseCode == "" {
+		return 0, nil
+	}
+
+	enterprise, err := s.enterpriseRepo.FindByEnterpriseCode(ctx, user.EnterpriseCode)
+	if err != nil {
+		return 0, ecode.ErrDatabase.WithMessage("查询企业信息失败")
+	}
+	if enterprise == nil {
+		return 0, ecode.ErrEnterpriseNotFound
+	}
+
+	return enterprise.ID, nil
 }
 
 // 辅助函数
