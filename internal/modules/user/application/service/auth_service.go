@@ -337,6 +337,7 @@ func toUserInfo(user *entity.User) *dto.UserInfo {
 	}
 	return &dto.UserInfo{
 		ID:             user.ID,
+		UID:            user.UID,
 		UserNo:         user.UserNo,
 		PlatformID:     user.PlatformID,
 		PersonalCode:   user.PersonalCode,

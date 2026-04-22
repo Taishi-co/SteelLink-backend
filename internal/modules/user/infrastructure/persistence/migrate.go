@@ -3,35 +3,25 @@ package persistence
 import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
+	"gorm.io/gorm"
 )
 
-// AutoMigrate 自动迁移数据库表
 func AutoMigrate() error {
 	db := database.GetDB()
 
-	// 迁移用户相关表
-	err := db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&entity.User{},
 		&entity.Enterprise{},
 		&entity.Role{},
 		&entity.UserRole{},
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 
-	// 初始化默认角色
-	if err := initRoles(); err != nil {
-		return err
-	}
-
-	return nil
+	return initRoles(db)
 }
 
-// initRoles 初始化默认角色
-func initRoles() error {
-	db := database.GetDB()
-
+func initRoles(db *gorm.DB) error {
 	roles := []entity.Role{
 		{
 			Code:        "guest",
@@ -42,7 +32,7 @@ func initRoles() error {
 		{
 			Code:        "personal",
 			Name:        "个人用户",
-			Description: "已注册的个人用户",
+			Description: "已注册个人用户",
 			Permissions: []string{"product:read", "order:create", "order:read"},
 		},
 		{
@@ -66,13 +56,12 @@ func initRoles() error {
 	}
 
 	for _, role := range roles {
-		var existingRole entity.Role
-		result := db.Where("code = ?", role.Code).First(&existingRole)
-		if result.Error != nil {
-			// 角色不存在，创建
-			if err := db.Create(&role).Error; err != nil {
-				return err
-			}
+		var existing entity.Role
+		if err := db.Where("code = ?", role.Code).First(&existing).Error; err == nil {
+			continue
+		}
+		if err := db.Create(&role).Error; err != nil {
+			return err
 		}
 	}
 
