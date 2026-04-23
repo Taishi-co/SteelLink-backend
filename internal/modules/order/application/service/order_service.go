@@ -161,7 +161,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权上传支付凭证")
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment {
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可上传支付凭证")
 	}
 
@@ -192,7 +192,7 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收款")
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment {
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收款")
 	}
 	if order.PaymentInfo == nil || order.PaymentInfo.VoucherURL == "" {
@@ -218,7 +218,7 @@ func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, op
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权录入提货信息")
 	}
-	if order.Status != orderEntity.OrderStatusPendingDelivery {
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingDelivery {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可录入提货信息")
 	}
 
@@ -259,7 +259,7 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认出库")
 	}
-	if order.Status != orderEntity.OrderStatusPendingDelivery {
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingDelivery {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认出库")
 	}
 	if order.DeliveryInfo == nil || order.DeliveryInfo.PickupCode == "" {
@@ -285,7 +285,7 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
 	}
-	if order.Status != orderEntity.OrderStatusDelivering {
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusDelivering {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
 	}
 
@@ -357,7 +357,7 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		TotalAmount:    order.TotalAmount,
 		TaxTotalAmount: order.TaxTotalAmount,
 		Currency:       order.Currency,
-		Status:         int(order.Status),
+		Status:         int(effectiveOrderStatus(order)),
 		ExpiresAt:      order.ExpiresAt,
 		CreatedAt:      order.CreatedAt,
 		PaymentInfo:    paymentInfo,
@@ -365,6 +365,25 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		ReceiptVoucher: order.ReceiptVoucher,
 		ReceiptAt:      order.ReceiptAt,
 	}
+}
+
+func effectiveOrderStatus(order *orderEntity.Order) orderEntity.OrderStatus {
+	if order == nil {
+		return orderEntity.OrderStatusDraft
+	}
+	if order.Status != orderEntity.OrderStatusDraft {
+		return order.Status
+	}
+	if order.ReceiptAt != nil || order.ReceiptVoucher != "" {
+		return orderEntity.OrderStatusCompleted
+	}
+	if order.DeliveryInfo != nil && order.DeliveryInfo.PickupCode != "" {
+		return orderEntity.OrderStatusPendingDelivery
+	}
+	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+		return orderEntity.OrderStatusPendingPayment
+	}
+	return orderEntity.OrderStatusPendingPayment
 }
 
 func generatePickupCode() string {
