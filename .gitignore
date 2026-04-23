@@ -45,3 +45,5 @@ config/config.local.yaml
 
 # Build artifacts
 dist/
+
+api

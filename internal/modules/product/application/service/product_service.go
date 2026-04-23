@@ -99,7 +99,7 @@ func (s *ProductService) GetPublicByID(ctx context.Context, id uint64) (*dto.Pro
 	if err != nil {
 		return nil, ecode.ErrDatabase
 	}
-	if product == nil || product.Status != entity.ProductStatusOnSale {
+	if product == nil || !product.IsOnSale() {
 		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
 	}
 
@@ -119,9 +119,17 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 		Page:         req.Page,
 		PageSize:     req.PageSize,
 		Category:     req.Category,
+		SubCategory:  req.SubCategory,
 		Keyword:      req.Keyword,
+		SteelMill:    req.SteelMill,
 		Status:       req.Status,
 		EnterpriseID: req.EnterpriseID,
+		MinUnitPrice: req.MinUnitPrice,
+		MaxUnitPrice: req.MaxUnitPrice,
+		MinAvailable: req.MinAvailable,
+		Province:     req.Province,
+		City:         req.City,
+		SortBy:       req.SortBy,
 	})
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -209,6 +217,10 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		TaxRate:       product.TaxRate,
 		Status:        int(product.Status),
 		EnterpriseID:  product.EnterpriseID,
+		AuditRemark:   product.AuditRemark,
+		ApprovedAt:    product.ApprovedAt,
+		QualityCert:   product.QualityCert,
+		Images:        []string(product.Images),
 		Description:   product.Description,
 		DeliveryDays:  product.DeliveryDays,
 		QuoteValidity: product.QuoteValidity,

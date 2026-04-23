@@ -74,6 +74,10 @@ type ProductInfo struct {
 	TaxRate       float64       `json:"tax_rate"`
 	Status        int           `json:"status"`
 	EnterpriseID  uint64        `json:"enterprise_id"`
+	AuditRemark   string        `json:"audit_remark"`
+	ApprovedAt    *time.Time    `json:"approved_at,omitempty"`
+	QualityCert   string        `json:"quality_cert"`
+	Images        []string      `json:"images"`
 	Description   string        `json:"description"`
 	DeliveryDays  int           `json:"delivery_days"`
 	QuoteValidity int           `json:"quote_validity"`
@@ -82,12 +86,20 @@ type ProductInfo struct {
 }
 
 type ProductListRequest struct {
-	Page         int    `form:"page" binding:"omitempty,min=1"`
-	PageSize     int    `form:"page_size" binding:"omitempty,min=1,max=100"`
-	Category     string `form:"category"`
-	Keyword      string `form:"keyword"`
-	Status       *int   `form:"status"`
-	EnterpriseID uint64 `form:"enterprise_id"`
+	Page         int     `form:"page" binding:"omitempty,min=1"`
+	PageSize     int     `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Category     string  `form:"category"`
+	SubCategory  string  `form:"sub_category"`
+	Keyword      string  `form:"keyword"`
+	SteelMill    string  `form:"steel_mill"`
+	Status       *int    `form:"status"`
+	EnterpriseID uint64  `form:"enterprise_id"`
+	MinUnitPrice float64 `form:"min_unit_price"`
+	MaxUnitPrice float64 `form:"max_unit_price"`
+	MinAvailable float64 `form:"min_available"`
+	Province     string  `form:"province"`
+	City         string  `form:"city"`
+	SortBy       string  `form:"sort_by"`
 }
 
 type ProductListResponse struct {
