@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"net/http"
@@ -10,21 +11,26 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
-	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	"github.com/Taishi-co/SteelLink-backend/config"
+	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
+	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
+	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
+	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
+	productRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/router"
 	tradepersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/persistence"
 	traderouter "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/router"
-	userpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
-	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
+	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
+	userRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/handler"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/logger"
+	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 var (
@@ -80,11 +86,17 @@ func main() {
 		logger.Fatal("Failed to init MySQL", zap.Error(err))
 	}
 	defer database.CloseMySQL()
-	if err := userpersistence.AutoMigrate(); err != nil {
-		logger.Fatal("Failed to auto migrate user tables", zap.Error(err))
+	if err := userPersistence.AutoMigrate(); err != nil {
+		logger.Fatal("Failed to migrate user tables", zap.Error(err))
 	}
 	if err := tradepersistence.AutoMigrate(); err != nil {
 		logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
+	}
+	if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
+		logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
+	}
+	if err := database.GetDB().AutoMigrate(&productEntity.Product{}, &orderEntity.Order{}); err != nil {
+		logger.Fatal("Failed to migrate business tables", zap.Error(err))
 	}
 
 	// Initialize redis
@@ -123,11 +135,19 @@ func main() {
 
 	// 用户模块路由
 	logger.Info("Registering user routes...")
-	router.RegisterRoutes(v1)
+	userRouter.RegisterRoutes(v1)
 	logger.Info("User routes registered")
 	logger.Info("Registering trade routes...")
 	traderouter.RegisterRoutes(v1)
 	logger.Info("Trade routes registered")
+
+	logger.Info("Registering product routes...")
+	productRouter.RegisterRoutes(v1)
+	logger.Info("Product routes registered")
+
+	logger.Info("Registering order routes...")
+	orderRouter.RegisterRoutes(v1)
+	logger.Info("Order routes registered")
 
 	// Start server
 	srv := &http.Server{
@@ -164,4 +184,128 @@ func main() {
 	}
 
 	logger.Info("Server exited")
+}
+
+func normalizeLegacyJSONColumns(db *gorm.DB) error {
+	if err := normalizeLegacyStatusColumns(db); err != nil {
+		return err
+	}
+
+	type fix struct {
+		model  interface{}
+		column string
+		sql    string
+	}
+	fixes := []fix{
+		{model: &productEntity.Product{}, column: "spec", sql: "UPDATE products SET spec = '{}' WHERE spec IS NULL OR TRIM(CAST(spec AS CHAR)) = '' OR JSON_VALID(spec) = 0"},
+		{model: &productEntity.Product{}, column: "warehouse_info", sql: "UPDATE products SET warehouse_info = '{}' WHERE warehouse_info IS NULL OR TRIM(CAST(warehouse_info AS CHAR)) = '' OR JSON_VALID(warehouse_info) = 0"},
+		{model: &productEntity.Product{}, column: "images", sql: "UPDATE products SET images = '[]' WHERE images IS NULL OR TRIM(CAST(images AS CHAR)) = '' OR JSON_VALID(images) = 0"},
+		{model: &productEntity.Product{}, column: "remark", sql: "UPDATE products SET remark = '{}' WHERE remark IS NULL OR TRIM(CAST(remark AS CHAR)) = '' OR JSON_VALID(remark) = 0"},
+		{model: &orderEntity.Order{}, column: "items", sql: "UPDATE orders SET items = '[]' WHERE items IS NULL OR TRIM(CAST(items AS CHAR)) = '' OR JSON_VALID(items) = 0"},
+		{model: &orderEntity.Order{}, column: "contract_info", sql: "UPDATE orders SET contract_info = NULL WHERE contract_info IS NOT NULL AND (TRIM(CAST(contract_info AS CHAR)) = '' OR JSON_VALID(contract_info) = 0)"},
+		{model: &orderEntity.Order{}, column: "payment_info", sql: "UPDATE orders SET payment_info = NULL WHERE payment_info IS NOT NULL AND (TRIM(CAST(payment_info AS CHAR)) = '' OR JSON_VALID(payment_info) = 0)"},
+		{model: &orderEntity.Order{}, column: "delivery_info", sql: "UPDATE orders SET delivery_info = NULL WHERE delivery_info IS NOT NULL AND (TRIM(CAST(delivery_info AS CHAR)) = '' OR JSON_VALID(delivery_info) = 0)"},
+		{model: &orderEntity.Order{}, column: "remark", sql: "UPDATE orders SET remark = '{}' WHERE remark IS NULL OR TRIM(CAST(remark AS CHAR)) = '' OR JSON_VALID(remark) = 0"},
+	}
+
+	for _, f := range fixes {
+		if !db.Migrator().HasColumn(f.model, f.column) {
+			continue
+		}
+		if err := db.Exec(f.sql).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeLegacyStatusColumns(db *gorm.DB) error {
+	productStatusType, err := getColumnDataType(db, "products", "status")
+	if err != nil {
+		return err
+	}
+	if isStringColumnType(productStatusType) {
+		stmt := `
+			UPDATE products
+			SET status = CASE LOWER(TRIM(status))
+				WHEN 'draft' THEN '0'
+				WHEN 'pending' THEN '1'
+				WHEN 'pending_review' THEN '1'
+				WHEN 'submitted' THEN '1'
+				WHEN 'approved' THEN '2'
+				WHEN 'on_sale' THEN '2'
+				WHEN 'onsale' THEN '2'
+				WHEN 'published' THEN '2'
+				WHEN 'off_sale' THEN '3'
+				WHEN 'offsale' THEN '3'
+				WHEN 'disabled' THEN '3'
+				WHEN 'rejected' THEN '4'
+				WHEN 'reject' THEN '4'
+				ELSE '0'
+			END
+			WHERE status IS NOT NULL AND TRIM(status) <> ''
+		`
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+
+	orderStatusType, err := getColumnDataType(db, "orders", "status")
+	if err != nil {
+		return err
+	}
+	if isStringColumnType(orderStatusType) {
+		stmt := `
+			UPDATE orders
+			SET status = CASE LOWER(TRIM(status))
+				WHEN 'draft' THEN '0'
+				WHEN 'pending_confirm' THEN '1'
+				WHEN 'pending_contract' THEN '2'
+				WHEN 'pending_payment' THEN '3'
+				WHEN 'paid' THEN '4'
+				WHEN 'pending_delivery' THEN '5'
+				WHEN 'delivering' THEN '6'
+				WHEN 'delivered' THEN '7'
+				WHEN 'completed' THEN '8'
+				WHEN 'cancelled' THEN '9'
+				WHEN 'frozen' THEN '10'
+				WHEN 'exception' THEN '11'
+				ELSE '0'
+			END
+			WHERE status IS NOT NULL AND TRIM(status) <> ''
+		`
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func getColumnDataType(db *gorm.DB, tableName, columnName string) (string, error) {
+	var dataType sql.NullString
+	err := db.Raw(`
+		SELECT DATA_TYPE
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?
+		  AND COLUMN_NAME = ?
+		LIMIT 1
+	`, tableName, columnName).Scan(&dataType).Error
+	if err != nil {
+		return "", err
+	}
+	if !dataType.Valid {
+		return "", nil
+	}
+	return dataType.String, nil
+}
+
+func isStringColumnType(dataType string) bool {
+	switch dataType {
+	case "char", "varchar", "text", "tinytext", "mediumtext", "longtext":
+		return true
+	default:
+		return false
+	}
 }

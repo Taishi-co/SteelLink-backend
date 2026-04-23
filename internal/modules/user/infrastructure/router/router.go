@@ -11,6 +11,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	// 初始化处理器
 	authHandler := handler.NewAuthHandler()
 	userHandler := handler.NewUserHandler()
+	enterpriseHandler := handler.NewEnterpriseHandler()
 
 	// 认证路由（无需登录）
 	auth := r.Group("/auth")
@@ -40,5 +41,15 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		users.GET("", userHandler.ListUsers)
 		users.GET("/:id", userHandler.GetUserByID)
 		users.PUT("/:id/status", userHandler.UpdateUserStatus)
+	}
+
+	enterprises := r.Group("/enterprises")
+	enterprises.Use(middleware.AuthRequired())
+	{
+		enterprises.POST("", enterpriseHandler.Create)
+		enterprises.GET("", enterpriseHandler.List)
+		enterprises.GET("/:id", enterpriseHandler.GetByID)
+		enterprises.POST("/:id/verify", enterpriseHandler.Verify)
+		enterprises.PUT("/:id/audit", enterpriseHandler.Audit)
 	}
 }
