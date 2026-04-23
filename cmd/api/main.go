@@ -18,7 +18,6 @@ import (
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/router"
 	tradepersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/persistence"
-	traderouter "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/router"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	userRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
@@ -137,10 +136,6 @@ func main() {
 	logger.Info("Registering user routes...")
 	userRouter.RegisterRoutes(v1)
 	logger.Info("User routes registered")
-	logger.Info("Registering trade routes...")
-	traderouter.RegisterRoutes(v1)
-	logger.Info("Trade routes registered")
-
 	logger.Info("Registering product routes...")
 	productRouter.RegisterRoutes(v1)
 	logger.Info("Product routes registered")

@@ -147,6 +147,8 @@ type Product struct {
 	TaxRate       float64        `gorm:"type:decimal(5,2);default:13.00;comment:税率(%)" json:"tax_rate"`
 	Status        ProductStatus  `gorm:"type:tinyint;default:0;comment:商品状态" json:"status"`
 	EnterpriseID  uint64         `gorm:"index;comment:所属企业ID" json:"enterprise_id"`
+	AuditRemark   string         `gorm:"type:varchar(255);comment:审核备注" json:"audit_remark"`
+	ApprovedAt    *time.Time     `gorm:"comment:审核通过时间" json:"approved_at"`
 	QualityCert   string         `gorm:"type:varchar(500);comment:质保书URL" json:"quality_cert"`
 	Images        StringList     `gorm:"type:json;comment:商品图片" json:"images"`
 	Description   string         `gorm:"type:text;comment:商品描述" json:"description"`
@@ -167,7 +169,13 @@ func (Product) TableName() string {
 
 // IsOnSale 检查商品是否在售
 func (p *Product) IsOnSale() bool {
-	return p.Status == ProductStatusOnSale && p.AvailableQty > 0
+	if p.AvailableQty <= 0 {
+		return false
+	}
+	if p.Status == ProductStatusOnSale {
+		return true
+	}
+	return p.ApprovedAt != nil && p.Status != ProductStatusOffSale && p.Status != ProductStatusRejected
 }
 
 // CanOrder 检查是否可以下单
