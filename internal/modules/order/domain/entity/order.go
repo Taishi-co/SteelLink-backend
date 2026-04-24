@@ -1,9 +1,11 @@
 package entity
 
 import (
+	"crypto/rand"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"time"
 
 	"gorm.io/gorm"
@@ -278,11 +280,11 @@ func generateOrderNo() string {
 
 // randomDigits 生成指定长度的数字字符串
 func randomDigits(length int) string {
-	digits := "0123456789"
+	const digits = "0123456789"
 	result := make([]byte, length)
 	for i := range result {
-		result[i] = digits[time.Now().Nanosecond()%10]
-		time.Sleep(1 * time.Nanosecond)
+		n, _ := rand.Int(rand.Reader, big.NewInt(10))
+		result[i] = digits[n.Int64()]
 	}
 	return string(result)
 }

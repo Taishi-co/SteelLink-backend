@@ -56,12 +56,14 @@ type OrderInfo struct {
 	TaxTotalAmount float64         `json:"tax_total_amount"`
 	Currency       string          `json:"currency"`
 	Status         int             `json:"status"`
+	Expired        bool            `json:"expired"`
 	ExpiresAt      *time.Time      `json:"expires_at,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	PaymentInfo    *PaymentInfo    `json:"payment_info,omitempty"`
 	DeliveryInfo   *DeliveryInfo   `json:"delivery_info,omitempty"`
 	ReceiptVoucher string          `json:"receipt_voucher,omitempty"`
 	ReceiptAt      *time.Time      `json:"receipt_at,omitempty"`
+	Timeline       []TimelineItem  `json:"timeline"`
 }
 
 type PaymentInfo struct {
@@ -83,4 +85,12 @@ type DeliveryInfo struct {
 	WarehouseName string `json:"warehouse_name"`
 	Address       string `json:"address"`
 	EstimatedTime string `json:"estimated_time"`
+}
+
+type TimelineItem struct {
+	Key         string     `json:"key"`
+	Label       string     `json:"label"`
+	Status      string     `json:"status"`
+	Time        *time.Time `json:"time,omitempty"`
+	Description string     `json:"description,omitempty"`
 }

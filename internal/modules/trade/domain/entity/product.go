@@ -46,7 +46,7 @@ type Product struct {
 }
 
 func (Product) TableName() string {
-	return "products"
+	return "trade_products"
 }
 
 func (p *Product) BeforeCreate(tx *gorm.DB) error {
