@@ -128,6 +128,12 @@ func (s *OrderService) GetByID(ctx context.Context, id, enterpriseID uint64) (*d
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
+	if err := s.reconcileOrderState(ctx, order); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase
+	}
 	if enterpriseID == 0 || (order.BuyerID != enterpriseID && order.SellerID != enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权查看该订单")
 	}
@@ -145,9 +151,74 @@ func (s *OrderService) ListByEnterprise(ctx context.Context, enterpriseID uint64
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		if err := s.reconcileOrderState(ctx, order); err != nil {
+			if e, ok := err.(*ecode.Error); ok {
+				return nil, e
+			}
+			return nil, ecode.ErrDatabase
+		}
 		result = append(result, toOrderInfo(order))
 	}
 	return result, nil
+}
+
+func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if err := s.reconcileOrderState(ctx, order); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase
+	}
+	if order.BuyerID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权取消该订单")
+	}
+	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可取消")
+	}
+	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+		return nil, ecode.ErrBadRequest.WithMessage("已上传支付凭证，无法直接取消订单")
+	}
+
+	db := database.GetDB()
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法取消")
+			}
+			if !product.UnlockStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
+
+		order.Status = orderEntity.OrderStatusCancelled
+		order.UpdatedBy = operatorID
+		if saveErr := tx.Save(order).Error; saveErr != nil {
+			return saveErr
+		}
+		return nil
+	}); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase.WithMessage("取消订单失败")
+	}
+
+	return toOrderInfo(order), nil
 }
 
 func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.UploadPaymentVoucherRequest) (*dto.OrderInfo, error) {
@@ -157,6 +228,12 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	}
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if err := s.reconcileOrderState(ctx, order); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase
 	}
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权上传支付凭证")
@@ -189,10 +266,17 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
+	if err := s.reconcileOrderState(ctx, order); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase
+	}
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收款")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
+	currentStatus := effectiveOrderStatus(order)
+	if currentStatus != orderEntity.OrderStatusPendingPayment && currentStatus != orderEntity.OrderStatusPaid {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收款")
 	}
 	if order.PaymentInfo == nil || order.PaymentInfo.VoucherURL == "" {
@@ -367,11 +451,65 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 	}
 }
 
+func (s *OrderService) reconcileOrderState(ctx context.Context, order *orderEntity.Order) error {
+	if order == nil {
+		return nil
+	}
+	if order.Status == orderEntity.OrderStatusCancelled || order.Status == orderEntity.OrderStatusCompleted {
+		return nil
+	}
+	if order.Status != orderEntity.OrderStatusPendingPayment {
+		return nil
+	}
+	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+		return nil
+	}
+	if order.ExpiresAt == nil || order.ExpiresAt.After(time.Now()) {
+		return nil
+	}
+	return s.cancelOrderWithUnlock(ctx, order, order.UpdatedBy)
+}
+
+func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEntity.Order, operatorID uint64) error {
+	db := database.GetDB()
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法取消")
+			}
+			if !product.UnlockStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
+
+		order.Status = orderEntity.OrderStatusCancelled
+		order.UpdatedBy = operatorID
+		if saveErr := tx.Save(order).Error; saveErr != nil {
+			return saveErr
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func effectiveOrderStatus(order *orderEntity.Order) orderEntity.OrderStatus {
 	if order == nil {
 		return orderEntity.OrderStatusDraft
 	}
 	if order.Status != orderEntity.OrderStatusDraft {
+		if order.Status == orderEntity.OrderStatusPendingPayment && order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+			return orderEntity.OrderStatusPaid
+		}
 		return order.Status
 	}
 	if order.ReceiptAt != nil || order.ReceiptVoucher != "" {
@@ -381,7 +519,7 @@ func effectiveOrderStatus(order *orderEntity.Order) orderEntity.OrderStatus {
 		return orderEntity.OrderStatusPendingDelivery
 	}
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		return orderEntity.OrderStatusPendingPayment
+		return orderEntity.OrderStatusPaid
 	}
 	return orderEntity.OrderStatusPendingPayment
 }

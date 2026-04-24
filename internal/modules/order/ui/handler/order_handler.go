@@ -76,6 +76,25 @@ func (h *OrderHandler) List(c *gin.Context) {
 	})
 }
 
+func (h *OrderHandler) Cancel(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.Cancel(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) UploadPaymentVoucher(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
