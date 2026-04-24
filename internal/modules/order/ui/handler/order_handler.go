@@ -66,7 +66,17 @@ func (h *OrderHandler) List(c *gin.Context) {
 		response.Unauthorized(c, "未登录")
 		return
 	}
-	result, err := h.orderService.ListByEnterprise(c.Request.Context(), claims.EnterpriseID)
+	role := c.Query("role")
+	var result []*dto.OrderInfo
+	var err error
+	switch role {
+	case "seller":
+		result, err = h.orderService.ListBySeller(c.Request.Context(), claims.EnterpriseID)
+	case "buyer":
+		result, err = h.orderService.ListByBuyer(c.Request.Context(), claims.EnterpriseID)
+	default:
+		result, err = h.orderService.ListByEnterprise(c.Request.Context(), claims.EnterpriseID)
+	}
 	if err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return

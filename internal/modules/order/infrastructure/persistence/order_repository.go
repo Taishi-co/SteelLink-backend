@@ -46,6 +46,28 @@ func (r *orderRepository) ListByEnterprise(ctx context.Context, enterpriseID uin
 	return orders, nil
 }
 
+func (r *orderRepository) ListByBuyer(ctx context.Context, buyerID uint64) ([]*entity.Order, error) {
+	var orders []*entity.Order
+	if err := r.db.WithContext(ctx).
+		Where("buyer_id = ?", buyerID).
+		Order("id desc").
+		Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
+func (r *orderRepository) ListBySeller(ctx context.Context, sellerID uint64) ([]*entity.Order, error) {
+	var orders []*entity.Order
+	if err := r.db.WithContext(ctx).
+		Where("seller_id = ?", sellerID).
+		Order("id desc").
+		Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
 func (r *orderRepository) Update(ctx context.Context, order *entity.Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
 }
