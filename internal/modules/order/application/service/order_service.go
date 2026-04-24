@@ -221,6 +221,48 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	return toOrderInfo(order), nil
 }
 
+func (s *OrderService) ListByBuyer(ctx context.Context, buyerID uint64) ([]*dto.OrderInfo, error) {
+	if buyerID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看订单")
+	}
+	orders, err := s.orderRepo.ListByBuyer(ctx, buyerID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	result := make([]*dto.OrderInfo, 0, len(orders))
+	for _, order := range orders {
+		if err := s.reconcileOrderState(ctx, order); err != nil {
+			if e, ok := err.(*ecode.Error); ok {
+				return nil, e
+			}
+			return nil, ecode.ErrDatabase
+		}
+		result = append(result, toOrderInfo(order))
+	}
+	return result, nil
+}
+
+func (s *OrderService) ListBySeller(ctx context.Context, sellerID uint64) ([]*dto.OrderInfo, error) {
+	if sellerID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看订单")
+	}
+	orders, err := s.orderRepo.ListBySeller(ctx, sellerID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	result := make([]*dto.OrderInfo, 0, len(orders))
+	for _, order := range orders {
+		if err := s.reconcileOrderState(ctx, order); err != nil {
+			if e, ok := err.(*ecode.Error); ok {
+				return nil, e
+			}
+			return nil, ecode.ErrDatabase
+		}
+		result = append(result, toOrderInfo(order))
+	}
+	return result, nil
+}
+
 func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.UploadPaymentVoucherRequest) (*dto.OrderInfo, error) {
 	order, err := s.orderRepo.FindByID(ctx, id)
 	if err != nil {
