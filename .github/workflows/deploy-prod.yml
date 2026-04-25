@@ -1,0 +1,36 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy backend to production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Run deployment script on production server
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PROD_DEPLOY_COMMAND: ${{ secrets.PROD_DEPLOY_COMMAND }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          envs: PROD_DEPLOY_COMMAND
+          script: |
+            set -euo pipefail
+
+            deploy_command="${PROD_DEPLOY_COMMAND:-./deploy_backend.sh}"
+
+            echo "Deploying SteelLink backend"
+            bash -lc "${deploy_command}"
