@@ -29,10 +29,10 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 	}
 
 	product := &entity.Product{
-		Name:         req.Name,
-		Category:     req.Category,
-		SubCategory:  req.SubCategory,
-		SteelMill:    req.SteelMill,
+		Name:        req.Name,
+		Category:    req.Category,
+		SubCategory: req.SubCategory,
+		SteelMill:   req.SteelMill,
 		Spec: &entity.ProductSpec{
 			Material:   req.Spec.Material,
 			Spec:       req.Spec.Spec,
@@ -59,6 +59,8 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 		MinOrderQty:   req.MinOrderQty,
 		Status:        entity.ProductStatusPending,
 		EnterpriseID:  enterpriseID,
+		Images:        entity.StringList(req.Images),
+		QualityCert:   req.QualityCert,
 		Description:   req.Description,
 		DeliveryDays:  req.DeliveryDays,
 		QuoteValidity: req.QuoteValidity,

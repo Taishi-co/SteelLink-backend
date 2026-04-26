@@ -34,24 +34,26 @@ type CreateProductRequest struct {
 	Quantity      float64       `json:"quantity" binding:"required,gt=0"`
 	UnitPrice     float64       `json:"unit_price" binding:"required,gt=0"`
 	MinOrderQty   float64       `json:"min_order_qty" binding:"required,gt=0"`
+	Images        []string      `json:"images" binding:"required,min=1"`
+	QualityCert   string        `json:"quality_cert"`
 	Description   string        `json:"description"`
 	DeliveryDays  int           `json:"delivery_days"`
 	QuoteValidity int           `json:"quote_validity"`
 }
 
 type UpdateProductRequest struct {
-	Name          string        `json:"name"`
-	Category      string        `json:"category"`
-	SubCategory   string        `json:"sub_category"`
-	SteelMill     string        `json:"steel_mill"`
-	Spec          *ProductSpec  `json:"spec"`
+	Name          string         `json:"name"`
+	Category      string         `json:"category"`
+	SubCategory   string         `json:"sub_category"`
+	SteelMill     string         `json:"steel_mill"`
+	Spec          *ProductSpec   `json:"spec"`
 	WarehouseInfo *WarehouseInfo `json:"warehouse_info"`
-	Quantity      float64       `json:"quantity"`
-	UnitPrice     float64       `json:"unit_price"`
-	MinOrderQty   float64       `json:"min_order_qty"`
-	Description   string        `json:"description"`
-	DeliveryDays  int           `json:"delivery_days"`
-	QuoteValidity int           `json:"quote_validity"`
+	Quantity      float64        `json:"quantity"`
+	UnitPrice     float64        `json:"unit_price"`
+	MinOrderQty   float64        `json:"min_order_qty"`
+	Description   string         `json:"description"`
+	DeliveryDays  int            `json:"delivery_days"`
+	QuoteValidity int            `json:"quote_validity"`
 }
 
 type ProductInfo struct {

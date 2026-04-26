@@ -130,6 +130,7 @@ func main() {
 	{
 		// Health check under API
 		v1.GET("/health", handler.Health)
+		v1.POST("/uploads", middleware.AuthRequired(), handler.UploadFile)
 	}
 
 	// 用户模块路由
