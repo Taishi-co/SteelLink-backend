@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -373,4 +375,77 @@ func (s *UserService) ListSubAccounts(ctx context.Context, parentID uint64) ([]*
 		})
 	}
 	return result, nil
+}
+
+func (s *UserService) GetDashboard(ctx context.Context, userID uint64) (*dto.DashboardResponse, error) {
+	db := database.GetDB()
+	stats := dto.DashboardStats{}
+
+	var inTransitResult struct {
+		Total float64
+	}
+	db.WithContext(ctx).Table("orders").
+		Where("buyer_id = ? AND status = ?", userID, 6).
+		Select("COALESCE(SUM(total_amount), 0) as total").
+		Scan(&inTransitResult)
+	stats.InTransitAmount = inTransitResult.Total
+
+	var pendingCount int64
+	db.WithContext(ctx).Table("orders").
+		Where("buyer_id = ? AND status = ?", userID, 3).
+		Count(&pendingCount)
+	stats.PendingPaymentCount = pendingCount
+
+	now := time.Now()
+	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	var monthlyResult struct {
+		Total float64
+	}
+	db.WithContext(ctx).Table("orders").
+		Where("buyer_id = ? AND status NOT IN ? AND created_at >= ?", userID, []int{9, 0}, firstOfMonth).
+		Select("COALESCE(SUM(total_amount), 0) as total").
+		Scan(&monthlyResult)
+	stats.MonthlyPurchaseAmount = monthlyResult.Total
+
+	var stockResult struct {
+		Total float64
+	}
+	db.WithContext(ctx).Table("products").
+		Where("status = ? AND available_qty > 0", 3).
+		Select("COALESCE(SUM(available_qty), 0) as total").
+		Scan(&stockResult)
+	stats.StockQuantity = stockResult.Total
+
+	type recentOrderRow struct {
+		ID          uint64
+		OrderNo     string
+		Status      int
+		TotalAmount float64
+		CreatedAt   time.Time
+		ProductName string
+	}
+	var rows []recentOrderRow
+	db.WithContext(ctx).Table("orders").
+		Where("buyer_id = ?", userID).
+		Order("id desc").
+		Limit(5).
+		Select("id, order_no, status, total_amount, created_at, JSON_UNQUOTE(JSON_EXTRACT(JSON_EXTRACT(items, '$[0]'), '$.product_name')) as product_name").
+		Scan(&rows)
+
+	recentOrders := make([]dto.RecentOrder, 0, len(rows))
+	for _, r := range rows {
+		recentOrders = append(recentOrders, dto.RecentOrder{
+			ID:          r.ID,
+			OrderNo:     r.OrderNo,
+			Status:      r.Status,
+			TotalAmount: r.TotalAmount,
+			CreatedAt:   r.CreatedAt.Format("2006-01-02"),
+			ProductName: r.ProductName,
+		})
+	}
+
+	return &dto.DashboardResponse{
+		Stats:        stats,
+		RecentOrders: recentOrders,
+	}, nil
 }
