@@ -34,6 +34,10 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		users.POST("/me/enterprise/join", userHandler.JoinEnterprise)
 		users.POST("/me/enterprise/leave", userHandler.LeaveEnterprise)
 
+		// 实名认证
+		users.POST("/me/identity", userHandler.SubmitIdentity)
+		users.GET("/me/identity", userHandler.GetIdentityStatus)
+
 		// 密码操作
 		users.PUT("/me/password", authHandler.ChangePassword)
 

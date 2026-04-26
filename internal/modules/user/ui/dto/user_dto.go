@@ -13,9 +13,27 @@ type UserInfo struct {
 	Phone          string    `json:"phone"`
 	QQ             string    `json:"qq"`
 	Email          string    `json:"email"`
+	RealName       string    `json:"real_name"`
+	IDCard         string    `json:"id_card"`
+	IdentityStatus int       `json:"identity_status"`
+	IdentityReject string    `json:"identity_reject"`
 	Status         int       `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type SubmitIdentityRequest struct {
+	RealName       string `json:"real_name" binding:"required"`
+	IDCard         string `json:"id_card" binding:"required,len=18"`
+	IDCardFrontURL string `json:"id_card_front_url" binding:"required,url"`
+	IDCardBackURL  string `json:"id_card_back_url" binding:"required,url"`
+}
+
+type IdentityStatusResponse struct {
+	IdentityStatus int    `json:"identity_status"`
+	RealName       string `json:"real_name"`
+	IDCard         string `json:"id_card"`
+	IdentityReject string `json:"identity_reject"`
 }
 
 type UpdateUserRequest struct {

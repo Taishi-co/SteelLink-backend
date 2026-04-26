@@ -142,6 +142,16 @@ func (s *UserService) JoinEnterprise(ctx context.Context, userID uint64, req *dt
 		return ecode.ErrUserNotFound
 	}
 
+	// 检查实名认证
+	if !user.IsIdentityVerified() {
+		return ecode.ErrBadRequest.WithMessage("请先完成实名认证后再加入企业")
+	}
+
+	// 检查1人1企限制
+	if user.EnterpriseCode != "" {
+		return ecode.ErrBadRequest.WithMessage("您已绑定企业，不可重复加入。1个实名个人仅可绑定1家企业")
+	}
+
 	// 更新企业代码
 	user.EnterpriseCode = req.EnterpriseCode
 	user.Role = entity.TypeEnterprise // 更新为企业用户
@@ -187,13 +197,13 @@ func (s *UserService) List(ctx context.Context, req *dto.UserListRequest) (*dto.
 	}
 
 	query := &repository.UserQuery{
-		Page:           req.Page,
-		PageSize:       req.PageSize,
-		Phone:          req.Phone,
-		Email:          req.Email,
-		Role:           req.Role,
-		Status:         req.Status,
-		Keyword:        req.Keyword,
+		Page:     req.Page,
+		PageSize: req.PageSize,
+		Phone:    req.Phone,
+		Email:    req.Email,
+		Role:     req.Role,
+		Status:   req.Status,
+		Keyword:  req.Keyword,
 	}
 
 	users, total, err := s.userRepo.List(ctx, query)
@@ -229,4 +239,44 @@ func (s *UserService) UpdateStatus(ctx context.Context, id uint64, status int, o
 	}
 
 	return nil
+}
+
+func (s *UserService) SubmitIdentityVerification(ctx context.Context, userID uint64, req *dto.SubmitIdentityRequest) error {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return ecode.ErrDatabase
+	}
+	if user == nil {
+		return ecode.ErrUserNotFound
+	}
+	if !user.CanSubmitIdentity() {
+		return ecode.ErrBadRequest.WithMessage("当前实名状态不可提交，请等待审核完成")
+	}
+	user.RealName = req.RealName
+	user.IDCard = req.IDCard
+	user.IDCardFrontURL = req.IDCardFrontURL
+	user.IDCardBackURL = req.IDCardBackURL
+	user.IdentityStatus = entity.IdentityPending
+	user.IdentityReject = ""
+	user.UpdatedBy = userID
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return ecode.ErrDatabase.WithMessage("提交实名认证失败")
+	}
+	return nil
+}
+
+func (s *UserService) GetIdentityStatus(ctx context.Context, userID uint64) (*dto.IdentityStatusResponse, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	return &dto.IdentityStatusResponse{
+		IdentityStatus: int(user.IdentityStatus),
+		RealName:       user.RealName,
+		IDCard:         user.IDCard,
+		IdentityReject: user.IdentityReject,
+	}, nil
 }
