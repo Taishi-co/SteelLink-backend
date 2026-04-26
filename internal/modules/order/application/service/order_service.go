@@ -290,6 +290,9 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return nil, err
+	}
 	if err := s.reconcileOrderState(ctx, order); err != nil {
 		if e, ok := err.(*ecode.Error); ok {
 			return nil, e
@@ -322,6 +325,9 @@ func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, op
 	}
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return nil, err
 	}
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权录入提货信息")
@@ -364,6 +370,9 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return nil, err
+	}
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认出库")
 	}
@@ -389,6 +398,9 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	}
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return nil, err
 	}
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
@@ -660,16 +672,32 @@ func (s *OrderService) reconcileOrderState(ctx context.Context, order *orderEnti
 	if order.Status == orderEntity.OrderStatusCancelled || order.Status == orderEntity.OrderStatusCompleted {
 		return nil
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment {
-		return nil
+
+	if order.Status == orderEntity.OrderStatusPendingPayment {
+		if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+			return nil
+		}
+		if order.ExpiresAt == nil || order.ExpiresAt.After(time.Now()) {
+			return nil
+		}
+		return s.cancelOrderWithUnlock(ctx, order, order.UpdatedBy)
 	}
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		return nil
+
+	if order.Status == orderEntity.OrderStatusDelivering {
+		receiptTimeout := 7 * 24 * time.Hour
+		if order.UpdatedAt.Before(time.Now().Add(-receiptTimeout)) {
+			now := time.Now()
+			order.ReceiptVoucher = ""
+			order.ReceiptAt = &now
+			order.Status = orderEntity.OrderStatusCompleted
+			order.UpdatedBy = 0
+			if err := s.orderRepo.Update(ctx, order); err != nil {
+				return ecode.ErrDatabase.WithMessage("签收超时自动确认失败")
+			}
+		}
 	}
-	if order.ExpiresAt == nil || order.ExpiresAt.After(time.Now()) {
-		return nil
-	}
-	return s.cancelOrderWithUnlock(ctx, order, order.UpdatedBy)
+
+	return nil
 }
 
 func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEntity.Order, operatorID uint64) error {
@@ -746,4 +774,20 @@ func isOrderExpired(order *orderEntity.Order) bool {
 
 func generatePickupCode() string {
 	return fmt.Sprintf("PK%s", time.Now().Format("0102150405"))
+}
+
+func checkOrderFrozenOrException(order *orderEntity.Order) error {
+	if order == nil {
+		return nil
+	}
+	if order.Status == orderEntity.OrderStatusFrozen {
+		return ecode.ErrBadRequest.WithMessage("订单已冻结，不可继续履约操作")
+	}
+	if order.Status == orderEntity.OrderStatusException {
+		return ecode.ErrBadRequest.WithMessage("订单异常，不可继续履约操作")
+	}
+	if order.Status == orderEntity.OrderStatusCancelled {
+		return ecode.ErrBadRequest.WithMessage("订单已取消，不可继续履约操作")
+	}
+	return nil
 }
