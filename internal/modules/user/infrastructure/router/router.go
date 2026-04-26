@@ -1,9 +1,9 @@
 package router
 
 import (
-	"github.com/gin-gonic/gin"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/handler"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes 注册用户模块路由
@@ -33,6 +33,18 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		users.PUT("/me", userHandler.UpdateCurrentUser)
 		users.POST("/me/enterprise/join", userHandler.JoinEnterprise)
 		users.POST("/me/enterprise/leave", userHandler.LeaveEnterprise)
+
+		// 实名认证
+		users.POST("/me/identity", userHandler.SubmitIdentity)
+		users.GET("/me/identity", userHandler.GetIdentityStatus)
+
+		// 子账号管理（仅企业用户）
+		subAccounts := users.Group("")
+		subAccounts.Use(middleware.RequireUserType("enterprise"))
+		{
+			subAccounts.POST("/me/sub-accounts", userHandler.CreateSubAccount)
+			subAccounts.GET("/me/sub-accounts", userHandler.ListSubAccounts)
+		}
 
 		// 密码操作
 		users.PUT("/me/password", authHandler.ChangePassword)

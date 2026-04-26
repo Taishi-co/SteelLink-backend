@@ -43,6 +43,12 @@ type UserRepository interface {
 
 	// UpdateStatus 更新用户状态
 	UpdateStatus(ctx context.Context, id uint64, status entity.UserStatus, updatedBy uint64) error
+
+	// CountSubAccounts 统计主账号下的子账号数量
+	CountSubAccounts(ctx context.Context, parentID uint64) (int64, error)
+
+	// FindSubAccounts 查询主账号下的子账号列表
+	FindSubAccounts(ctx context.Context, parentID uint64) ([]*entity.User, error)
 }
 
 // UserQuery 用户查询条件

@@ -13,9 +13,27 @@ type UserInfo struct {
 	Phone          string    `json:"phone"`
 	QQ             string    `json:"qq"`
 	Email          string    `json:"email"`
+	RealName       string    `json:"real_name"`
+	IDCard         string    `json:"id_card"`
+	IdentityStatus int       `json:"identity_status"`
+	IdentityReject string    `json:"identity_reject"`
 	Status         int       `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type SubmitIdentityRequest struct {
+	RealName       string `json:"real_name" binding:"required"`
+	IDCard         string `json:"id_card" binding:"required,len=18"`
+	IDCardFrontURL string `json:"id_card_front_url" binding:"required,url"`
+	IDCardBackURL  string `json:"id_card_back_url" binding:"required,url"`
+}
+
+type IdentityStatusResponse struct {
+	IdentityStatus int    `json:"identity_status"`
+	RealName       string `json:"real_name"`
+	IDCard         string `json:"id_card"`
+	IdentityReject string `json:"identity_reject"`
 }
 
 type UpdateUserRequest struct {
@@ -49,6 +67,25 @@ type UserListResponse struct {
 	Total    int64       `json:"total"`
 	Page     int         `json:"page"`
 	PageSize int         `json:"page_size"`
+}
+
+type CreateSubAccountRequest struct {
+	Phone    string `json:"phone" binding:"required,len=11"`
+	Password string `json:"password" binding:"required,min=6"`
+	RealName string `json:"real_name" binding:"required"`
+	QQ       string `json:"qq"`
+	Email    string `json:"email" binding:"omitempty,email"`
+}
+
+type SubAccountInfo struct {
+	ID        uint64    `json:"id"`
+	UserNo    string    `json:"user_no"`
+	Phone     string    `json:"phone"`
+	RealName  string    `json:"real_name"`
+	Email     string    `json:"email"`
+	QQ        string    `json:"qq"`
+	Status    int       `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func ToUserInfo(user interface{}) *UserInfo {

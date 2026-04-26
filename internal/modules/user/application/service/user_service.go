@@ -8,6 +8,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // UserService 用户服务
@@ -142,6 +143,16 @@ func (s *UserService) JoinEnterprise(ctx context.Context, userID uint64, req *dt
 		return ecode.ErrUserNotFound
 	}
 
+	// 检查实名认证
+	if !user.IsIdentityVerified() {
+		return ecode.ErrBadRequest.WithMessage("请先完成实名认证后再加入企业")
+	}
+
+	// 检查1人1企限制
+	if user.EnterpriseCode != "" {
+		return ecode.ErrBadRequest.WithMessage("您已绑定企业，不可重复加入。1个实名个人仅可绑定1家企业")
+	}
+
 	// 更新企业代码
 	user.EnterpriseCode = req.EnterpriseCode
 	user.Role = entity.TypeEnterprise // 更新为企业用户
@@ -187,13 +198,13 @@ func (s *UserService) List(ctx context.Context, req *dto.UserListRequest) (*dto.
 	}
 
 	query := &repository.UserQuery{
-		Page:           req.Page,
-		PageSize:       req.PageSize,
-		Phone:          req.Phone,
-		Email:          req.Email,
-		Role:           req.Role,
-		Status:         req.Status,
-		Keyword:        req.Keyword,
+		Page:     req.Page,
+		PageSize: req.PageSize,
+		Phone:    req.Phone,
+		Email:    req.Email,
+		Role:     req.Role,
+		Status:   req.Status,
+		Keyword:  req.Keyword,
 	}
 
 	users, total, err := s.userRepo.List(ctx, query)
@@ -229,4 +240,137 @@ func (s *UserService) UpdateStatus(ctx context.Context, id uint64, status int, o
 	}
 
 	return nil
+}
+
+func (s *UserService) SubmitIdentityVerification(ctx context.Context, userID uint64, req *dto.SubmitIdentityRequest) error {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return ecode.ErrDatabase
+	}
+	if user == nil {
+		return ecode.ErrUserNotFound
+	}
+	if !user.CanSubmitIdentity() {
+		return ecode.ErrBadRequest.WithMessage("当前实名状态不可提交，请等待审核完成")
+	}
+	user.RealName = req.RealName
+	user.IDCard = req.IDCard
+	user.IDCardFrontURL = req.IDCardFrontURL
+	user.IDCardBackURL = req.IDCardBackURL
+	user.IdentityStatus = entity.IdentityPending
+	user.IdentityReject = ""
+	user.UpdatedBy = userID
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return ecode.ErrDatabase.WithMessage("提交实名认证失败")
+	}
+	return nil
+}
+
+func (s *UserService) GetIdentityStatus(ctx context.Context, userID uint64) (*dto.IdentityStatusResponse, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	return &dto.IdentityStatusResponse{
+		IdentityStatus: int(user.IdentityStatus),
+		RealName:       user.RealName,
+		IDCard:         user.IDCard,
+		IdentityReject: user.IdentityReject,
+	}, nil
+}
+
+func (s *UserService) CreateSubAccount(ctx context.Context, parentID uint64, req *dto.CreateSubAccountRequest) (*dto.SubAccountInfo, error) {
+	parent, err := s.userRepo.FindByID(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if parent == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if parent.IsSubAccount() {
+		return nil, ecode.ErrBadRequest.WithMessage("子账号不可再创建子账号")
+	}
+	if parent.EnterpriseCode == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("主账号未加入企业，不可创建子账号")
+	}
+
+	count, err := s.userRepo.CountSubAccounts(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if count >= entity.MaxSubAccounts {
+		return nil, ecode.ErrBadRequest.WithMessage("子账号数量已达上限（最多5个）")
+	}
+
+	exists, err := s.userRepo.ExistsByPhone(ctx, req.Phone)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if exists {
+		return nil, ecode.ErrPhoneExists
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, ecode.ErrInternal.WithMessage("密码加密失败")
+	}
+
+	sub := &entity.User{
+		Phone:          req.Phone,
+		Password:       string(hashedPwd),
+		RealName:       req.RealName,
+		QQ:             req.QQ,
+		EnterpriseCode: parent.EnterpriseCode,
+		Role:           entity.TypeEnterprise,
+		ParentID:       parentID,
+		Status:         entity.StatusActive,
+		CreatedBy:      parentID,
+		UpdatedBy:      parentID,
+	}
+	if req.Email != "" {
+		sub.Email = &req.Email
+	}
+
+	if err := s.userRepo.Create(ctx, sub); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建子账号失败")
+	}
+
+	return &dto.SubAccountInfo{
+		ID:        sub.ID,
+		UserNo:    sub.UserNo,
+		Phone:     sub.Phone,
+		RealName:  sub.RealName,
+		Email:     req.Email,
+		QQ:        sub.QQ,
+		Status:    int(sub.Status),
+		CreatedAt: sub.CreatedAt,
+	}, nil
+}
+
+func (s *UserService) ListSubAccounts(ctx context.Context, parentID uint64) ([]*dto.SubAccountInfo, error) {
+	subs, err := s.userRepo.FindSubAccounts(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	result := make([]*dto.SubAccountInfo, 0, len(subs))
+	for _, sub := range subs {
+		var email string
+		if sub.Email != nil {
+			email = *sub.Email
+		}
+		result = append(result, &dto.SubAccountInfo{
+			ID:        sub.ID,
+			UserNo:    sub.UserNo,
+			Phone:     sub.Phone,
+			RealName:  sub.RealName,
+			Email:     email,
+			QQ:        sub.QQ,
+			Status:    int(sub.Status),
+			CreatedAt: sub.CreatedAt,
+		})
+	}
+	return result, nil
 }

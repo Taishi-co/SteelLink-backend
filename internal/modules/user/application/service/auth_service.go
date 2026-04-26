@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
@@ -14,6 +13,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+	"github.com/redis/go-redis/v9"
 )
 
 // AuthService 认证服务
@@ -81,7 +81,7 @@ func (s *AuthService) Register(ctx context.Context, req *dto.RegisterRequest) (*
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), 0)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), 0, "", "")
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -125,7 +125,7 @@ func (s *AuthService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Lo
 	}
 
 	// 获取企业ID（如果已加入企业）
-	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *AuthService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Lo
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -171,7 +171,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	}
 
 	// 生成新Token
-	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -259,7 +259,7 @@ func (s *AuthService) SmsLogin(ctx context.Context, req *dto.SmsLoginRequest) (*
 	}
 
 	// 生成Token
-	enterpriseID, err := s.resolveEnterpriseID(ctx, user)
+	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +268,7 @@ func (s *AuthService) SmsLogin(ctx context.Context, req *dto.SmsLoginRequest) (*
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -311,19 +311,24 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *dto.ResetPasswordR
 }
 
 func (s *AuthService) resolveEnterpriseID(ctx context.Context, user *entity.User) (uint64, error) {
+	id, _, _, err := s.resolveEnterpriseInfo(ctx, user)
+	return id, err
+}
+
+func (s *AuthService) resolveEnterpriseInfo(ctx context.Context, user *entity.User) (uint64, string, string, error) {
 	if user == nil || user.EnterpriseCode == "" {
-		return 0, nil
+		return 0, "", "", nil
 	}
 
 	enterprise, err := s.enterpriseRepo.FindByEnterpriseCode(ctx, user.EnterpriseCode)
 	if err != nil {
-		return 0, ecode.ErrDatabase.WithMessage("查询企业信息失败")
+		return 0, "", "", ecode.ErrDatabase.WithMessage("查询企业信息失败")
 	}
 	if enterprise == nil {
-		return 0, ecode.ErrEnterpriseNotFound
+		return 0, "", "", ecode.ErrEnterpriseNotFound
 	}
 
-	return enterprise.ID, nil
+	return enterprise.ID, enterprise.EnterpriseCode, enterprise.EnterpriseRole, nil
 }
 
 // 辅助函数
@@ -364,6 +369,10 @@ func toUserInfo(user *entity.User) *dto.UserInfo {
 		Phone:          user.Phone,
 		QQ:             user.QQ,
 		Email:          email,
+		RealName:       user.RealName,
+		IDCard:         user.IDCard,
+		IdentityStatus: int(user.IdentityStatus),
+		IdentityReject: user.IdentityReject,
 		Status:         int(user.Status),
 		CreatedAt:      user.CreatedAt,
 		UpdatedAt:      user.UpdatedAt,

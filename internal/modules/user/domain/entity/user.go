@@ -30,6 +30,15 @@ const (
 	StatusBanned   UserStatus = 2
 )
 
+type IdentityStatus int
+
+const (
+	IdentityNone     IdentityStatus = 0
+	IdentityPending  IdentityStatus = 1
+	IdentityVerified IdentityStatus = 2
+	IdentityRejected IdentityStatus = 3
+)
+
 type Remark map[string]interface{}
 
 func (r Remark) Value() (driver.Value, error) {
@@ -64,6 +73,13 @@ type User struct {
 	QQ             string         `gorm:"type:varchar(20);comment:QQ号" json:"qq"`
 	Email          *string        `gorm:"type:varchar(100);uniqueIndex;comment:邮箱" json:"email"`
 	Password       string         `gorm:"type:varchar(255);comment:密码" json:"-"`
+	RealName       string         `gorm:"type:varchar(50);default:;comment:真实姓名" json:"real_name"`
+	IDCard         string         `gorm:"type:varchar(30);default:;comment:身份证号" json:"id_card"`
+	IDCardFrontURL string         `gorm:"type:varchar(500);default:;comment:身份证正面照URL" json:"id_card_front_url"`
+	IDCardBackURL  string         `gorm:"type:varchar(500);default:;comment:身份证背面照URL" json:"id_card_back_url"`
+	IdentityStatus IdentityStatus `gorm:"type:tinyint;default:0;comment:实名认证状态 0未实名1审核中2已实名3已驳回" json:"identity_status"`
+	IdentityReject string         `gorm:"type:varchar(255);default:;comment:实名驳回原因" json:"identity_reject"`
+	ParentID       uint64         `gorm:"type:bigint;default:0;comment:主账号ID，0表示主账号" json:"parent_id"`
 	Status         UserStatus     `gorm:"type:tinyint;default:1;comment:状态" json:"status"`
 	Remark         Remark         `gorm:"type:json;comment:备注" json:"remark"`
 	CreatedBy      uint64         `gorm:"comment:创建者" json:"created_by"`
@@ -102,6 +118,20 @@ func (u *User) IsInEnterprise() bool {
 func (u *User) CanLogin() bool {
 	return u.IsActive()
 }
+
+func (u *User) IsIdentityVerified() bool {
+	return u.IdentityStatus == IdentityVerified
+}
+
+func (u *User) CanSubmitIdentity() bool {
+	return u.IdentityStatus == IdentityNone || u.IdentityStatus == IdentityRejected
+}
+
+func (u *User) IsSubAccount() bool {
+	return u.ParentID > 0
+}
+
+const MaxSubAccounts = 5
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {
 	if u.UID == "" {
