@@ -135,6 +135,44 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *UserHandler) CreateSubAccount(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	var req dto.CreateSubAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.userService.CreateSubAccount(c.Request.Context(), userID, &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *UserHandler) ListSubAccounts(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	result, err := h.userService.ListSubAccounts(c.Request.Context(), userID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // UpdateUserStatus 更新用户状态
 // @Summary 更新用户状态
 // @Description 更新用户状态（管理员）

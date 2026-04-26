@@ -4,17 +4,19 @@ import (
 	"errors"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type Claims struct {
-	UserID      uint64 `json:"user_id"`
-	Phone       string `json:"phone,omitempty"`
-	Email       string `json:"email,omitempty"`
-	UserType    string `json:"user_type"`
-	EnterpriseID uint64 `json:"enterprise_id,omitempty"`
+	UserID         uint64 `json:"user_id"`
+	Phone          string `json:"phone,omitempty"`
+	Email          string `json:"email,omitempty"`
+	UserType       string `json:"user_type"`
+	EnterpriseID   uint64 `json:"enterprise_id,omitempty"`
+	EnterpriseCode string `json:"enterprise_code,omitempty"`
+	EnterpriseRole string `json:"enterprise_role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -30,7 +32,7 @@ var (
 )
 
 // GenerateToken generates access token and refresh token
-func GenerateToken(userID uint64, phone, email, userType string, enterpriseID uint64) (*TokenPair, error) {
+func GenerateToken(userID uint64, phone, email, userType string, enterpriseID uint64, enterpriseCode, enterpriseRole string) (*TokenPair, error) {
 	cfg := config.Get()
 
 	now := time.Now()
@@ -39,11 +41,13 @@ func GenerateToken(userID uint64, phone, email, userType string, enterpriseID ui
 
 	// Access token claims
 	accessClaims := Claims{
-		UserID:       userID,
-		Phone:        phone,
-		Email:        email,
-		UserType:     userType,
-		EnterpriseID: enterpriseID,
+		UserID:         userID,
+		Phone:          phone,
+		Email:          email,
+		UserType:       userType,
+		EnterpriseID:   enterpriseID,
+		EnterpriseCode: enterpriseCode,
+		EnterpriseRole: enterpriseRole,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    cfg.JWT.Issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -113,5 +117,5 @@ func RefreshToken(refreshTokenString string) (*TokenPair, error) {
 		return nil, err
 	}
 
-	return GenerateToken(claims.UserID, claims.Phone, claims.Email, claims.UserType, claims.EnterpriseID)
+	return GenerateToken(claims.UserID, claims.Phone, claims.Email, claims.UserType, claims.EnterpriseID, claims.EnterpriseCode, claims.EnterpriseRole)
 }

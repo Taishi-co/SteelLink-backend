@@ -69,6 +69,25 @@ type UserListResponse struct {
 	PageSize int         `json:"page_size"`
 }
 
+type CreateSubAccountRequest struct {
+	Phone    string `json:"phone" binding:"required,len=11"`
+	Password string `json:"password" binding:"required,min=6"`
+	RealName string `json:"real_name" binding:"required"`
+	QQ       string `json:"qq"`
+	Email    string `json:"email" binding:"omitempty,email"`
+}
+
+type SubAccountInfo struct {
+	ID        uint64    `json:"id"`
+	UserNo    string    `json:"user_no"`
+	Phone     string    `json:"phone"`
+	RealName  string    `json:"real_name"`
+	Email     string    `json:"email"`
+	QQ        string    `json:"qq"`
+	Status    int       `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func ToUserInfo(user interface{}) *UserInfo {
 	return nil
 }

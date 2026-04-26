@@ -13,8 +13,11 @@ import (
 type EnterpriseRole string
 
 const (
-	EnterpriseRoleBuyer  EnterpriseRole = "buyer"  // 采购方
-	EnterpriseRoleSeller EnterpriseRole = "seller" // 供应商
+	EnterpriseRoleBuyer     EnterpriseRole = "buyer"     // 采购方/贸易商
+	EnterpriseRoleSeller    EnterpriseRole = "seller"    // 供应商
+	EnterpriseRoleLogistics EnterpriseRole = "logistics" // 物流商
+	EnterpriseRoleWarehouse EnterpriseRole = "warehouse" // 仓储商
+	EnterpriseRoleFund      EnterpriseRole = "fund"      // 资金方（银行/保理/担保）
 )
 
 // EnterpriseStatus 企业状态
@@ -93,6 +96,18 @@ func (e *Enterprise) BeforeCreate(tx *gorm.DB) error {
 		e.EnterpriseCode = generateEnterpriseCode()
 	}
 	return nil
+}
+
+func (e *Enterprise) HasRole(role EnterpriseRole) bool {
+	return e.EnterpriseRole == string(role)
+}
+
+func ValidEnterpriseRole(role string) bool {
+	switch EnterpriseRole(role) {
+	case EnterpriseRoleBuyer, EnterpriseRoleSeller, EnterpriseRoleLogistics, EnterpriseRoleWarehouse, EnterpriseRoleFund:
+		return true
+	}
+	return false
 }
 
 // generateEnterpriseCode 生成企业代码

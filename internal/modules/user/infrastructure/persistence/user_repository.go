@@ -172,3 +172,15 @@ func (r *userRepository) UpdateStatus(ctx context.Context, id uint64, status ent
 			"updated_by": updatedBy,
 		}).Error
 }
+
+func (r *userRepository) CountSubAccounts(ctx context.Context, parentID uint64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&entity.User{}).Where("parent_id = ? AND deleted_at IS NULL", parentID).Count(&count).Error
+	return count, err
+}
+
+func (r *userRepository) FindSubAccounts(ctx context.Context, parentID uint64) ([]*entity.User, error) {
+	var users []*entity.User
+	err := r.db.WithContext(ctx).Where("parent_id = ? AND deleted_at IS NULL", parentID).Find(&users).Error
+	return users, err
+}

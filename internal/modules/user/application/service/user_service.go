@@ -8,6 +8,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // UserService 用户服务
@@ -279,4 +280,97 @@ func (s *UserService) GetIdentityStatus(ctx context.Context, userID uint64) (*dt
 		IDCard:         user.IDCard,
 		IdentityReject: user.IdentityReject,
 	}, nil
+}
+
+func (s *UserService) CreateSubAccount(ctx context.Context, parentID uint64, req *dto.CreateSubAccountRequest) (*dto.SubAccountInfo, error) {
+	parent, err := s.userRepo.FindByID(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if parent == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if parent.IsSubAccount() {
+		return nil, ecode.ErrBadRequest.WithMessage("子账号不可再创建子账号")
+	}
+	if parent.EnterpriseCode == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("主账号未加入企业，不可创建子账号")
+	}
+
+	count, err := s.userRepo.CountSubAccounts(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if count >= entity.MaxSubAccounts {
+		return nil, ecode.ErrBadRequest.WithMessage("子账号数量已达上限（最多5个）")
+	}
+
+	exists, err := s.userRepo.ExistsByPhone(ctx, req.Phone)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if exists {
+		return nil, ecode.ErrPhoneExists
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, ecode.ErrInternal.WithMessage("密码加密失败")
+	}
+
+	sub := &entity.User{
+		Phone:          req.Phone,
+		Password:       string(hashedPwd),
+		RealName:       req.RealName,
+		QQ:             req.QQ,
+		EnterpriseCode: parent.EnterpriseCode,
+		Role:           entity.TypeEnterprise,
+		ParentID:       parentID,
+		Status:         entity.StatusActive,
+		CreatedBy:      parentID,
+		UpdatedBy:      parentID,
+	}
+	if req.Email != "" {
+		sub.Email = &req.Email
+	}
+
+	if err := s.userRepo.Create(ctx, sub); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建子账号失败")
+	}
+
+	return &dto.SubAccountInfo{
+		ID:        sub.ID,
+		UserNo:    sub.UserNo,
+		Phone:     sub.Phone,
+		RealName:  sub.RealName,
+		Email:     req.Email,
+		QQ:        sub.QQ,
+		Status:    int(sub.Status),
+		CreatedAt: sub.CreatedAt,
+	}, nil
+}
+
+func (s *UserService) ListSubAccounts(ctx context.Context, parentID uint64) ([]*dto.SubAccountInfo, error) {
+	subs, err := s.userRepo.FindSubAccounts(ctx, parentID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	result := make([]*dto.SubAccountInfo, 0, len(subs))
+	for _, sub := range subs {
+		var email string
+		if sub.Email != nil {
+			email = *sub.Email
+		}
+		result = append(result, &dto.SubAccountInfo{
+			ID:        sub.ID,
+			UserNo:    sub.UserNo,
+			Phone:     sub.Phone,
+			RealName:  sub.RealName,
+			Email:     email,
+			QQ:        sub.QQ,
+			Status:    int(sub.Status),
+			CreatedAt: sub.CreatedAt,
+		})
+	}
+	return result, nil
 }
