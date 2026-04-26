@@ -13,6 +13,8 @@ import (
 
 	"github.com/Taishi-co/SteelLink-backend/config"
 	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
+	aiProcurementPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
+	aiProcurementRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
@@ -96,6 +98,9 @@ func main() {
 	if err := supplyDemandPersistence.AutoMigrate(); err != nil {
 		logger.Fatal("Failed to migrate supply demand tables", zap.Error(err))
 	}
+	if err := aiProcurementPersistence.AutoMigrate(); err != nil {
+		logger.Fatal("Failed to migrate AI procurement tables", zap.Error(err))
+	}
 	if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
 		logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
 	}
@@ -153,6 +158,10 @@ func main() {
 	logger.Info("Registering supply demand routes...")
 	supplyDemandRouter.RegisterRoutes(v1)
 	logger.Info("Supply demand routes registered")
+
+	logger.Info("Registering AI procurement routes...")
+	aiProcurementRouter.RegisterRoutes(v1)
+	logger.Info("AI procurement routes registered")
 
 	// Start server
 	srv := &http.Server{
