@@ -17,6 +17,7 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Log      LogConfig      `mapstructure:"log"`
 	Kafka    KafkaConfig    `mapstructure:"kafka"`
+	Storage  StorageConfig  `mapstructure:"storage"`
 }
 
 type ServerConfig struct {
@@ -81,6 +82,27 @@ type LogConfig struct {
 type KafkaConfig struct {
 	Brokers []string `mapstructure:"brokers"`
 	GroupID string   `mapstructure:"group_id"`
+}
+
+type StorageConfig struct {
+	Provider       string `mapstructure:"provider"`
+	Region         string `mapstructure:"region"`
+	SecretID       string `mapstructure:"secret_id"`
+	SecretKey      string `mapstructure:"secret_key"`
+	PublicBucket   string `mapstructure:"public_bucket"`
+	PrivateBucket  string `mapstructure:"private_bucket"`
+	AdminBucket    string `mapstructure:"admin_bucket"`
+	PublicBaseURL  string `mapstructure:"public_base_url"`
+	PrivateBaseURL string `mapstructure:"private_base_url"`
+	AdminBaseURL   string `mapstructure:"admin_base_url"`
+	MaxFileSizeMB  int64  `mapstructure:"max_file_size_mb"`
+}
+
+func (c StorageConfig) MaxFileSizeBytes() int64 {
+	if c.MaxFileSizeMB <= 0 {
+		return 20 << 20
+	}
+	return c.MaxFileSizeMB << 20
 }
 
 var GlobalConfig *Config
@@ -218,6 +240,42 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("KAFKA_GROUP_ID"); v != "" {
 		c.Kafka.GroupID = v
+	}
+
+	if v := os.Getenv("STORAGE_PROVIDER"); v != "" {
+		c.Storage.Provider = v
+	}
+	if v := os.Getenv("COS_REGION"); v != "" {
+		c.Storage.Region = v
+	}
+	if v := os.Getenv("COS_SECRET_ID"); v != "" {
+		c.Storage.SecretID = v
+	}
+	if v := os.Getenv("COS_SECRET_KEY"); v != "" {
+		c.Storage.SecretKey = v
+	}
+	if v := os.Getenv("COS_PUBLIC_BUCKET"); v != "" {
+		c.Storage.PublicBucket = v
+	}
+	if v := os.Getenv("COS_PRIVATE_BUCKET"); v != "" {
+		c.Storage.PrivateBucket = v
+	}
+	if v := os.Getenv("COS_ADMIN_BUCKET"); v != "" {
+		c.Storage.AdminBucket = v
+	}
+	if v := os.Getenv("COS_PUBLIC_BASE_URL"); v != "" {
+		c.Storage.PublicBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("COS_PRIVATE_BASE_URL"); v != "" {
+		c.Storage.PrivateBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("COS_ADMIN_BASE_URL"); v != "" {
+		c.Storage.AdminBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("STORAGE_MAX_FILE_SIZE_MB"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			c.Storage.MaxFileSizeMB = n
+		}
 	}
 }
 
