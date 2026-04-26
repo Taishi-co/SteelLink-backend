@@ -6,7 +6,7 @@ import "time"
 type CreateEnterpriseRequest struct {
 	Name             string `json:"name" binding:"required,max=200"`
 	CreditCode       string `json:"credit_code" binding:"required,max=50"`
-	EnterpriseRole   string `json:"enterprise_role" binding:"required,oneof=buyer seller"`
+	EnterpriseRole   string `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
 	ContactName      string `json:"contact_name" binding:"required"`
 	ContactPhone     string `json:"contact_phone" binding:"required,len=11"`
 	Address          string `json:"address"`

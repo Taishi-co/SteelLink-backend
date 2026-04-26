@@ -13,17 +13,35 @@ import (
 // EnterpriseService 企业服务
 type EnterpriseService struct {
 	enterpriseRepo repository.EnterpriseRepository
+	userRepo       repository.UserRepository
 }
 
-// NewEnterpriseService 创建企业服务
 func NewEnterpriseService() *EnterpriseService {
 	return &EnterpriseService{
 		enterpriseRepo: persistence.NewEnterpriseRepository(),
+		userRepo:       persistence.NewUserRepository(),
 	}
 }
 
 // Create 创建企业申请
 func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpriseRequest, operatorID uint64) (*dto.EnterpriseInfo, error) {
+	user, err := s.userRepo.FindByID(ctx, operatorID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.IsIdentityVerified() {
+		return nil, ecode.ErrBadRequest.WithMessage("请先完成实名认证后再创建企业")
+	}
+	if user.EnterpriseCode != "" {
+		return nil, ecode.ErrBadRequest.WithMessage("您已绑定企业，不可重复创建。1个实名个人仅可绑定1家企业")
+	}
+	if !entity.ValidEnterpriseRole(req.EnterpriseRole) {
+		return nil, ecode.ErrBadRequest.WithMessage("企业角色无效，仅支持 buyer/seller/logistics/warehouse/fund")
+	}
+
 	existing, err := s.enterpriseRepo.FindByCreditCode(ctx, req.CreditCode)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -48,6 +66,13 @@ func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpris
 
 	if err := s.enterpriseRepo.Create(ctx, enterprise); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建企业申请失败")
+	}
+
+	user.EnterpriseCode = enterprise.EnterpriseCode
+	user.Role = entity.TypeEnterprise
+	user.UpdatedBy = operatorID
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新用户企业绑定失败")
 	}
 
 	return toEnterpriseInfo(enterprise), nil
