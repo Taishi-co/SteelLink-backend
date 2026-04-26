@@ -1,0 +1,443 @@
+package service
+
+import (
+	"context"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/repository"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
+	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
+	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
+	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
+	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+)
+
+type ProcurementService struct {
+	procurementRepo repository.ProcurementRepository
+	productRepo     productRepository.ProductRepository
+}
+
+func NewProcurementService() *ProcurementService {
+	return &ProcurementService{
+		procurementRepo: persistence.NewProcurementRepository(),
+		productRepo:     productPersistence.NewProductRepository(),
+	}
+}
+
+func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.ParseResponse, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("采购指令不能为空")
+	}
+	parsed := parseInstruction(prompt)
+	matches, err := s.matchProducts(ctx, parsed)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
+	}
+	orderDraft := buildOrderDraft(parsed, matches)
+	financePlans := buildFinancePlans(parsed, orderDraft.EstimatedAmt)
+	auditItems := buildAuditItems(parsed, matches, financePlans)
+	return &dto.ParseResponse{
+		Parsed:          parsed,
+		MatchedProducts: matches,
+		OrderDraft:      orderDraft,
+		FinancePlans:    financePlans,
+		AuditItems:      auditItems,
+		Stages:          buildStages(entity.StageReviewSubmission, false),
+	}, nil
+}
+
+func (s *ProcurementService) Create(ctx context.Context, req *dto.CreateProcurementRequest, userID, enterpriseID uint64) (*dto.ProcurementInfo, error) {
+	if userID == 0 {
+		return nil, ecode.ErrUnauthorized.WithMessage("未登录")
+	}
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能发起AI采购")
+	}
+	parsedResult, err := s.Parse(ctx, req.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	procurement := &entity.AIProcurement{
+		Prompt:            strings.TrimSpace(req.Prompt),
+		ProductName:       parsedResult.Parsed.ProductName,
+		Category:          parsedResult.Parsed.Category,
+		Quantity:          parsedResult.Parsed.Quantity,
+		Unit:              parsedResult.Parsed.Unit,
+		Usage:             parsedResult.Parsed.Usage,
+		FinancingRequired: parsedResult.Parsed.FinancingRequired,
+		CurrentStage:      entity.StageFinancingMatching,
+		Status:            entity.ProcurementStatusFinancingReady,
+		ParsedInstruction: parsedResult.Parsed,
+		MatchedProducts:   parsedResult.MatchedProducts,
+		OrderDraft:        parsedResult.OrderDraft,
+		FinancePlans:      parsedResult.FinancePlans,
+		AuditItems:        parsedResult.AuditItems,
+		EnterpriseID:      enterpriseID,
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+	}
+	if len(parsedResult.MatchedProducts) > 0 {
+		procurement.CurrentStage = entity.StageOrderGeneration
+		procurement.Status = entity.ProcurementStatusOrderGenerated
+	}
+	if procurement.FinancingRequired {
+		procurement.CurrentStage = entity.StageFinancingMatching
+		procurement.Status = entity.ProcurementStatusFinancingReady
+	}
+	if err := s.procurementRepo.Create(ctx, procurement); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建AI采购单失败")
+	}
+	return toProcurementInfo(procurement), nil
+}
+
+func (s *ProcurementService) ListMine(ctx context.Context, req *dto.ProcurementListRequest, userID, enterpriseID uint64) (*dto.ProcurementListResponse, error) {
+	if userID == 0 {
+		return nil, ecode.ErrUnauthorized.WithMessage("未登录")
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	items, total, err := s.procurementRepo.List(ctx, &repository.ProcurementQuery{
+		Page:         req.Page,
+		PageSize:     req.PageSize,
+		Keyword:      req.Keyword,
+		Status:       entity.ProcurementStatus(req.Status),
+		EnterpriseID: enterpriseID,
+		CreatedBy:    userID,
+	})
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	return &dto.ProcurementListResponse{List: toProcurementInfoList(items), Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
+func (s *ProcurementService) GetByID(ctx context.Context, id, userID, enterpriseID uint64) (*dto.ProcurementInfo, error) {
+	item, err := s.procurementRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if item == nil {
+		return nil, ecode.ErrNotFound.WithMessage("AI采购单不存在")
+	}
+	if item.CreatedBy != userID && item.EnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权查看该AI采购单")
+	}
+	return toProcurementInfo(item), nil
+}
+
+func (s *ProcurementService) SubmitReview(ctx context.Context, id, userID, enterpriseID uint64) (*dto.ProcurementInfo, error) {
+	item, err := s.procurementRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if item == nil {
+		return nil, ecode.ErrNotFound.WithMessage("AI采购单不存在")
+	}
+	if item.CreatedBy != userID && item.EnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权提交该AI采购单")
+	}
+	if len(item.MatchedProducts) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("没有可提交审核的商品匹配结果")
+	}
+	now := time.Now()
+	item.CurrentStage = entity.StageReviewSubmission
+	item.Status = entity.ProcurementStatusReviewSubmitted
+	item.ReviewSubmittedAt = &now
+	item.UpdatedBy = userID
+	item.AuditItems = markAuditSubmitted(item.AuditItems)
+	if err := s.procurementRepo.Update(ctx, item); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("提交审核失败")
+	}
+	return toProcurementInfo(item), nil
+}
+
+func parseInstruction(prompt string) entity.ParsedInstruction {
+	quantity, unit := extractQuantity(prompt)
+	productName := extractProductName(prompt)
+	keywords := buildKeywords(productName, prompt)
+	return entity.ParsedInstruction{
+		ProductName:       productName,
+		Category:          inferCategory(productName, prompt),
+		Quantity:          quantity,
+		Unit:              unit,
+		Usage:             extractUsage(prompt),
+		FinancingRequired: strings.Contains(prompt, "融资") || strings.Contains(prompt, "账期"),
+		Keywords:          keywords,
+		Confidence:        0.86,
+	}
+}
+
+func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
+	status := int(productEntity.ProductStatusOnSale)
+	products, _, err := s.productRepo.List(ctx, &productRepository.ProductQuery{
+		Page:     1,
+		PageSize: 5,
+		Keyword:  parsed.ProductName,
+		Category: parsed.Category,
+		Status:   &status,
+		SortBy:   "stock_desc",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(products) == 0 && parsed.Category != "" {
+		products, _, err = s.productRepo.List(ctx, &productRepository.ProductQuery{
+			Page:     1,
+			PageSize: 5,
+			Category: parsed.Category,
+			Status:   &status,
+			SortBy:   "stock_desc",
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(products) == 0 {
+		return entity.MatchedProducts{
+			{
+				ProductName: parsed.ProductName,
+				Category:    parsed.Category,
+				Quantity:    parsed.Quantity,
+				UnitPrice:   320,
+				TotalAmount: parsed.Quantity * 320,
+				Score:       72,
+				MatchReason: "未命中现货商品，已生成参考采购方案",
+			},
+		}, nil
+	}
+	matches := make(entity.MatchedProducts, 0, len(products))
+	for _, product := range products {
+		qty := parsed.Quantity
+		if product.AvailableQty > 0 && product.AvailableQty < qty {
+			qty = product.AvailableQty
+		}
+		score := 82
+		if strings.Contains(product.Name, parsed.ProductName) || strings.Contains(parsed.ProductName, product.Name) {
+			score = 95
+		}
+		matches = append(matches, entity.MatchedProduct{
+			ProductID:    product.ID,
+			ProductNo:    product.ProductNo,
+			ProductName:  product.Name,
+			Category:     product.SubCategory,
+			SteelMill:    product.SteelMill,
+			Quantity:     qty,
+			UnitPrice:    product.UnitPrice,
+			TotalAmount:  qty * product.UnitPrice,
+			Score:        score,
+			MatchReason:  "按商品名称、品类、可用库存综合匹配",
+			EnterpriseID: product.EnterpriseID,
+		})
+	}
+	return matches, nil
+}
+
+func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {
+	amount := parsed.Quantity * 320
+	if len(matches) > 0 && matches[0].TotalAmount > 0 {
+		amount = matches[0].TotalAmount
+	}
+	return entity.OrderDraft{
+		ProductName:   parsed.ProductName,
+		Quantity:      parsed.Quantity,
+		Unit:          parsed.Unit,
+		EstimatedAmt:  amount,
+		PaymentMethod: "线上合同 + 对公转账",
+		DeliveryNote:  "按匹配供应商交付周期生成订单",
+	}
+}
+
+func buildFinancePlans(parsed entity.ParsedInstruction, amount float64) entity.FinancePlans {
+	if !parsed.FinancingRequired {
+		return entity.FinancePlans{}
+	}
+	return entity.FinancePlans{
+		{Provider: "钢链金融", ProductName: "订单融资", Amount: amount * 0.8, Rate: 6.2, TermDays: 90, Matched: true, Reason: "采购用途和订单金额满足订单融资初筛"},
+		{Provider: "合作银行", ProductName: "短期经营贷", Amount: amount * 0.7, Rate: 6.8, TermDays: 120, Matched: true, Reason: "作为备选融资方案"},
+	}
+}
+
+func buildAuditItems(parsed entity.ParsedInstruction, matches entity.MatchedProducts, financePlans entity.FinancePlans) entity.AuditItems {
+	items := entity.AuditItems{
+		{Code: "instruction", Name: "采购指令解析", Status: "passed", Required: true, Message: "已识别商品、数量、用途"},
+		{Code: "product_match", Name: "商品匹配", Status: "passed", Required: true, Message: "已生成商品匹配方案"},
+		{Code: "order_draft", Name: "订单草稿", Status: "passed", Required: true, Message: "已生成订单草稿"},
+	}
+	if len(matches) == 0 {
+		items[1].Status = "pending"
+		items[1].Message = "等待供应商报价或现货补充"
+	}
+	if parsed.FinancingRequired {
+		status := "passed"
+		message := "已匹配融资方案"
+		if len(financePlans) == 0 {
+			status = "pending"
+			message = "等待融资产品匹配"
+		}
+		items = append(items, entity.AuditItem{Code: "finance", Name: "融资匹配", Status: status, Required: true, Message: message})
+	}
+	items = append(items, entity.AuditItem{Code: "review", Name: "审核提交", Status: "pending", Required: true, Message: "待用户确认后提交审核"})
+	return items
+}
+
+func markAuditSubmitted(items entity.AuditItems) entity.AuditItems {
+	for idx := range items {
+		if items[idx].Code == "review" {
+			items[idx].Status = "submitted"
+			items[idx].Message = "已提交平台审核"
+		}
+	}
+	return items
+}
+
+func extractQuantity(prompt string) (float64, string) {
+	re := regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)(吨|套|件|支|张|批|个|台)?`)
+	matches := re.FindStringSubmatch(prompt)
+	if len(matches) < 2 {
+		return 1, "套"
+	}
+	qty, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || qty <= 0 {
+		qty = 1
+	}
+	unit := "套"
+	if len(matches) >= 3 && matches[2] != "" {
+		unit = matches[2]
+	}
+	return qty, unit
+}
+
+func extractProductName(prompt string) string {
+	re := regexp.MustCompile(`采购[0-9]*(?:\.[0-9]+)?(?:吨|套|件|支|张|批|个|台)?([^，,。；;]+)`)
+	matches := re.FindStringSubmatch(prompt)
+	if len(matches) >= 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	for _, keyword := range []string{"工业轴承", "螺纹钢", "热轧卷", "冷轧卷", "钢板", "钢管"} {
+		if strings.Contains(prompt, keyword) {
+			return keyword
+		}
+	}
+	return "采购物品"
+}
+
+func inferCategory(productName, prompt string) string {
+	switch {
+	case strings.Contains(productName, "轴承") || strings.Contains(prompt, "轴承"):
+		return "工业备件"
+	case strings.Contains(productName, "螺纹钢") || strings.Contains(productName, "钢筋"):
+		return "螺纹钢"
+	case strings.Contains(productName, "热轧"):
+		return "热轧"
+	case strings.Contains(productName, "冷轧"):
+		return "冷轧"
+	case strings.Contains(productName, "钢板"):
+		return "中厚板"
+	case strings.Contains(productName, "钢管"):
+		return "钢管"
+	default:
+		return "钢材现货"
+	}
+}
+
+func extractUsage(prompt string) string {
+	re := regexp.MustCompile(`用于([^，,。；;]+)`)
+	matches := re.FindStringSubmatch(prompt)
+	if len(matches) >= 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	return "企业生产采购"
+}
+
+func buildKeywords(productName, prompt string) []string {
+	keywords := []string{productName}
+	for _, keyword := range []string{"融资", "维修", "现货", "急采", "设备"} {
+		if strings.Contains(prompt, keyword) {
+			keywords = append(keywords, keyword)
+		}
+	}
+	return keywords
+}
+
+func toProcurementInfoList(items []*entity.AIProcurement) []*dto.ProcurementInfo {
+	result := make([]*dto.ProcurementInfo, 0, len(items))
+	for _, item := range items {
+		result = append(result, toProcurementInfo(item))
+	}
+	return result
+}
+
+func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
+	if item == nil {
+		return nil
+	}
+	return &dto.ProcurementInfo{
+		ID:                item.ID,
+		ProcurementNo:     item.ProcurementNo,
+		Prompt:            item.Prompt,
+		ProductName:       item.ProductName,
+		Category:          item.Category,
+		Quantity:          item.Quantity,
+		Unit:              item.Unit,
+		Usage:             item.Usage,
+		FinancingRequired: item.FinancingRequired,
+		CurrentStage:      item.CurrentStage,
+		Status:            item.Status,
+		ParsedInstruction: item.ParsedInstruction,
+		MatchedProducts:   item.MatchedProducts,
+		OrderDraft:        item.OrderDraft,
+		FinancePlans:      item.FinancePlans,
+		AuditItems:        item.AuditItems,
+		Stages:            buildStages(item.CurrentStage, item.Status == entity.ProcurementStatusReviewSubmitted),
+		EnterpriseID:      item.EnterpriseID,
+		CreatedBy:         item.CreatedBy,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+		ReviewSubmittedAt: item.ReviewSubmittedAt,
+	}
+}
+
+func buildStages(current entity.WorkflowStage, submitted bool) []dto.StageInfo {
+	names := map[entity.WorkflowStage]string{
+		entity.StageInstructionParsing: "指令解析",
+		entity.StageProductMatching:    "商品匹配",
+		entity.StageOrderGeneration:    "订单生成",
+		entity.StageFinancingMatching:  "融资匹配",
+		entity.StageReviewSubmission:   "审核提交",
+	}
+	descriptions := map[entity.WorkflowStage]string{
+		entity.StageInstructionParsing: "识别采购品类、数量、用途和融资意图",
+		entity.StageProductMatching:    "按商品、库存、价格和供应商能力匹配",
+		entity.StageOrderGeneration:    "生成订单草稿和交易要素",
+		entity.StageFinancingMatching:  "匹配订单融资和备选金融产品",
+		entity.StageReviewSubmission:   "提交平台审核并进入后续履约",
+	}
+	currentIndex := 0
+	for idx, stage := range entity.WorkflowStages() {
+		if stage == current {
+			currentIndex = idx
+			break
+		}
+	}
+	stages := make([]dto.StageInfo, 0, len(entity.WorkflowStages()))
+	for idx, stage := range entity.WorkflowStages() {
+		status := "pending"
+		if idx < currentIndex || submitted {
+			status = "completed"
+		}
+		if idx == currentIndex && !submitted {
+			status = "processing"
+		}
+		stages = append(stages, dto.StageInfo{Code: stage, Name: names[stage], Status: status, Description: descriptions[stage]})
+	}
+	return stages
+}
