@@ -328,6 +328,7 @@ func (s *UserService) CreateSubAccount(ctx context.Context, parentID uint64, req
 		EnterpriseCode: parent.EnterpriseCode,
 		Role:           entity.TypeEnterprise,
 		ParentID:       parentID,
+		Permissions:    entity.StringList(req.Permissions),
 		Status:         entity.StatusActive,
 		CreatedBy:      parentID,
 		UpdatedBy:      parentID,
@@ -341,14 +342,15 @@ func (s *UserService) CreateSubAccount(ctx context.Context, parentID uint64, req
 	}
 
 	return &dto.SubAccountInfo{
-		ID:        sub.ID,
-		UserNo:    sub.UserNo,
-		Phone:     sub.Phone,
-		RealName:  sub.RealName,
-		Email:     req.Email,
-		QQ:        sub.QQ,
-		Status:    int(sub.Status),
-		CreatedAt: sub.CreatedAt,
+		ID:          sub.ID,
+		UserNo:      sub.UserNo,
+		Phone:       sub.Phone,
+		RealName:    sub.RealName,
+		Email:       req.Email,
+		QQ:          sub.QQ,
+		Permissions: []string(sub.Permissions),
+		Status:      int(sub.Status),
+		CreatedAt:   sub.CreatedAt,
 	}, nil
 }
 
@@ -364,17 +366,73 @@ func (s *UserService) ListSubAccounts(ctx context.Context, parentID uint64) ([]*
 			email = *sub.Email
 		}
 		result = append(result, &dto.SubAccountInfo{
-			ID:        sub.ID,
-			UserNo:    sub.UserNo,
-			Phone:     sub.Phone,
-			RealName:  sub.RealName,
-			Email:     email,
-			QQ:        sub.QQ,
-			Status:    int(sub.Status),
-			CreatedAt: sub.CreatedAt,
+			ID:          sub.ID,
+			UserNo:      sub.UserNo,
+			Phone:       sub.Phone,
+			RealName:    sub.RealName,
+			Email:       email,
+			QQ:          sub.QQ,
+			Permissions: []string(sub.Permissions),
+			Status:      int(sub.Status),
+			CreatedAt:   sub.CreatedAt,
 		})
 	}
 	return result, nil
+}
+
+func (s *UserService) UpdateSubAccount(ctx context.Context, parentID, subID uint64, req *dto.UpdateSubAccountRequest) (*dto.SubAccountInfo, error) {
+	sub, err := s.userRepo.FindByID(ctx, subID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if sub == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if sub.ParentID != parentID {
+		return nil, ecode.ErrBadRequest.WithMessage("无权操作此子账号")
+	}
+
+	if req.RealName != "" {
+		sub.RealName = req.RealName
+	}
+	if req.QQ != "" {
+		sub.QQ = req.QQ
+	}
+	if req.Email != "" {
+		sub.Email = &req.Email
+	}
+	if req.Permissions != nil {
+		sub.Permissions = entity.StringList(req.Permissions)
+	}
+	if req.Status != nil {
+		sub.Status = entity.UserStatus(*req.Status)
+	}
+	sub.UpdatedBy = parentID
+
+	if err := s.userRepo.Update(ctx, sub); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新子账号失败")
+	}
+
+	updated, _ := s.userRepo.FindByID(ctx, subID)
+	if updated == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+
+	var email string
+	if updated.Email != nil {
+		email = *updated.Email
+	}
+	return &dto.SubAccountInfo{
+		ID:          updated.ID,
+		UserNo:      updated.UserNo,
+		Phone:       updated.Phone,
+		RealName:    updated.RealName,
+		Email:       email,
+		QQ:          updated.QQ,
+		Permissions: []string(updated.Permissions),
+		Status:      int(updated.Status),
+		CreatedAt:   updated.CreatedAt,
+	}, nil
 }
 
 func (s *UserService) GetDashboard(ctx context.Context, userID uint64) (*dto.DashboardResponse, error) {

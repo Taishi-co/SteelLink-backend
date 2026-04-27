@@ -21,6 +21,7 @@ type OrderContractStatus string
 
 const (
 	OrderContractStatusSubmitted OrderContractStatus = "submitted"
+	OrderContractStatusSigned    OrderContractStatus = "signed"
 )
 
 type PaymentReceiptStatus string
@@ -101,6 +102,8 @@ type OrderContract struct {
 	Status       OrderContractStatus `gorm:"type:varchar(32);comment:合同状态" json:"status"`
 	SubmittedBy  uint64              `gorm:"comment:提交人ID" json:"submitted_by"`
 	SubmittedAt  time.Time           `gorm:"comment:提交时间" json:"submitted_at"`
+	SignedBy     *uint64             `gorm:"comment:签署人ID" json:"signed_by"`
+	SignedAt     *time.Time          `gorm:"comment:签署时间" json:"signed_at"`
 	CreatedAt    time.Time           `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time           `gorm:"autoUpdateTime" json:"updated_at"`
 }

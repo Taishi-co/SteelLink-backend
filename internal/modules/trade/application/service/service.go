@@ -9,10 +9,10 @@ import (
 
 	"github.com/Taishi-co/SteelLink-backend/config"
 	tradeentity "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/domain/entity"
+	tradedto "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/ui/dto"
 	userentity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	userrepo "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	userpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
-	tradedto "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"gorm.io/gorm"
@@ -349,6 +349,40 @@ func (s *TradeService) SubmitOrderContract(ctx context.Context, buyerID, orderRe
 	}
 
 	return s.GetOrder(ctx, buyerID, orderRefID)
+}
+
+func (s *TradeService) SignContract(ctx context.Context, userID, orderRefID uint64) (*tradedto.OrderInfo, error) {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order tradeentity.Order
+		if err := tx.Where("id = ? AND (buyer_id = ? OR seller_id = ?)", orderRefID, userID, userID).Preload("Contract").First(&order).Error; err != nil {
+			return err
+		}
+		if order.Contract == nil {
+			return fmt.Errorf("contract has not been submitted yet")
+		}
+		if order.Contract.Status == tradeentity.OrderContractStatusSigned {
+			return fmt.Errorf("contract already signed")
+		}
+
+		now := time.Now()
+		if err := tx.Model(&tradeentity.OrderContract{}).Where("order_ref_id = ?", order.ID).Updates(map[string]interface{}{
+			"status":    tradeentity.OrderContractStatusSigned,
+			"signed_by": userID,
+			"signed_at": now,
+		}).Error; err != nil {
+			return err
+		}
+
+		if order.Status == tradeentity.OrderStatusPendingContract {
+			return tx.Model(&order).Update("status", tradeentity.OrderStatusPendingPayment).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetOrder(ctx, userID, orderRefID)
 }
 
 func (s *TradeService) SubmitPaymentReceipt(ctx context.Context, buyerID, orderRefID uint64, req *tradedto.SubmitPaymentReceiptRequest) (*tradedto.OrderInfo, error) {
@@ -762,6 +796,8 @@ func toOrderContractInfo(contract *tradeentity.OrderContract) *tradedto.OrderCon
 		Status:       string(contract.Status),
 		SubmittedBy:  contract.SubmittedBy,
 		SubmittedAt:  contract.SubmittedAt,
+		SignedBy:     contract.SignedBy,
+		SignedAt:     contract.SignedAt,
 	}
 }
 

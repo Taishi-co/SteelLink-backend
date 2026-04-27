@@ -70,22 +70,32 @@ type UserListResponse struct {
 }
 
 type CreateSubAccountRequest struct {
-	Phone    string `json:"phone" binding:"required,len=11"`
-	Password string `json:"password" binding:"required,min=6"`
-	RealName string `json:"real_name" binding:"required"`
-	QQ       string `json:"qq"`
-	Email    string `json:"email" binding:"omitempty,email"`
+	Phone       string   `json:"phone" binding:"required,len=11"`
+	Password    string   `json:"password" binding:"required,min=6"`
+	RealName    string   `json:"real_name" binding:"required"`
+	QQ          string   `json:"qq"`
+	Email       string   `json:"email" binding:"omitempty,email"`
+	Permissions []string `json:"permissions"`
+}
+
+type UpdateSubAccountRequest struct {
+	RealName    string   `json:"real_name"`
+	QQ          string   `json:"qq"`
+	Email       string   `json:"email" binding:"omitempty,email"`
+	Permissions []string `json:"permissions"`
+	Status      *int     `json:"status"`
 }
 
 type SubAccountInfo struct {
-	ID        uint64    `json:"id"`
-	UserNo    string    `json:"user_no"`
-	Phone     string    `json:"phone"`
-	RealName  string    `json:"real_name"`
-	Email     string    `json:"email"`
-	QQ        string    `json:"qq"`
-	Status    int       `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          uint64    `json:"id"`
+	UserNo      string    `json:"user_no"`
+	Phone       string    `json:"phone"`
+	RealName    string    `json:"real_name"`
+	Email       string    `json:"email"`
+	QQ          string    `json:"qq"`
+	Permissions []string  `json:"permissions"`
+	Status      int       `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type DashboardStats struct {

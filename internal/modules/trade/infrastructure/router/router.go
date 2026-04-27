@@ -13,7 +13,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/products/:id", tradeHandler.GetProduct)
 
 	seller := r.Group("/seller")
-	seller.Use(middleware.AuthRequired())
+	seller.Use(middleware.AuthRequired(), middleware.RequireEnterpriseRole("seller"))
 	{
 		seller.GET("/products", tradeHandler.ListSellerProducts)
 		seller.POST("/products", tradeHandler.CreateSellerProduct)
@@ -21,7 +21,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	admin := r.Group("/admin")
-	admin.Use(middleware.AuthRequired())
+	admin.Use(middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"))
 	{
 		admin.GET("/products", tradeHandler.ListAdminProducts)
 		admin.PUT("/products/:id/audit", tradeHandler.AuditProduct)
@@ -31,12 +31,13 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	orders := r.Group("/orders")
-	orders.Use(middleware.AuthRequired())
+	orders.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		orders.POST("", tradeHandler.CreateOrder)
 		orders.GET("", tradeHandler.ListOrders)
 		orders.GET("/:id", tradeHandler.GetOrder)
 		orders.POST("/:id/contract/submit", tradeHandler.SubmitOrderContract)
+		orders.POST("/:id/contract/sign", tradeHandler.SignContract)
 		orders.POST("/:id/payment-receipts", tradeHandler.SubmitPaymentReceipt)
 		orders.GET("/:id/pickup-code", tradeHandler.GetOrderPickupCode)
 		orders.POST("/:id/pickup-code/verify", tradeHandler.VerifyPickupCode)

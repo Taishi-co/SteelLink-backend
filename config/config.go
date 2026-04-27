@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -125,6 +126,15 @@ func Init(configPath string) error {
 	}
 
 	applyEnvOverrides(GlobalConfig)
+
+	if GlobalConfig.JWT.Secret == "" || GlobalConfig.JWT.Secret == "change-me" {
+		env := os.Getenv("APP_ENV")
+		if env == "production" || env == "prod" {
+			return fmt.Errorf("JWT_SECRET must be set in production environment")
+		}
+		log.Println("WARNING: JWT secret is using insecure default. Set JWT_SECRET env var for production!")
+	}
+
 	return nil
 }
 

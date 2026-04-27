@@ -25,6 +25,8 @@ const (
 	PurposeProductQualification Purpose = "product_qualification"
 	PurposePaymentVoucher       Purpose = "payment_voucher"
 	PurposeReceiptVoucher       Purpose = "receipt_voucher"
+	PurposeIdentityCard         Purpose = "identity_card"
+	PurposeEnterpriseLicense    Purpose = "enterprise_license"
 )
 
 type UploadResult struct {
@@ -112,18 +114,8 @@ func (c *Client) validate(purpose Purpose, header *multipart.FileHeader) error {
 	if header.Size > c.cfg.MaxFileSizeBytes() {
 		return fmt.Errorf("file exceeds %dMB limit", c.cfg.MaxFileSizeMB)
 	}
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	switch purpose {
-	case PurposeProductImage:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
-			return fmt.Errorf("product images only support jpg, jpeg, png, webp")
-		}
-	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp", ".pdf") {
-			return fmt.Errorf("voucher files only support jpg, jpeg, png, webp, pdf")
-		}
-	default:
-		return fmt.Errorf("invalid upload purpose")
+	if err := ValidateExtension(purpose, header.Filename); err != nil {
+		return err
 	}
 	return nil
 }
@@ -146,6 +138,14 @@ func (c *Client) target(purpose Purpose) (bucket, baseURL, prefix string, err er
 		bucket = c.cfg.PrivateBucket
 		baseURL = c.cfg.PrivateBaseURL
 		prefix = "orders/receipt-vouchers"
+	case PurposeIdentityCard:
+		bucket = c.cfg.PrivateBucket
+		baseURL = c.cfg.PrivateBaseURL
+		prefix = "identity/cards"
+	case PurposeEnterpriseLicense:
+		bucket = c.cfg.PrivateBucket
+		baseURL = c.cfg.PrivateBaseURL
+		prefix = "enterprise/licenses"
 	default:
 		err = fmt.Errorf("invalid upload purpose")
 	}

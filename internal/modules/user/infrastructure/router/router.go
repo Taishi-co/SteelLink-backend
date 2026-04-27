@@ -6,14 +6,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterRoutes 注册用户模块路由
 func RegisterRoutes(r *gin.RouterGroup) {
-	// 初始化处理器
 	authHandler := handler.NewAuthHandler()
 	userHandler := handler.NewUserHandler()
 	enterpriseHandler := handler.NewEnterpriseHandler()
 
-	// 认证路由（无需登录）
 	auth := r.Group("/auth")
 	{
 		auth.POST("/register", authHandler.Register)
@@ -24,38 +21,36 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		auth.POST("/password/reset", authHandler.ResetPassword)
 	}
 
-	// 需要登录的路由
 	users := r.Group("/users")
 	users.Use(middleware.AuthRequired())
 	{
-		// 当前用户操作
 		users.GET("/me", userHandler.GetCurrentUser)
 		users.PUT("/me", userHandler.UpdateCurrentUser)
 		users.POST("/me/enterprise/join", userHandler.JoinEnterprise)
 		users.POST("/me/enterprise/leave", userHandler.LeaveEnterprise)
 
-		// 实名认证
 		users.POST("/me/identity", userHandler.SubmitIdentity)
 		users.GET("/me/identity", userHandler.GetIdentityStatus)
 
-		// 工作台
 		users.GET("/me/dashboard", userHandler.GetDashboard)
 
-		// 子账号管理（仅企业用户）
 		subAccounts := users.Group("")
 		subAccounts.Use(middleware.RequireUserType("enterprise"))
 		{
 			subAccounts.POST("/me/sub-accounts", userHandler.CreateSubAccount)
 			subAccounts.GET("/me/sub-accounts", userHandler.ListSubAccounts)
+			subAccounts.PUT("/me/sub-accounts/:sub_id", userHandler.UpdateSubAccount)
 		}
 
-		// 密码操作
 		users.PUT("/me/password", authHandler.ChangePassword)
 
-		// 用户管理（管理员）
-		users.GET("", userHandler.ListUsers)
-		users.GET("/:id", userHandler.GetUserByID)
-		users.PUT("/:id/status", userHandler.UpdateUserStatus)
+		userAdmin := users.Group("")
+		userAdmin.Use(middleware.RequireUserType("operator", "super_admin"))
+		{
+			userAdmin.GET("", userHandler.ListUsers)
+			userAdmin.GET("/:id", userHandler.GetUserByID)
+			userAdmin.PUT("/:id/status", userHandler.UpdateUserStatus)
+		}
 	}
 
 	enterprises := r.Group("/enterprises")
@@ -65,6 +60,11 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		enterprises.GET("", enterpriseHandler.List)
 		enterprises.GET("/:id", enterpriseHandler.GetByID)
 		enterprises.POST("/:id/verify", enterpriseHandler.Verify)
-		enterprises.PUT("/:id/audit", enterpriseHandler.Audit)
+
+		entAdmin := enterprises.Group("")
+		entAdmin.Use(middleware.RequireUserType("operator", "super_admin"))
+		{
+			entAdmin.PUT("/:id/audit", enterpriseHandler.Audit)
+		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 )
 
-// RegisterRoutes 注册商品模块路由
 func RegisterRoutes(r *gin.RouterGroup) {
 	productHandler := handler.NewProductHandler()
 
@@ -14,7 +13,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/products/:id", middleware.OptionalAuth(), productHandler.GetByID)
 
 	products := r.Group("/products")
-	products.Use(middleware.AuthRequired())
+	products.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		products.POST("", productHandler.Create)
 		products.PUT("/:id/status", productHandler.UpdateStatus)

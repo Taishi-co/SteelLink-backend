@@ -24,6 +24,7 @@ import (
 	supplyDemandPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/supplydemand/infrastructure/persistence"
 	supplyDemandRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/supplydemand/infrastructure/router"
 	tradepersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/persistence"
+	tradeRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/router"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	userRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
@@ -179,6 +180,20 @@ func main() {
 	logger.Info("Registering AI procurement routes...")
 	aiProcurementRouter.RegisterRoutes(v1)
 	logger.Info("AI procurement routes registered")
+
+	logger.Info("Registering trade routes...")
+	tradeRouter.RegisterRoutes(v1.Group("/trade"))
+	logger.Info("Trade routes registered")
+
+	if cfg.Storage.Provider == "" || cfg.Storage.SecretID == "" {
+		localDir := os.Getenv("STORAGE_LOCAL_DIR")
+		if localDir == "" {
+			localDir = "./uploads"
+		}
+		os.MkdirAll(localDir, 0755)
+		ginRouter.Static("/uploads", localDir)
+		logger.Info("Local file storage enabled", zap.String("dir", localDir))
+	}
 
 	// Start server
 	srv := &http.Server{
