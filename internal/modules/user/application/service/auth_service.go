@@ -11,6 +11,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/sms"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/redis/go-redis/v9"
@@ -21,14 +22,15 @@ type AuthService struct {
 	userRepo       repository.UserRepository
 	enterpriseRepo repository.EnterpriseRepository
 	redis          *redis.Client
+	smsProvider    sms.Provider
 }
 
-// NewAuthService 创建认证服务实例
 func NewAuthService() *AuthService {
 	return &AuthService{
 		userRepo:       persistence.NewUserRepository(),
 		enterpriseRepo: persistence.NewEnterpriseRepository(),
 		redis:          database.GetRedis(),
+		smsProvider:    sms.NewProvider(sms.ProviderConfig{}),
 	}
 }
 
@@ -213,11 +215,11 @@ func (s *AuthService) SendSms(ctx context.Context, req *dto.SendSmsRequest) erro
 
 	// 设置发送频率限制（1分钟）
 	if err := s.redis.Set(ctx, key, "1", time.Minute).Err(); err != nil {
-		// 忽略错误
 	}
 
-	// TODO: 调用短信服务发送验证码
-	// 这里需要集成实际的短信服务
+	if err := s.smsProvider.SendCode(req.Phone, code, req.Type); err != nil {
+		return ecode.ErrBadRequest.WithMessage("发送验证码失败: " + err.Error())
+	}
 
 	return nil
 }

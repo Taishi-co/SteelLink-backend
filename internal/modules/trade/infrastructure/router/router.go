@@ -37,6 +37,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.GET("", tradeHandler.ListOrders)
 		orders.GET("/:id", tradeHandler.GetOrder)
 		orders.POST("/:id/contract/submit", tradeHandler.SubmitOrderContract)
+		orders.POST("/:id/contract/sign", tradeHandler.SignContract)
 		orders.POST("/:id/payment-receipts", tradeHandler.SubmitPaymentReceipt)
 		orders.GET("/:id/pickup-code", tradeHandler.GetOrderPickupCode)
 		orders.POST("/:id/pickup-code/verify", tradeHandler.VerifyPickupCode)

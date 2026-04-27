@@ -146,6 +146,8 @@ type OrderContractInfo struct {
 	Status       string    `json:"status"`
 	SubmittedBy  uint64    `json:"submitted_by"`
 	SubmittedAt  time.Time `json:"submitted_at"`
+	SignedBy     *uint64   `json:"signed_by,omitempty"`
+	SignedAt     *time.Time `json:"signed_at,omitempty"`
 }
 
 type PaymentReceiptInfo struct {

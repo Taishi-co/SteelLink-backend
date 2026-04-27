@@ -228,6 +228,25 @@ func (h *TradeHandler) SubmitOrderContract(c *gin.Context) {
 	response.Success(c, order)
 }
 
+func (h *TradeHandler) SignContract(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+
+	order, err := h.service.SignContract(c.Request.Context(), userID, id)
+	if err != nil {
+		if tradeservice.IsNotFound(err) {
+			response.NotFound(c, "order not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, order)
+}
+
 func (h *TradeHandler) SubmitPaymentReceipt(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	id, ok := parseUintParam(c, "id")
