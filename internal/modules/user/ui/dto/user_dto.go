@@ -88,6 +88,27 @@ type SubAccountInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type DashboardStats struct {
+	InTransitAmount       float64 `json:"in_transit_amount"`
+	PendingPaymentCount   int64   `json:"pending_payment_count"`
+	MonthlyPurchaseAmount float64 `json:"monthly_purchase_amount"`
+	StockQuantity         float64 `json:"stock_quantity"`
+}
+
+type RecentOrder struct {
+	ID          uint64  `json:"id"`
+	OrderNo     string  `json:"order_no"`
+	Status      int     `json:"status"`
+	TotalAmount float64 `json:"total_amount"`
+	CreatedAt   string  `json:"created_at"`
+	ProductName string  `json:"product_name"`
+}
+
+type DashboardResponse struct {
+	Stats        DashboardStats `json:"stats"`
+	RecentOrders []RecentOrder  `json:"recent_orders"`
+}
+
 func ToUserInfo(user interface{}) *UserInfo {
 	return nil
 }

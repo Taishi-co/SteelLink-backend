@@ -135,6 +135,22 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *UserHandler) GetDashboard(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	result, err := h.userService.GetDashboard(c.Request.Context(), userID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 func (h *UserHandler) CreateSubAccount(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == 0 {

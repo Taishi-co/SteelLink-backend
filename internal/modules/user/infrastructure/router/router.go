@@ -38,6 +38,9 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		users.POST("/me/identity", userHandler.SubmitIdentity)
 		users.GET("/me/identity", userHandler.GetIdentityStatus)
 
+		// 工作台
+		users.GET("/me/dashboard", userHandler.GetDashboard)
+
 		// 子账号管理（仅企业用户）
 		subAccounts := users.Group("")
 		subAccounts.Use(middleware.RequireUserType("enterprise"))
