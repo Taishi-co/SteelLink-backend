@@ -13,7 +13,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/supply-demands/stats", supplyDemandHandler.Stats)
 
 	posts := r.Group("/supply-demands")
-	posts.Use(middleware.AuthRequired())
+	posts.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		posts.POST("", supplyDemandHandler.Create)
 		posts.GET("/mine", supplyDemandHandler.ListMine)

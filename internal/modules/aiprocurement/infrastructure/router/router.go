@@ -10,7 +10,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	procurementHandler := handler.NewProcurementHandler()
 
 	group := r.Group("/ai-procurements")
-	group.Use(middleware.AuthRequired())
+	group.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		group.POST("/parse", procurementHandler.Parse)
 		group.POST("", procurementHandler.Create)
