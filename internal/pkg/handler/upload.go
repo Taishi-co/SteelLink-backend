@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Taishi-co/SteelLink-backend/config"
@@ -21,7 +23,23 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	result, err := storage.NewClient(config.Get().Storage).Upload(c.Request.Context(), purpose, file)
+	cfg := config.Get()
+	var result *storage.UploadResult
+
+	if cfg.Storage.Provider != "" && cfg.Storage.SecretID != "" && cfg.Storage.SecretKey != "" {
+		result, err = storage.NewClient(cfg.Storage).Upload(c.Request.Context(), purpose, file)
+	} else {
+		baseDir := os.Getenv("STORAGE_LOCAL_DIR")
+		if baseDir == "" {
+			baseDir = "./uploads"
+		}
+		baseURL := os.Getenv("STORAGE_LOCAL_BASE_URL")
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://localhost:%d/uploads", cfg.Server.Port)
+		}
+		result, err = storage.NewLocalClient(baseDir, baseURL, cfg.Storage.MaxFileSizeBytes()).Upload(c.Request.Context(), purpose, file)
+	}
+
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

@@ -163,6 +163,16 @@ func main() {
 	aiProcurementRouter.RegisterRoutes(v1)
 	logger.Info("AI procurement routes registered")
 
+	if cfg.Storage.Provider == "" || cfg.Storage.SecretID == "" {
+		localDir := os.Getenv("STORAGE_LOCAL_DIR")
+		if localDir == "" {
+			localDir = "./uploads"
+		}
+		os.MkdirAll(localDir, 0755)
+		ginRouter.Static("/uploads", localDir)
+		logger.Info("Local file storage enabled", zap.String("dir", localDir))
+	}
+
 	// Start server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
