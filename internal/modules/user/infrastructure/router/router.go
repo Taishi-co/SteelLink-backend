@@ -39,6 +39,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		{
 			subAccounts.POST("/me/sub-accounts", userHandler.CreateSubAccount)
 			subAccounts.GET("/me/sub-accounts", userHandler.ListSubAccounts)
+			subAccounts.PUT("/me/sub-accounts/:sub_id", userHandler.UpdateSubAccount)
 		}
 
 		users.PUT("/me/password", authHandler.ChangePassword)

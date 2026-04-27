@@ -60,6 +60,27 @@ func (r *Remark) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, r)
 }
 
+type Strings []string
+
+func (s Strings) Value() (driver.Value, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return json.Marshal(s)
+}
+
+func (s *Strings) Scan(value interface{}) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, s)
+}
+
 type User struct {
 	ID             uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
 	UID            string         `gorm:"type:varchar(32);uniqueIndex;comment:用户UID" json:"uid"`
@@ -80,6 +101,7 @@ type User struct {
 	IdentityStatus IdentityStatus `gorm:"type:tinyint;default:0;comment:实名认证状态 0未实名1审核中2已实名3已驳回" json:"identity_status"`
 	IdentityReject string         `gorm:"type:varchar(255);default:;comment:实名驳回原因" json:"identity_reject"`
 	ParentID       uint64         `gorm:"type:bigint;default:0;comment:主账号ID，0表示主账号" json:"parent_id"`
+	Permissions    Strings        `gorm:"type:json;comment:子账号权限列表" json:"permissions"`
 	Status         UserStatus     `gorm:"type:tinyint;default:1;comment:状态" json:"status"`
 	Remark         Remark         `gorm:"type:json;comment:备注" json:"remark"`
 	CreatedBy      uint64         `gorm:"comment:创建者" json:"created_by"`

@@ -3,12 +3,12 @@ package handler
 import (
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/application/service"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 // UserHandler 用户处理器
@@ -189,7 +189,33 @@ func (h *UserHandler) ListSubAccounts(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// UpdateUserStatus 更新用户状态
+func (h *UserHandler) UpdateSubAccount(c *gin.Context) {
+	parentID := middleware.GetUserID(c)
+	if parentID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	subIDStr := c.Param("sub_id")
+	subID, err := strconv.ParseUint(subIDStr, 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的子账号ID")
+		return
+	}
+
+	var req dto.UpdateSubAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid payload")
+		return
+	}
+
+	result, err := h.userService.UpdateSubAccount(c.Request.Context(), parentID, subID, &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 // @Summary 更新用户状态
 // @Description 更新用户状态（管理员）
 // @Tags 用户
