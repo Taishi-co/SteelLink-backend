@@ -30,7 +30,7 @@ func NewAuthService() *AuthService {
 		userRepo:       persistence.NewUserRepository(),
 		enterpriseRepo: persistence.NewEnterpriseRepository(),
 		redis:          database.GetRedis(),
-		smsProvider:    sms.NewProvider(sms.ProviderConfig{}),
+		smsProvider:    sms.NewProvider(),
 	}
 }
 

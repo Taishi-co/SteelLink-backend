@@ -114,22 +114,8 @@ func (c *Client) validate(purpose Purpose, header *multipart.FileHeader) error {
 	if header.Size > c.cfg.MaxFileSizeBytes() {
 		return fmt.Errorf("file exceeds %dMB limit", c.cfg.MaxFileSizeMB)
 	}
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	switch purpose {
-	case PurposeProductImage:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
-			return fmt.Errorf("product images only support jpg, jpeg, png, webp")
-		}
-	case PurposeIdentityCard, PurposeEnterpriseLicense:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
-			return fmt.Errorf("identity/license files only support jpg, jpeg, png, webp")
-		}
-	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp", ".pdf") {
-			return fmt.Errorf("voucher files only support jpg, jpeg, png, webp, pdf")
-		}
-	default:
-		return fmt.Errorf("invalid upload purpose")
+	if err := ValidateExtension(purpose, header.Filename); err != nil {
+		return err
 	}
 	return nil
 }

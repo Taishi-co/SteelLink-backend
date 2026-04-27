@@ -354,7 +354,7 @@ func (s *TradeService) SubmitOrderContract(ctx context.Context, buyerID, orderRe
 func (s *TradeService) SignContract(ctx context.Context, userID, orderRefID uint64) (*tradedto.OrderInfo, error) {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order tradeentity.Order
-		if err := tx.Where("id = ? AND (buyer_id = ? OR seller_id = ?)", orderRefID, userID, userID).First(&order).Error; err != nil {
+		if err := tx.Where("id = ? AND (buyer_id = ? OR seller_id = ?)", orderRefID, userID, userID).Preload("Contract").First(&order).Error; err != nil {
 			return err
 		}
 		if order.Contract == nil {

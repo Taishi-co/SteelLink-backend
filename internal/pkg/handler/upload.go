@@ -4,12 +4,42 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/storage"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
 	"github.com/gin-gonic/gin"
 )
+
+var (
+	cosClientOnce   sync.Once
+	cosClient       *storage.Client
+	localClientOnce sync.Once
+	localClient     *storage.LocalClient
+)
+
+func getCOSClient(cfg config.StorageConfig) *storage.Client {
+	cosClientOnce.Do(func() {
+		cosClient = storage.NewClient(cfg)
+	})
+	return cosClient
+}
+
+func getLocalClient(cfg *config.Config) *storage.LocalClient {
+	localClientOnce.Do(func() {
+		baseDir := os.Getenv("STORAGE_LOCAL_DIR")
+		if baseDir == "" {
+			baseDir = "./uploads"
+		}
+		baseURL := os.Getenv("STORAGE_LOCAL_BASE_URL")
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://localhost:%d/uploads", cfg.Server.Port)
+		}
+		localClient = storage.NewLocalClient(baseDir, baseURL, cfg.Storage.MaxFileSizeBytes())
+	})
+	return localClient
+}
 
 func UploadFile(c *gin.Context) {
 	purpose := storage.Purpose(strings.TrimSpace(c.PostForm("purpose")))
@@ -27,17 +57,9 @@ func UploadFile(c *gin.Context) {
 	var result *storage.UploadResult
 
 	if cfg.Storage.Provider != "" && cfg.Storage.SecretID != "" && cfg.Storage.SecretKey != "" {
-		result, err = storage.NewClient(cfg.Storage).Upload(c.Request.Context(), purpose, file)
+		result, err = getCOSClient(cfg.Storage).Upload(c.Request.Context(), purpose, file)
 	} else {
-		baseDir := os.Getenv("STORAGE_LOCAL_DIR")
-		if baseDir == "" {
-			baseDir = "./uploads"
-		}
-		baseURL := os.Getenv("STORAGE_LOCAL_BASE_URL")
-		if baseURL == "" {
-			baseURL = fmt.Sprintf("http://localhost:%d/uploads", cfg.Server.Port)
-		}
-		result, err = storage.NewLocalClient(baseDir, baseURL, cfg.Storage.MaxFileSizeBytes()).Upload(c.Request.Context(), purpose, file)
+		result, err = getLocalClient(cfg).Upload(c.Request.Context(), purpose, file)
 	}
 
 	if err != nil {

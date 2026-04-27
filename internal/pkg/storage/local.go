@@ -34,20 +34,11 @@ func (l *LocalClient) Upload(ctx context.Context, purpose Purpose, header *multi
 		return nil, fmt.Errorf("file exceeds %dMB limit", l.maxSize/(1<<20))
 	}
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	switch purpose {
-	case PurposeProductImage, PurposeIdentityCard, PurposeEnterpriseLicense:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
-			return nil, fmt.Errorf("only support jpg, jpeg, png, webp")
-		}
-	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher:
-		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp", ".pdf") {
-			return nil, fmt.Errorf("only support jpg, jpeg, png, webp, pdf")
-		}
-	default:
-		return nil, fmt.Errorf("invalid upload purpose")
+	if err := ValidateExtension(purpose, header.Filename); err != nil {
+		return nil, err
 	}
 
+	ext := strings.ToLower(filepath.Ext(header.Filename))
 	prefix := localPrefix(purpose)
 	key := path.Join(prefix, time.Now().Format("2006/01/02"), randomID()+ext)
 
@@ -62,6 +53,16 @@ func (l *LocalClient) Upload(ctx context.Context, purpose Purpose, header *multi
 	}
 	defer file.Close()
 
+	buf := make([]byte, 512)
+	n, _ := file.Read(buf)
+	contentType := http.DetectContentType(buf[:n])
+	if seeker, ok := file.(io.Seeker); ok {
+		seeker.Seek(0, io.SeekStart)
+	}
+	if ct := header.Header.Get("Content-Type"); ct != "" {
+		contentType = ct
+	}
+
 	dst, err := os.Create(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("create file: %w", err)
@@ -70,11 +71,6 @@ func (l *LocalClient) Upload(ctx context.Context, purpose Purpose, header *multi
 
 	if _, err := io.Copy(dst, file); err != nil {
 		return nil, fmt.Errorf("write file: %w", err)
-	}
-
-	contentType := http.DetectContentType([]byte{})
-	if ct := header.Header.Get("Content-Type"); ct != "" {
-		contentType = ct
 	}
 
 	return &UploadResult{

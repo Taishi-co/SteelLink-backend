@@ -328,7 +328,7 @@ func (s *UserService) CreateSubAccount(ctx context.Context, parentID uint64, req
 		EnterpriseCode: parent.EnterpriseCode,
 		Role:           entity.TypeEnterprise,
 		ParentID:       parentID,
-		Permissions:    entity.Strings(req.Permissions),
+		Permissions:    entity.StringList(req.Permissions),
 		Status:         entity.StatusActive,
 		CreatedBy:      parentID,
 		UpdatedBy:      parentID,
@@ -402,7 +402,7 @@ func (s *UserService) UpdateSubAccount(ctx context.Context, parentID, subID uint
 		sub.Email = &req.Email
 	}
 	if req.Permissions != nil {
-		sub.Permissions = entity.Strings(req.Permissions)
+		sub.Permissions = entity.StringList(req.Permissions)
 	}
 	if req.Status != nil {
 		sub.Status = entity.UserStatus(*req.Status)
