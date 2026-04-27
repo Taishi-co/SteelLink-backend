@@ -15,6 +15,8 @@ import (
 	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	aiProcurementPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
 	aiProcurementRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/router"
+	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
+	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
@@ -90,23 +92,35 @@ func main() {
 		logger.Fatal("Failed to init MySQL", zap.Error(err))
 	}
 	defer database.CloseMySQL()
-	if err := userPersistence.AutoMigrate(); err != nil {
-		logger.Fatal("Failed to migrate user tables", zap.Error(err))
-	}
-	if err := tradepersistence.AutoMigrate(); err != nil {
-		logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
-	}
-	if err := supplyDemandPersistence.AutoMigrate(); err != nil {
-		logger.Fatal("Failed to migrate supply demand tables", zap.Error(err))
-	}
-	if err := aiProcurementPersistence.AutoMigrate(); err != nil {
-		logger.Fatal("Failed to migrate AI procurement tables", zap.Error(err))
-	}
-	if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
-		logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
-	}
-	if err := database.GetDB().AutoMigrate(&productEntity.Product{}, &orderEntity.Order{}); err != nil {
-		logger.Fatal("Failed to migrate business tables", zap.Error(err))
+	switch os.Getenv("AUTO_MIGRATE_SCOPE") {
+	case "market":
+		if err := marketpersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to auto migrate market tables", zap.Error(err))
+		}
+	case "skip":
+		logger.Info("Skipping database auto migration")
+	default:
+		if err := userPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate user tables", zap.Error(err))
+		}
+		if err := tradepersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
+		}
+		if err := supplyDemandPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate supply demand tables", zap.Error(err))
+		}
+		if err := aiProcurementPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate AI procurement tables", zap.Error(err))
+		}
+		if err := marketpersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to auto migrate market tables", zap.Error(err))
+		}
+		if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
+			logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
+		}
+		if err := database.GetDB().AutoMigrate(&productEntity.Product{}, &orderEntity.Order{}); err != nil {
+			logger.Fatal("Failed to migrate business tables", zap.Error(err))
+		}
 	}
 
 	// Initialize redis
@@ -155,6 +169,9 @@ func main() {
 	logger.Info("Registering order routes...")
 	orderRouter.RegisterRoutes(v1)
 	logger.Info("Order routes registered")
+	logger.Info("Registering market routes...")
+	marketRouter.RegisterRoutes(v1)
+	logger.Info("Market routes registered")
 
 	logger.Info("Registering supply demand routes...")
 	supplyDemandRouter.RegisterRoutes(v1)
