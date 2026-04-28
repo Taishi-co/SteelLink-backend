@@ -4,12 +4,12 @@ import "time"
 
 // CreateEnterpriseRequest 创建企业请求
 type CreateEnterpriseRequest struct {
-	Name             string `json:"name" binding:"required,max=200"`
-	CreditCode       string `json:"credit_code" binding:"required,max=50"`
-	EnterpriseRole   string `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
-	ContactName      string `json:"contact_name" binding:"required"`
-	ContactPhone     string `json:"contact_phone" binding:"required,len=11"`
-	Address          string `json:"address"`
+	Name           string `json:"name" binding:"required,max=200"`
+	CreditCode     string `json:"credit_code" binding:"required,max=50"`
+	EnterpriseRole string `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
+	ContactName    string `json:"contact_name" binding:"required"`
+	ContactPhone   string `json:"contact_phone" binding:"required,len=11"`
+	Address        string `json:"address"`
 }
 
 // EnterpriseInfo 企业信息响应
@@ -27,22 +27,22 @@ type EnterpriseInfo struct {
 
 // VerificationInfo 认证信息
 type VerificationInfo struct {
-	LegalPerson      string `json:"legal_person"`
-	LegalIdCard      string `json:"legal_id_card"`
-	BusinessLicense  string `json:"business_license"`
-	BankAccount      string `json:"bank_account"`
-	BankName         string `json:"bank_name"`
-	ContactName      string `json:"contact_name"`
-	ContactPhone     string `json:"contact_phone"`
-	Address          string `json:"address"`
+	LegalPerson     string `json:"legal_person"`
+	LegalIdCard     string `json:"legal_id_card"`
+	BusinessLicense string `json:"business_license"`
+	BankAccount     string `json:"bank_account"`
+	BankName        string `json:"bank_name"`
+	ContactName     string `json:"contact_name"`
+	ContactPhone    string `json:"contact_phone"`
+	Address         string `json:"address"`
 }
 
 // UpdateEnterpriseRequest 更新企业信息请求
 type UpdateEnterpriseRequest struct {
-	Name           string `json:"name" binding:"omitempty,max=200"`
-	ContactName    string `json:"contact_name"`
-	ContactPhone   string `json:"contact_phone" binding:"omitempty,len=11"`
-	Address        string `json:"address"`
+	Name         string `json:"name" binding:"omitempty,max=200"`
+	ContactName  string `json:"contact_name"`
+	ContactPhone string `json:"contact_phone" binding:"omitempty,len=11"`
+	Address      string `json:"address"`
 }
 
 // VerifyEnterpriseRequest 企业认证请求
@@ -53,7 +53,7 @@ type VerifyEnterpriseRequest struct {
 	BankAccount     string `json:"bank_account" binding:"required"`
 	BankName        string `json:"bank_name" binding:"required"`
 	ContactName     string `json:"contact_name" binding:"required"`
-	ContactPhone    string `json:"contact_phone" binding:"required,mobile"`
+	ContactPhone    string `json:"contact_phone" binding:"required,len=11"`
 	Address         string `json:"address" binding:"required"`
 }
 
@@ -76,6 +76,6 @@ type EnterpriseListResponse struct {
 
 // AuditEnterpriseRequest 审核企业请求
 type AuditEnterpriseRequest struct {
-	Status  int    `json:"status" binding:"required,oneof=1 2"` // 1=通过, 2=拒绝
-	Reason  string `json:"reason"` // 拒绝原因
+	Status int    `json:"status" binding:"required,oneof=1 2"` // 1=通过, 2=拒绝
+	Reason string `json:"reason"`                              // 拒绝原因
 }

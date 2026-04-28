@@ -49,6 +49,12 @@ type UserRepository interface {
 
 	// FindSubAccounts 查询主账号下的子账号列表
 	FindSubAccounts(ctx context.Context, parentID uint64) ([]*entity.User, error)
+
+	// FindByEnterpriseCode 根据企业代码查询用户列表
+	FindByEnterpriseCode(ctx context.Context, enterpriseCode string) ([]*entity.User, error)
+
+	// UpdateRoleByEnterpriseCode 批量更新企业下用户的角色
+	UpdateRoleByEnterpriseCode(ctx context.Context, enterpriseCode string, role entity.UserType, updatedBy uint64) error
 }
 
 // UserQuery 用户查询条件

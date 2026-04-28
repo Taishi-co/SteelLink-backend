@@ -13,7 +13,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/products/:id", tradeHandler.GetProduct)
 
 	seller := r.Group("/seller")
-	seller.Use(middleware.AuthRequired(), middleware.RequireEnterpriseRole("seller"))
+	seller.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		seller.GET("/products", tradeHandler.ListSellerProducts)
 		seller.POST("/products", tradeHandler.CreateSellerProduct)
