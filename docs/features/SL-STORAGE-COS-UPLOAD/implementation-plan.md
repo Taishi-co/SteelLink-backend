@@ -12,6 +12,7 @@
   - `config/config.go`
   - `internal/pkg/handler/upload.go`
   - `internal/pkg/storage/cos.go`
+  - `internal/pkg/storage/local.go`
   - `internal/modules/product/ui/dto/product_dto.go`
   - `internal/modules/product/application/service/product_service.go`
 - 文档文件:
@@ -22,7 +23,8 @@
   - `go.mod`
   - `go.sum`
 - 部署/脚本文件:
-  - 无脚本变更；部署环境需补 COS 密钥。
+  - `Dockerfile`
+  - 部署环境需补 COS 密钥；本地写盘仅在 `STORAGE_PROVIDER=local` 时启用。
 
 ## 实施步骤
 
@@ -31,6 +33,7 @@
 3. 新增 `POST /api/v1/uploads`，复用登录态鉴权，接收 multipart 文件。
 4. 扩展商品创建 DTO 与服务逻辑，保存商品图片和质保资料 URL。
 5. 与前端联调支付凭证、签收凭证、商品图片上传链路。
+6. 收紧 provider 选择逻辑，避免 COS 密钥缺失时静默降级到本地 `uploads` 导致容器权限错误。
 
 ## 验证计划
 
@@ -44,4 +47,5 @@
 
 - 私有桶 URL 如果未开放读权限，前端直接点击可能返回 403；后续应补签名 URL 查看接口。
 - COS 密钥必须通过环境变量注入，不能写入仓库。
+- 生产环境如果没有注入 COS 密钥，接口会明确返回配置错误；不能依赖本地 fallback 保存生产资料。
 - 回滚时移除上传接口和前端上传调用，恢复为传入 URL；已上传对象需按 key 前缀清理。

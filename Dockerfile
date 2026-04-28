@@ -41,7 +41,9 @@ COPY --from=builder /steellink-backend /app/steellink-backend
 COPY config/config.yaml /app/config/config.yaml
 
 # User
-RUN adduser -D -g '' appuser
+RUN adduser -D -g '' appuser && \
+    mkdir -p /app/uploads && \
+    chown -R appuser:appuser /app/uploads
 USER appuser
 
 EXPOSE 8080
