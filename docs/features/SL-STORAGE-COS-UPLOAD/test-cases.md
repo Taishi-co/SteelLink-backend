@@ -20,7 +20,7 @@
 | TC-EX-01 | 未登录上传 | 无 token | 调用 `POST /api/v1/uploads` | 返回未授权 |
 | TC-EX-02 | 非法上传用途 | 已登录 | `purpose=unknown` 上传文件 | 返回参数错误 |
 | TC-EX-03 | 非法文件类型 | 已登录 | 商品主图上传 `.exe` | 返回文件类型错误 |
-| TC-EX-04 | COS 未配置 | 未设置 `COS_SECRET_ID` 或 `COS_SECRET_KEY` | 调用上传接口 | 返回 COS 配置错误 |
+| TC-EX-04 | COS 未配置 | `STORAGE_PROVIDER=tencent_cos`，未设置 `COS_SECRET_ID` 或 `COS_SECRET_KEY` | 调用上传接口 | 返回 COS 配置错误，不创建本地 `uploads` 目录 |
 
 ## 权限测试
 
@@ -36,3 +36,4 @@
 | --- | --- | --- | --- |
 | TC-OPS-01 | 配置文件可加载 | `./harness/verify.sh` | Go 测试、构建、配置检查通过 |
 | TC-OPS-02 | 环境变量示例完整 | 检查 `.env.example` | 包含 COS bucket、base URL、密钥占位符 |
+| TC-OPS-03 | 本地存储显式启用 | 设置 `STORAGE_PROVIDER=local`，上传合法文件 | 写入本地目录；默认 COS 模式缺密钥时不会降级写盘 |
