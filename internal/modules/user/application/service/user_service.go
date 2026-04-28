@@ -157,7 +157,6 @@ func (s *UserService) JoinEnterprise(ctx context.Context, userID uint64, req *dt
 
 	// 更新企业代码
 	user.EnterpriseCode = req.EnterpriseCode
-	user.Role = entity.TypeEnterprise // 更新为企业用户
 	user.UpdatedBy = userID
 
 	if err := s.userRepo.Update(ctx, user); err != nil {

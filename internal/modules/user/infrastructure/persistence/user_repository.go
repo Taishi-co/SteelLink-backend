@@ -184,3 +184,16 @@ func (r *userRepository) FindSubAccounts(ctx context.Context, parentID uint64) (
 	err := r.db.WithContext(ctx).Where("parent_id = ? AND deleted_at IS NULL", parentID).Find(&users).Error
 	return users, err
 }
+
+func (r *userRepository) FindByEnterpriseCode(ctx context.Context, enterpriseCode string) ([]*entity.User, error) {
+	var users []*entity.User
+	err := r.db.WithContext(ctx).Where("enterprise_code = ? AND deleted_at IS NULL", enterpriseCode).Find(&users).Error
+	return users, err
+}
+
+func (r *userRepository) UpdateRoleByEnterpriseCode(ctx context.Context, enterpriseCode string, role entity.UserType, updatedBy uint64) error {
+	return r.db.WithContext(ctx).
+		Model(&entity.User{}).
+		Where("enterprise_code = ? AND deleted_at IS NULL", enterpriseCode).
+		Updates(map[string]interface{}{"role": role, "updated_by": updatedBy}).Error
+}

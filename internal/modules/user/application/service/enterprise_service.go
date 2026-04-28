@@ -69,7 +69,6 @@ func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpris
 	}
 
 	user.EnterpriseCode = enterprise.EnterpriseCode
-	user.Role = entity.TypeEnterprise
 	user.UpdatedBy = operatorID
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("更新用户企业绑定失败")
@@ -169,7 +168,16 @@ func (s *EnterpriseService) Audit(ctx context.Context, id uint64, req *dto.Audit
 		return ecode.ErrDatabase.WithMessage("审核企业失败")
 	}
 
-	if req.Status == int(entity.EnterpriseStatusRejected) {
+	if status == entity.EnterpriseStatusApproved {
+		if err := s.userRepo.UpdateRoleByEnterpriseCode(ctx, enterprise.EnterpriseCode, entity.TypeEnterprise, operatorID); err != nil {
+			return ecode.ErrDatabase.WithMessage("更新用户角色失败")
+		}
+	}
+
+	if status == entity.EnterpriseStatusRejected {
+		if err := s.userRepo.UpdateRoleByEnterpriseCode(ctx, enterprise.EnterpriseCode, entity.TypePersonal, operatorID); err != nil {
+			return ecode.ErrDatabase.WithMessage("更新用户角色失败")
+		}
 		if enterprise.Remark == nil {
 			enterprise.Remark = entity.Remark{}
 		}
