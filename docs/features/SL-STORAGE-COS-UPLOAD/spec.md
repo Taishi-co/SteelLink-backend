@@ -34,7 +34,7 @@
 - 受影响 middleware: 上传接口使用 `AuthRequired`
 - 受影响表/model: `products.images`, `products.quality_cert`
 - 配置或环境变量变化: 新增 `storage` 配置与 `COS_*` / `STORAGE_*` 环境变量
-- Docker / 部署影响: 部署环境必须注入 `COS_SECRET_ID` 与 `COS_SECRET_KEY`
+- Docker / 部署影响: 部署环境必须注入 `COS_SECRET_ID` 与 `COS_SECRET_KEY`；只有显式配置 `STORAGE_PROVIDER=local` 时才允许写入本地 `uploads` 目录。
 
 ## 权限与合规影响
 
@@ -47,4 +47,4 @@
 1. 已登录用户可上传合法类型文件并获得 COS URL。
 2. 商品创建请求必须包含至少一张商品主图，后端保存真实 URL。
 3. 支付凭证和签收凭证由前端上传后提交 URL，订单数据不再依赖手填占位 URL。
-4. 缺少 COS 密钥或上传非法类型文件时返回明确错误。
+4. `STORAGE_PROVIDER=tencent_cos` 缺少 COS 密钥或上传非法类型文件时返回明确错误，不能静默降级为本地 `uploads` 写盘。

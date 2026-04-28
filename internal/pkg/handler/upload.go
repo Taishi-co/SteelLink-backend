@@ -56,10 +56,13 @@ func UploadFile(c *gin.Context) {
 	cfg := config.Get()
 	var result *storage.UploadResult
 
-	if cfg.Storage.Provider != "" && cfg.Storage.SecretID != "" && cfg.Storage.SecretKey != "" {
+	switch strings.TrimSpace(cfg.Storage.Provider) {
+	case "", "tencent_cos":
 		result, err = getCOSClient(cfg.Storage).Upload(c.Request.Context(), purpose, file)
-	} else {
+	case "local":
 		result, err = getLocalClient(cfg).Upload(c.Request.Context(), purpose, file)
+	default:
+		err = fmt.Errorf("unsupported storage provider: %s", cfg.Storage.Provider)
 	}
 
 	if err != nil {
