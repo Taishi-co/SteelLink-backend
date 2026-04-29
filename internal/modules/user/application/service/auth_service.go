@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
@@ -205,7 +207,7 @@ func (s *AuthService) SendSms(ctx context.Context, req *dto.SendSmsRequest) erro
 	}
 
 	// 生成6位验证码
-	code := generateSmsCode()
+	code := resolveSmsCode()
 
 	// 存储验证码（5分钟有效）
 	codeKey := fmt.Sprintf("sms:code:%s:%s", req.Type, req.Phone)
@@ -357,6 +359,31 @@ func isPhone(s string) bool {
 func generateSmsCode() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	return fmt.Sprintf("%06d", r.Intn(1000000))
+}
+
+func resolveSmsCode() string {
+	if code := fixedDevSmsCode(); code != "" {
+		return code
+	}
+	return generateSmsCode()
+}
+
+func fixedDevSmsCode() string {
+	provider := strings.TrimSpace(strings.ToLower(os.Getenv("SMS_PROVIDER")))
+	if provider != "" && provider != "dev" {
+		return ""
+	}
+
+	code := strings.TrimSpace(os.Getenv("SMS_DEV_CODE"))
+	if len(code) != 6 {
+		return ""
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return code
 }
 
 // toUserInfo 转换用户信息
