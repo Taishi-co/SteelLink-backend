@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
@@ -92,7 +95,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 			},
 		},
 		Currency:  product.Currency,
-		Status:    orderEntity.OrderStatusPendingPayment,
+		Status:    orderEntity.OrderStatusPendingConfirm,
 		CreatedBy: userID,
 		UpdatedBy: userID,
 	}
@@ -173,7 +176,10 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权取消该订单")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
+	currentStatus := effectiveOrderStatus(order)
+	if currentStatus != orderEntity.OrderStatusPendingPayment &&
+		currentStatus != orderEntity.OrderStatusPendingConfirm &&
+		currentStatus != orderEntity.OrderStatusPendingContract {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可取消")
 	}
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
@@ -212,6 +218,61 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 		return nil, ecode.ErrDatabase.WithMessage("取消订单失败")
 	}
 
+	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) ConfirmOrder(ctx context.Context, id, sellerEnterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.SellerID != sellerEnterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单")
+	}
+	if order.Status != orderEntity.OrderStatusPendingConfirm {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态无需确认")
+	}
+	order.Status = orderEntity.OrderStatusPendingContract
+	ensureContractInfo(order)
+	order.UpdatedBy = operatorID
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("确认订单失败")
+	}
+	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.BuyerID != enterpriseID && order.SellerID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权签署该订单合同")
+	}
+	if order.Status != orderEntity.OrderStatusPendingContract {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署合同")
+	}
+	ensureContractInfo(order)
+	if order.BuyerID == enterpriseID {
+		order.ContractInfo.BuyerSigned = true
+	} else {
+		order.ContractInfo.SellerSigned = true
+	}
+	order.UpdatedBy = operatorID
+	if order.ContractInfo.BuyerSigned && order.ContractInfo.SellerSigned {
+		now := time.Now()
+		order.ContractInfo.SignedAt = now
+		order.Status = orderEntity.OrderStatusPendingPayment
+	}
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("签署合同失败")
+	}
 	return toOrderInfo(order), nil
 }
 
@@ -265,14 +326,24 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可上传支付凭证")
 	}
+	if !isHTTPURL(req.VoucherURL) {
+		return nil, ecode.ErrBadRequest.WithMessage("支付凭证地址必须是有效的 HTTP/HTTPS URL")
+	}
+
+	now := time.Now()
 
 	order.PaymentInfo = &orderEntity.PaymentInfo{
 		PaymentMethod: "bank_transfer",
-		PaymentTime:   time.Now(),
+		PaymentTime:   now,
 		TransactionNo: req.TransactionNo,
 		PayeeAccount:  req.PayeeAccount,
 		PayerAccount:  req.PayerAccount,
 		VoucherURL:    req.VoucherURL,
+		UploadedBy:    operatorID,
+		UploadedAt:    now,
+		CapturedAt:    req.CapturedAt,
+		GPSLatitude:   req.GPSLatitude,
+		GPSLongitude:  req.GPSLongitude,
 	}
 	order.UpdatedBy = operatorID
 
@@ -362,7 +433,7 @@ func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, op
 	return toOrderInfo(order), nil
 }
 
-func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.VerifyPickupCodeRequest) (*dto.OrderInfo, error) {
 	order, err := s.orderRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -381,6 +452,9 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	}
 	if order.DeliveryInfo == nil || order.DeliveryInfo.PickupCode == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("买家尚未录入提货信息")
+	}
+	if req != nil && strings.TrimSpace(req.PickupCode) != "" && strings.TrimSpace(req.PickupCode) != order.DeliveryInfo.PickupCode {
+		return nil, ecode.ErrBadRequest.WithMessage("提货码不正确")
 	}
 
 	order.Status = orderEntity.OrderStatusDelivering
@@ -408,9 +482,20 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	if effectiveOrderStatus(order) != orderEntity.OrderStatusDelivering {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
 	}
+	if !isHTTPURL(req.ReceiptVoucher) {
+		return nil, ecode.ErrBadRequest.WithMessage("签收凭证地址必须是有效的 HTTP/HTTPS URL")
+	}
 
 	now := time.Now()
 	order.ReceiptVoucher = req.ReceiptVoucher
+	order.ReceiptInfo = &orderEntity.VoucherEvidence{
+		VoucherURL:   req.ReceiptVoucher,
+		UploadedBy:   operatorID,
+		UploadedAt:   now,
+		CapturedAt:   req.CapturedAt,
+		GPSLatitude:  req.GPSLatitude,
+		GPSLongitude: req.GPSLongitude,
+	}
 	order.ReceiptAt = &now
 	order.Status = orderEntity.OrderStatusCompleted
 	order.UpdatedBy = operatorID
@@ -449,6 +534,11 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 			PayeeAccount:  order.PaymentInfo.PayeeAccount,
 			PayerAccount:  order.PaymentInfo.PayerAccount,
 			VoucherURL:    order.PaymentInfo.VoucherURL,
+			UploadedBy:    order.PaymentInfo.UploadedBy,
+			UploadedAt:    order.PaymentInfo.UploadedAt,
+			CapturedAt:    order.PaymentInfo.CapturedAt,
+			GPSLatitude:   order.PaymentInfo.GPSLatitude,
+			GPSLongitude:  order.PaymentInfo.GPSLongitude,
 		}
 	}
 	var deliveryInfo *dto.DeliveryInfo
@@ -463,6 +553,33 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 			WarehouseName: order.DeliveryInfo.WarehouseName,
 			Address:       order.DeliveryInfo.Address,
 			EstimatedTime: order.DeliveryInfo.EstimatedTime,
+		}
+	}
+	var contractInfo *dto.ContractInfo
+	if order.ContractInfo != nil {
+		var signedAt *time.Time
+		if !order.ContractInfo.SignedAt.IsZero() {
+			signedAt = &order.ContractInfo.SignedAt
+		}
+		contractInfo = &dto.ContractInfo{
+			ContractNo:   order.ContractInfo.ContractNo,
+			ContractURL:  order.ContractInfo.ContractURL,
+			ContractHash: order.ContractInfo.ContractHash,
+			SignStatus:   contractSignStatus(order.ContractInfo),
+			BuyerSigned:  order.ContractInfo.BuyerSigned,
+			SellerSigned: order.ContractInfo.SellerSigned,
+			SignedAt:     signedAt,
+		}
+	}
+	var receiptInfo *dto.VoucherEvidence
+	if order.ReceiptInfo != nil {
+		receiptInfo = &dto.VoucherEvidence{
+			VoucherURL:   order.ReceiptInfo.VoucherURL,
+			UploadedBy:   order.ReceiptInfo.UploadedBy,
+			UploadedAt:   order.ReceiptInfo.UploadedAt,
+			CapturedAt:   order.ReceiptInfo.CapturedAt,
+			GPSLatitude:  order.ReceiptInfo.GPSLatitude,
+			GPSLongitude: order.ReceiptInfo.GPSLongitude,
 		}
 	}
 	return &dto.OrderInfo{
@@ -481,9 +598,11 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		Expired:        isOrderExpired(order),
 		ExpiresAt:      order.ExpiresAt,
 		CreatedAt:      order.CreatedAt,
+		ContractInfo:   contractInfo,
 		PaymentInfo:    paymentInfo,
 		DeliveryInfo:   deliveryInfo,
 		ReceiptVoucher: order.ReceiptVoucher,
+		ReceiptInfo:    receiptInfo,
 		ReceiptAt:      order.ReceiptAt,
 		Timeline:       buildOrderTimeline(order),
 	}
@@ -503,6 +622,89 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Time:        &order.CreatedAt,
 			Description: "买家已提交订单，系统锁定对应库存。",
 		},
+	}
+
+	if status >= orderEntity.OrderStatusPendingContract {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "completed",
+			Time:        &order.UpdatedAt,
+			Description: "卖家已确认订单，等待双方签署合同。",
+		})
+	} else if status == orderEntity.OrderStatusPendingConfirm {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "current",
+			Description: "等待卖家确认订单。",
+		})
+	} else if status == orderEntity.OrderStatusCancelled {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "skipped",
+			Description: "订单已关闭，卖家未确认。",
+		})
+	} else {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "pending",
+			Description: "等待卖家确认订单。",
+		})
+	}
+
+	if status >= orderEntity.OrderStatusPendingPayment {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "completed",
+			Time:        &order.UpdatedAt,
+			Description: "买卖双方已签署合同，等待买家支付。",
+		})
+	} else if status == orderEntity.OrderStatusPendingContract {
+		buyerSigned := order.ContractInfo != nil && order.ContractInfo.BuyerSigned
+		sellerSigned := order.ContractInfo != nil && order.ContractInfo.SellerSigned
+		if buyerSigned || sellerSigned {
+			items = append(items, dto.TimelineItem{
+				Key:    "contract_signed",
+				Label:  "双方签署合同",
+				Status: "current",
+				Description: fmt.Sprintf("%s已签署，等待%s签署。", func() string {
+					if buyerSigned {
+						return "买家"
+					}
+					return "卖家"
+				}(), func() string {
+					if !buyerSigned {
+						return "买家"
+					}
+					return "卖家"
+				}()),
+			})
+		} else {
+			items = append(items, dto.TimelineItem{
+				Key:         "contract_signed",
+				Label:       "双方签署合同",
+				Status:      "current",
+				Description: "等待买卖双方签署合同。",
+			})
+		}
+	} else if status == orderEntity.OrderStatusCancelled {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "skipped",
+			Description: "订单已关闭，合同未签署。",
+		})
+	} else {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "pending",
+			Description: "卖家确认订单后，双方签署合同。",
+		})
 	}
 
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
@@ -774,6 +976,46 @@ func isOrderExpired(order *orderEntity.Order) bool {
 
 func generatePickupCode() string {
 	return fmt.Sprintf("PK%s", time.Now().Format("0102150405"))
+}
+
+func ensureContractInfo(order *orderEntity.Order) {
+	if order == nil {
+		return
+	}
+	if order.ContractInfo == nil {
+		order.ContractInfo = &orderEntity.ContractInfo{}
+	}
+	if order.ContractInfo.ContractNo == "" {
+		order.ContractInfo.ContractNo = fmt.Sprintf("CT%s", strings.TrimPrefix(order.OrderNo, "O"))
+	}
+	if order.ContractInfo.ContractURL == "" {
+		order.ContractInfo.ContractURL = fmt.Sprintf("https://steellink.local/contracts/%s.pdf", order.ContractInfo.ContractNo)
+	}
+	if order.ContractInfo.ContractHash == "" {
+		sum := sha256.Sum256([]byte(order.OrderNo + ":" + order.ContractInfo.ContractNo))
+		order.ContractInfo.ContractHash = fmt.Sprintf("%x", sum)
+	}
+}
+
+func contractSignStatus(contract *orderEntity.ContractInfo) string {
+	if contract == nil {
+		return "pending"
+	}
+	if contract.BuyerSigned && contract.SellerSigned {
+		return "signed"
+	}
+	if contract.BuyerSigned || contract.SellerSigned {
+		return "partial"
+	}
+	return "pending"
+}
+
+func isHTTPURL(value string) bool {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func checkOrderFrozenOrException(order *orderEntity.Order) error {

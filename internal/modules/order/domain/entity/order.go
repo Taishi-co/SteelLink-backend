@@ -120,6 +120,11 @@ type PaymentInfo struct {
 	PayeeAccount  string    `json:"payee_account"`  // 收款人账户
 	PayerAccount  string    `json:"payer_account"`  // 付款人账户
 	VoucherURL    string    `json:"voucher_url"`    // 支付凭证URL
+	UploadedBy    uint64    `json:"uploaded_by"`    // 上传人
+	UploadedAt    time.Time `json:"uploaded_at"`    // 上传时间
+	CapturedAt    string    `json:"captured_at"`    // 凭证水印时间
+	GPSLatitude   *float64  `json:"gps_latitude"`   // 凭证GPS纬度
+	GPSLongitude  *float64  `json:"gps_longitude"`  // 凭证GPS经度
 }
 
 // Value 实现driver.Valuer接口
@@ -166,6 +171,33 @@ func (c *ContractInfo) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, c)
 }
 
+// VoucherEvidence 凭证留痕信息
+type VoucherEvidence struct {
+	VoucherURL   string    `json:"voucher_url"`   // 凭证URL
+	UploadedBy   uint64    `json:"uploaded_by"`   // 上传人
+	UploadedAt   time.Time `json:"uploaded_at"`   // 上传时间
+	CapturedAt   string    `json:"captured_at"`   // 凭证水印时间
+	GPSLatitude  *float64  `json:"gps_latitude"`  // 凭证GPS纬度
+	GPSLongitude *float64  `json:"gps_longitude"` // 凭证GPS经度
+}
+
+// Value 实现driver.Valuer接口
+func (v VoucherEvidence) Value() (driver.Value, error) {
+	return json.Marshal(v)
+}
+
+// Scan 实现sql.Scanner接口
+func (v *VoucherEvidence) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, v)
+}
+
 // Remark 备注字段JSON结构
 type Remark map[string]interface{}
 
@@ -192,33 +224,34 @@ func (r *Remark) Scan(value interface{}) error {
 
 // Order 订单实体
 type Order struct {
-	ID                 uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrderNo            string         `gorm:"type:varchar(32);uniqueIndex;comment:订单编号" json:"order_no"`
-	BuyerID            uint64         `gorm:"index;comment:买家企业ID" json:"buyer_id"`
-	SellerEnterpriseID uint64         `gorm:"column:seller_enterprise_id;index;comment:卖家企业ID兼容字段" json:"seller_enterprise_id"`
-	BuyerName          string         `gorm:"type:varchar(200);comment:买家企业名称" json:"buyer_name"`
-	SellerID           uint64         `gorm:"index;comment:卖家企业ID" json:"seller_id"`
-	SellerName         string         `gorm:"type:varchar(200);comment:卖家企业名称" json:"seller_name"`
-	Items              OrderItems     `gorm:"type:json;comment:订单项" json:"items"`
-	TotalQuantity      float64        `gorm:"type:decimal(10,2);comment:总数量(吨)" json:"total_quantity"`
-	TotalAmount        float64        `gorm:"type:decimal(12,2);comment:总金额(元)" json:"total_amount"`
-	TaxTotalAmount     float64        `gorm:"type:decimal(12,2);comment:含税总金额(元)" json:"tax_total_amount"`
-	Currency           string         `gorm:"type:varchar(10);default:CNY;comment:币种" json:"currency"`
-	Status             OrderStatus    `gorm:"type:tinyint;default:0;comment:订单状态" json:"status"`
-	ContractInfo       *ContractInfo  `gorm:"type:json;comment:合同信息" json:"contract_info"`
-	PaymentInfo        *PaymentInfo   `gorm:"type:json;comment:支付信息" json:"payment_info"`
-	DeliveryInfo       *DeliveryInfo  `gorm:"type:json;comment:配送信息" json:"delivery_info"`
-	DeliveryVoucher    string         `gorm:"type:varchar(500);comment:配送凭证URL" json:"delivery_voucher"`
-	ReceiptVoucher     string         `gorm:"type:varchar(500);comment:签收凭证URL" json:"receipt_voucher"`
-	ReceiptAt          *time.Time     `gorm:"comment:签收时间" json:"receipt_at"`
-	ExpiresAt          *time.Time     `gorm:"index;comment:过期时间" json:"expires_at"`
-	FinanceID          uint64         `gorm:"index;comment:关联融资申请ID" json:"finance_id"`
-	Remark             Remark         `gorm:"type:json;comment:备注" json:"remark"`
-	CreatedBy          uint64         `gorm:"comment:创建者" json:"created_by"`
-	CreatedAt          time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
-	UpdatedBy          uint64         `gorm:"comment:修改者" json:"updated_by"`
-	UpdatedAt          time.Time      `gorm:"autoUpdateTime;comment:修改时间" json:"updated_at"`
-	DeletedAt          gorm.DeletedAt `gorm:"index;comment:删除时间" json:"-"`
+	ID                 uint64           `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderNo            string           `gorm:"type:varchar(32);uniqueIndex;comment:订单编号" json:"order_no"`
+	BuyerID            uint64           `gorm:"index;comment:买家企业ID" json:"buyer_id"`
+	SellerEnterpriseID uint64           `gorm:"column:seller_enterprise_id;index;comment:卖家企业ID兼容字段" json:"seller_enterprise_id"`
+	BuyerName          string           `gorm:"type:varchar(200);comment:买家企业名称" json:"buyer_name"`
+	SellerID           uint64           `gorm:"index;comment:卖家企业ID" json:"seller_id"`
+	SellerName         string           `gorm:"type:varchar(200);comment:卖家企业名称" json:"seller_name"`
+	Items              OrderItems       `gorm:"type:json;comment:订单项" json:"items"`
+	TotalQuantity      float64          `gorm:"type:decimal(10,2);comment:总数量(吨)" json:"total_quantity"`
+	TotalAmount        float64          `gorm:"type:decimal(12,2);comment:总金额(元)" json:"total_amount"`
+	TaxTotalAmount     float64          `gorm:"type:decimal(12,2);comment:含税总金额(元)" json:"tax_total_amount"`
+	Currency           string           `gorm:"type:varchar(10);default:CNY;comment:币种" json:"currency"`
+	Status             OrderStatus      `gorm:"type:tinyint;default:0;comment:订单状态" json:"status"`
+	ContractInfo       *ContractInfo    `gorm:"type:json;comment:合同信息" json:"contract_info"`
+	PaymentInfo        *PaymentInfo     `gorm:"type:json;comment:支付信息" json:"payment_info"`
+	DeliveryInfo       *DeliveryInfo    `gorm:"type:json;comment:配送信息" json:"delivery_info"`
+	DeliveryVoucher    string           `gorm:"type:varchar(500);comment:配送凭证URL" json:"delivery_voucher"`
+	ReceiptVoucher     string           `gorm:"type:varchar(500);comment:签收凭证URL" json:"receipt_voucher"`
+	ReceiptInfo        *VoucherEvidence `gorm:"type:json;comment:签收凭证留痕信息" json:"receipt_info"`
+	ReceiptAt          *time.Time       `gorm:"comment:签收时间" json:"receipt_at"`
+	ExpiresAt          *time.Time       `gorm:"index;comment:过期时间" json:"expires_at"`
+	FinanceID          uint64           `gorm:"index;comment:关联融资申请ID" json:"finance_id"`
+	Remark             Remark           `gorm:"type:json;comment:备注" json:"remark"`
+	CreatedBy          uint64           `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt          time.Time        `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedBy          uint64           `gorm:"comment:修改者" json:"updated_by"`
+	UpdatedAt          time.Time        `gorm:"autoUpdateTime;comment:修改时间" json:"updated_at"`
+	DeletedAt          gorm.DeletedAt   `gorm:"index;comment:删除时间" json:"-"`
 }
 
 // TableName 指定表名

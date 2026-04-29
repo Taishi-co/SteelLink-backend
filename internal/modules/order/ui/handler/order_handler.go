@@ -105,6 +105,44 @@ func (h *OrderHandler) Cancel(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OrderHandler) ConfirmOrder(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.ConfirmOrder(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) SignContract(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.SignContract(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) UploadPaymentVoucher(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
@@ -183,7 +221,12 @@ func (h *OrderHandler) ConfirmOutbound(c *gin.Context) {
 		response.BadRequest(c, "无效的订单ID")
 		return
 	}
-	result, svcErr := h.orderService.ConfirmOutbound(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	var req dto.VerifyPickupCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.ConfirmOutbound(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
