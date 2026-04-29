@@ -330,6 +330,11 @@ func (s *AuthService) resolveEnterpriseInfo(ctx context.Context, user *entity.Us
 		return 0, "", "", ecode.ErrEnterpriseNotFound
 	}
 
+	if enterprise.IsApproved() && user.Role == entity.TypePersonal {
+		_ = s.userRepo.UpdateRoleByEnterpriseCode(ctx, enterprise.EnterpriseCode, entity.TypeEnterprise, user.ID)
+		user.Role = entity.TypeEnterprise
+	}
+
 	return enterprise.ID, enterprise.EnterpriseCode, enterprise.EnterpriseRole, nil
 }
 

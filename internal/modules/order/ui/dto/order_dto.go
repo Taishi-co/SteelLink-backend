@@ -59,11 +59,20 @@ type OrderInfo struct {
 	Expired        bool            `json:"expired"`
 	ExpiresAt      *time.Time      `json:"expires_at,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
+	ContractInfo   *ContractInfo   `json:"contract_info,omitempty"`
 	PaymentInfo    *PaymentInfo    `json:"payment_info,omitempty"`
 	DeliveryInfo   *DeliveryInfo   `json:"delivery_info,omitempty"`
 	ReceiptVoucher string          `json:"receipt_voucher,omitempty"`
 	ReceiptAt      *time.Time      `json:"receipt_at,omitempty"`
 	Timeline       []TimelineItem  `json:"timeline"`
+}
+
+type ContractInfo struct {
+	ContractNo   string    `json:"contract_no,omitempty"`
+	ContractURL  string    `json:"contract_url,omitempty"`
+	BuyerSigned  bool      `json:"buyer_signed"`
+	SellerSigned bool      `json:"seller_signed"`
+	SignedAt     *time.Time `json:"signed_at,omitempty"`
 }
 
 type PaymentInfo struct {

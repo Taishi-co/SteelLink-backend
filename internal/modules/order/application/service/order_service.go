@@ -92,7 +92,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 			},
 		},
 		Currency:  product.Currency,
-		Status:    orderEntity.OrderStatusPendingPayment,
+		Status:    orderEntity.OrderStatusPendingConfirm,
 		CreatedBy: userID,
 		UpdatedBy: userID,
 	}
@@ -173,7 +173,10 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权取消该订单")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
+	currentStatus := effectiveOrderStatus(order)
+	if currentStatus != orderEntity.OrderStatusPendingPayment &&
+		currentStatus != orderEntity.OrderStatusPendingConfirm &&
+		currentStatus != orderEntity.OrderStatusPendingContract {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可取消")
 	}
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
@@ -212,6 +215,60 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 		return nil, ecode.ErrDatabase.WithMessage("取消订单失败")
 	}
 
+	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) ConfirmOrder(ctx context.Context, id, sellerEnterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.SellerID != sellerEnterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单")
+	}
+	if order.Status != orderEntity.OrderStatusPendingConfirm {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态无需确认")
+	}
+	order.Status = orderEntity.OrderStatusPendingContract
+	order.UpdatedBy = operatorID
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("确认订单失败")
+	}
+	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.BuyerID != enterpriseID && order.SellerID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权签署该订单合同")
+	}
+	if order.Status != orderEntity.OrderStatusPendingContract {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署合同")
+	}
+	if order.ContractInfo == nil {
+		order.ContractInfo = &orderEntity.ContractInfo{}
+	}
+	if order.BuyerID == enterpriseID {
+		order.ContractInfo.BuyerSigned = true
+	} else {
+		order.ContractInfo.SellerSigned = true
+	}
+	order.UpdatedBy = operatorID
+	if order.ContractInfo.BuyerSigned && order.ContractInfo.SellerSigned {
+		order.Status = orderEntity.OrderStatusPendingPayment
+	}
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("签署合同失败")
+	}
 	return toOrderInfo(order), nil
 }
 
@@ -465,6 +522,15 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 			EstimatedTime: order.DeliveryInfo.EstimatedTime,
 		}
 	}
+	var contractInfo *dto.ContractInfo
+	if order.ContractInfo != nil {
+		contractInfo = &dto.ContractInfo{
+			ContractNo:   order.ContractInfo.ContractNo,
+			ContractURL:  order.ContractInfo.ContractURL,
+			BuyerSigned:  order.ContractInfo.BuyerSigned,
+			SellerSigned: order.ContractInfo.SellerSigned,
+		}
+	}
 	return &dto.OrderInfo{
 		ID:             order.ID,
 		OrderNo:        order.OrderNo,
@@ -481,6 +547,7 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		Expired:        isOrderExpired(order),
 		ExpiresAt:      order.ExpiresAt,
 		CreatedAt:      order.CreatedAt,
+		ContractInfo:   contractInfo,
 		PaymentInfo:    paymentInfo,
 		DeliveryInfo:   deliveryInfo,
 		ReceiptVoucher: order.ReceiptVoucher,
@@ -503,6 +570,89 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Time:        &order.CreatedAt,
 			Description: "买家已提交订单，系统锁定对应库存。",
 		},
+	}
+
+	if status >= orderEntity.OrderStatusPendingContract {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "completed",
+			Time:        &order.UpdatedAt,
+			Description: "卖家已确认订单，等待双方签署合同。",
+		})
+	} else if status == orderEntity.OrderStatusPendingConfirm {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "current",
+			Description: "等待卖家确认订单。",
+		})
+	} else if status == orderEntity.OrderStatusCancelled {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "skipped",
+			Description: "订单已关闭，卖家未确认。",
+		})
+	} else {
+		items = append(items, dto.TimelineItem{
+			Key:         "order_confirmed",
+			Label:       "卖家确认订单",
+			Status:      "pending",
+			Description: "等待卖家确认订单。",
+		})
+	}
+
+	if status >= orderEntity.OrderStatusPendingPayment {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "completed",
+			Time:        &order.UpdatedAt,
+			Description: "买卖双方已签署合同，等待买家支付。",
+		})
+	} else if status == orderEntity.OrderStatusPendingContract {
+		buyerSigned := order.ContractInfo != nil && order.ContractInfo.BuyerSigned
+		sellerSigned := order.ContractInfo != nil && order.ContractInfo.SellerSigned
+		if buyerSigned || sellerSigned {
+			items = append(items, dto.TimelineItem{
+				Key:    "contract_signed",
+				Label:  "双方签署合同",
+				Status: "current",
+				Description: fmt.Sprintf("%s已签署，等待%s签署。", func() string {
+					if buyerSigned {
+						return "买家"
+					}
+					return "卖家"
+				}(), func() string {
+					if !buyerSigned {
+						return "买家"
+					}
+					return "卖家"
+				}()),
+			})
+		} else {
+			items = append(items, dto.TimelineItem{
+				Key:         "contract_signed",
+				Label:       "双方签署合同",
+				Status:      "current",
+				Description: "等待买卖双方签署合同。",
+			})
+		}
+	} else if status == orderEntity.OrderStatusCancelled {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "skipped",
+			Description: "订单已关闭，合同未签署。",
+		})
+	} else {
+		items = append(items, dto.TimelineItem{
+			Key:         "contract_signed",
+			Label:       "双方签署合同",
+			Status:      "pending",
+			Description: "卖家确认订单后，双方签署合同。",
+		})
 	}
 
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
