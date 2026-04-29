@@ -14,6 +14,12 @@ type UploadPaymentVoucherRequest struct {
 	PayeeAccount  string `json:"payee_account"`
 }
 
+type AttachContractRequest struct {
+	ContractNo   string `json:"contract_no"`
+	ContractURL  string `json:"contract_url" binding:"required"`
+	ContractHash string `json:"contract_hash"`
+}
+
 type SetDeliveryInfoRequest struct {
 	DriverName    string `json:"driver_name" binding:"required"`
 	DriverPhone   string `json:"driver_phone" binding:"required"`
@@ -68,10 +74,11 @@ type OrderInfo struct {
 }
 
 type ContractInfo struct {
-	ContractNo   string    `json:"contract_no,omitempty"`
-	ContractURL  string    `json:"contract_url,omitempty"`
-	BuyerSigned  bool      `json:"buyer_signed"`
-	SellerSigned bool      `json:"seller_signed"`
+	ContractNo   string     `json:"contract_no,omitempty"`
+	ContractURL  string     `json:"contract_url,omitempty"`
+	ContractHash string     `json:"contract_hash,omitempty"`
+	BuyerSigned  bool       `json:"buyer_signed"`
+	SellerSigned bool       `json:"seller_signed"`
 	SignedAt     *time.Time `json:"signed_at,omitempty"`
 }
 
