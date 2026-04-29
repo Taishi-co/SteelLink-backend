@@ -18,6 +18,15 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	autoReceiptTimeout        = 7 * 24 * time.Hour
+	autoReceiptVoucher        = "AUTO_CONFIRMED_BY_TIMEOUT"
+	autoReceiptSource         = "system_timeout"
+	autoReceiptReason         = "delivering_timeout"
+	autoReceiptTimeoutDays    = 7
+	autoReceiptTriggeredAtKey = "receipt_auto_triggered_at"
+)
+
 type OrderService struct {
 	orderRepo      orderRepository.OrderRepository
 	productRepo    productRepository.ProductRepository
@@ -834,13 +843,19 @@ func (s *OrderService) reconcileOrderState(ctx context.Context, order *orderEnti
 	}
 
 	if order.Status == orderEntity.OrderStatusDelivering {
-		receiptTimeout := 7 * 24 * time.Hour
-		if order.UpdatedAt.Before(time.Now().Add(-receiptTimeout)) {
+		if order.UpdatedAt.Before(time.Now().Add(-autoReceiptTimeout)) {
 			now := time.Now()
-			order.ReceiptVoucher = ""
+			order.ReceiptVoucher = autoReceiptVoucher
 			order.ReceiptAt = &now
 			order.Status = orderEntity.OrderStatusCompleted
 			order.UpdatedBy = 0
+			if order.Remark == nil {
+				order.Remark = orderEntity.Remark{}
+			}
+			order.Remark["receipt_confirm_source"] = autoReceiptSource
+			order.Remark["receipt_confirm_reason"] = autoReceiptReason
+			order.Remark["receipt_timeout_days"] = autoReceiptTimeoutDays
+			order.Remark[autoReceiptTriggeredAtKey] = now.Format(time.RFC3339)
 			if err := s.orderRepo.Update(ctx, order); err != nil {
 				return ecode.ErrDatabase.WithMessage("签收超时自动确认失败")
 			}
