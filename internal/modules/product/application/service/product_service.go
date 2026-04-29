@@ -150,6 +150,47 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 	}, nil
 }
 
+// UpdateDisplay 更新商品展示/审核补充资料，不允许修改捆包号、库存、价格、规格、仓库等关键交易字段。
+func (s *ProductService) UpdateDisplay(ctx context.Context, id uint64, req *dto.UpdateProductDisplayRequest, operatorID, enterpriseID uint64) (*dto.ProductInfo, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业用户才能修改商品资料")
+	}
+
+	product, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if product == nil {
+		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
+	}
+	if product.EnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权修改该商品")
+	}
+	if len(req.Images) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请至少保留 1 张商品主图")
+	}
+
+	product.Images = entity.StringList(req.Images)
+	product.QualityCert = req.QualityCert
+	product.Description = req.Description
+	if req.DeliveryDays > 0 {
+		product.DeliveryDays = req.DeliveryDays
+	}
+	if req.QuoteValidity > 0 {
+		product.QuoteValidity = req.QuoteValidity
+	}
+	product.Status = entity.ProductStatusPending
+	product.AuditRemark = ""
+	product.ApprovedAt = nil
+	product.UpdatedBy = operatorID
+
+	if err := s.productRepo.Update(ctx, product); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新商品资料失败")
+	}
+
+	return toProductInfo(product), nil
+}
+
 // UpdateStatus 更新商品审核/上下架状态
 func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int, operatorID uint64) error {
 	product, err := s.productRepo.FindByID(ctx, id)

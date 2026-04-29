@@ -56,6 +56,14 @@ type UpdateProductRequest struct {
 	QuoteValidity int            `json:"quote_validity"`
 }
 
+type UpdateProductDisplayRequest struct {
+	Images        []string `json:"images" binding:"required,min=1"`
+	QualityCert   string   `json:"quality_cert"`
+	Description   string   `json:"description"`
+	DeliveryDays  int      `json:"delivery_days"`
+	QuoteValidity int      `json:"quote_validity"`
+}
+
 type ProductInfo struct {
 	ID            uint64        `json:"id"`
 	ProductNo     string        `json:"product_no"`

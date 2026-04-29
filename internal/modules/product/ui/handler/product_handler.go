@@ -3,12 +3,12 @@ package handler
 import (
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/application/service"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 // ProductHandler 商品处理器
@@ -62,6 +62,36 @@ func (h *ProductHandler) GetByID(c *gin.Context) {
 	} else {
 		result, svcErr = h.productService.GetByID(c.Request.Context(), id)
 	}
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// UpdateDisplay 更新商品展示/审核补充资料
+func (h *ProductHandler) UpdateDisplay(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的商品ID")
+		return
+	}
+
+	var req dto.UpdateProductDisplayRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, svcErr := h.productService.UpdateDisplay(c.Request.Context(), id, &req, userID, claims.EnterpriseID)
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
