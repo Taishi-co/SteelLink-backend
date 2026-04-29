@@ -1,9 +1,9 @@
 package router
 
 import (
-	"github.com/gin-gonic/gin"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/ui/handler"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 func RegisterRoutes(r *gin.RouterGroup) {
@@ -16,6 +16,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	products.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{
 		products.POST("", productHandler.Create)
+		products.PUT("/:id/display", productHandler.UpdateDisplay)
 		products.PUT("/:id/status", productHandler.UpdateStatus)
 	}
 }
