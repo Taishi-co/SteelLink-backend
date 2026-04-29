@@ -18,6 +18,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("/:id/cancel", orderHandler.Cancel)
 		orders.POST("/:id/confirm", orderHandler.ConfirmOrder)
 		orders.POST("/:id/sign-contract", orderHandler.SignContract)
+		orders.POST("/:id/contract", orderHandler.AttachContract)
 		orders.POST("/:id/payment-voucher", orderHandler.UploadPaymentVoucher)
 		orders.POST("/:id/confirm-payment", orderHandler.ConfirmPayment)
 		orders.POST("/:id/delivery-info", orderHandler.SetDeliveryInfo)

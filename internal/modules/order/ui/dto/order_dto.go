@@ -17,6 +17,12 @@ type UploadPaymentVoucherRequest struct {
 	GPSLongitude  *float64 `json:"gps_longitude"`
 }
 
+type AttachContractRequest struct {
+	ContractNo   string `json:"contract_no"`
+	ContractURL  string `json:"contract_url" binding:"required"`
+	ContractHash string `json:"contract_hash"`
+}
+
 type SetDeliveryInfoRequest struct {
 	DriverName    string `json:"driver_name" binding:"required"`
 	DriverPhone   string `json:"driver_phone" binding:"required"`

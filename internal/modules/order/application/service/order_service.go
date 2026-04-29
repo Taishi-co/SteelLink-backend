@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/contract"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"gorm.io/gorm"
@@ -34,6 +34,7 @@ type OrderService struct {
 	orderRepo      orderRepository.OrderRepository
 	productRepo    productRepository.ProductRepository
 	enterpriseRepo userRepository.EnterpriseRepository
+	contract       contract.Provider
 }
 
 func NewOrderService() *OrderService {
@@ -41,6 +42,7 @@ func NewOrderService() *OrderService {
 		orderRepo:      orderPersistence.NewOrderRepository(),
 		productRepo:    productPersistence.NewProductRepository(),
 		enterpriseRepo: userPersistence.NewEnterpriseRepository(),
+		contract:       contract.NewProvider(),
 	}
 }
 
@@ -244,8 +246,10 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, id, sellerEnterpriseID,
 	if order.Status != orderEntity.OrderStatusPendingConfirm {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态无需确认")
 	}
+	if err := s.ensureContract(ctx, order); err != nil {
+		return nil, err
+	}
 	order.Status = orderEntity.OrderStatusPendingContract
-	ensureContractInfo(order)
 	order.UpdatedBy = operatorID
 	if err := s.orderRepo.Update(ctx, order); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认订单失败")
@@ -267,20 +271,75 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if order.Status != orderEntity.OrderStatusPendingContract {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署合同")
 	}
-	ensureContractInfo(order)
+	if err := s.ensureContract(ctx, order); err != nil {
+		return nil, err
+	}
+	signer := "seller"
 	if order.BuyerID == enterpriseID {
+		signer = "buyer"
 		order.ContractInfo.BuyerSigned = true
 	} else {
 		order.ContractInfo.SellerSigned = true
 	}
+	signResult, err := s.contract.Sign(ctx, contract.SignRequest{
+		ContractNo: order.ContractInfo.ContractNo,
+		Signer:     signer,
+	})
+	if err != nil {
+		return nil, ecode.ErrBadRequest.WithMessage("签署合同失败: " + err.Error())
+	}
 	order.UpdatedBy = operatorID
 	if order.ContractInfo.BuyerSigned && order.ContractInfo.SellerSigned {
-		now := time.Now()
-		order.ContractInfo.SignedAt = now
+		order.ContractInfo.SignedAt = signResult.SignedAt
 		order.Status = orderEntity.OrderStatusPendingPayment
 	}
 	if err := s.orderRepo.Update(ctx, order); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("签署合同失败")
+	}
+	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) AttachContract(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.AttachContractRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.BuyerID != enterpriseID && order.SellerID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权绑定该订单合同")
+	}
+	if order.Status != orderEntity.OrderStatusPendingContract {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可绑定合同")
+	}
+	if !isHTTPURL(req.ContractURL) {
+		return nil, ecode.ErrBadRequest.WithMessage("合同URL必须是有效的HTTP/HTTPS地址")
+	}
+
+	contractNo := req.ContractNo
+	if contractNo == "" && order.ContractInfo != nil {
+		contractNo = order.ContractInfo.ContractNo
+	}
+	if contractNo == "" {
+		contractNo = fmt.Sprintf("HT%s%s", time.Now().Format("20060102"), order.OrderNo)
+	}
+
+	info := &orderEntity.ContractInfo{
+		ContractNo:   contractNo,
+		ContractURL:  req.ContractURL,
+		ContractHash: req.ContractHash,
+	}
+	if order.ContractInfo != nil {
+		info.BuyerSigned = order.ContractInfo.BuyerSigned
+		info.SellerSigned = order.ContractInfo.SellerSigned
+		info.SignedAt = order.ContractInfo.SignedAt
+	}
+	order.ContractInfo = info
+	order.UpdatedBy = operatorID
+
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("绑定合同失败")
 	}
 	return toOrderInfo(order), nil
 }
@@ -993,23 +1052,35 @@ func generatePickupCode() string {
 	return fmt.Sprintf("PK%s", time.Now().Format("0102150405"))
 }
 
-func ensureContractInfo(order *orderEntity.Order) {
-	if order == nil {
-		return
+func (s *OrderService) ensureContract(ctx context.Context, order *orderEntity.Order) error {
+	if order.ContractInfo != nil && order.ContractInfo.ContractNo != "" && order.ContractInfo.ContractURL != "" {
+		return nil
 	}
-	if order.ContractInfo == nil {
-		order.ContractInfo = &orderEntity.ContractInfo{}
+
+	doc, err := s.contract.Create(ctx, contract.OrderSnapshot{
+		OrderNo:     order.OrderNo,
+		BuyerName:   order.BuyerName,
+		SellerName:  order.SellerName,
+		Amount:      order.TotalAmount,
+		Currency:    order.Currency,
+		ConfirmedAt: time.Now(),
+	})
+	if err != nil {
+		return ecode.ErrBadRequest.WithMessage("生成合同失败: " + err.Error())
 	}
-	if order.ContractInfo.ContractNo == "" {
-		order.ContractInfo.ContractNo = fmt.Sprintf("CT%s", strings.TrimPrefix(order.OrderNo, "O"))
+
+	info := &orderEntity.ContractInfo{
+		ContractNo:   doc.ContractNo,
+		ContractURL:  doc.ContractURL,
+		ContractHash: doc.ContractHash,
 	}
-	if order.ContractInfo.ContractURL == "" {
-		order.ContractInfo.ContractURL = fmt.Sprintf("https://steellink.local/contracts/%s.pdf", order.ContractInfo.ContractNo)
+	if order.ContractInfo != nil {
+		info.BuyerSigned = order.ContractInfo.BuyerSigned
+		info.SellerSigned = order.ContractInfo.SellerSigned
+		info.SignedAt = order.ContractInfo.SignedAt
 	}
-	if order.ContractInfo.ContractHash == "" {
-		sum := sha256.Sum256([]byte(order.OrderNo + ":" + order.ContractInfo.ContractNo))
-		order.ContractInfo.ContractHash = fmt.Sprintf("%x", sum)
-	}
+	order.ContractInfo = info
+	return nil
 }
 
 func contractSignStatus(contract *orderEntity.ContractInfo) string {
