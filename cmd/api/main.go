@@ -103,6 +103,9 @@ func main() {
 		if err := userPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate user tables", zap.Error(err))
 		}
+		if err := repairLegacyEnterpriseUserRoles(database.GetDB()); err != nil {
+			logger.Fatal("Failed to repair legacy enterprise user roles", zap.Error(err))
+		}
 		if err := tradepersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
 		}
@@ -230,6 +233,25 @@ func main() {
 	}
 
 	logger.Info("Server exited")
+}
+
+func repairLegacyEnterpriseUserRoles(db *gorm.DB) error {
+	if !db.Migrator().HasTable("users") || !db.Migrator().HasTable("enterprises") {
+		return nil
+	}
+
+	return db.Exec(`
+		UPDATE users u
+		INNER JOIN enterprises e ON e.enterprise_code = u.enterprise_code
+		SET u.role = 'enterprise',
+			u.updated_by = 0,
+			u.updated_at = NOW()
+		WHERE u.deleted_at IS NULL
+		  AND e.deleted_at IS NULL
+		  AND e.status = 1
+		  AND COALESCE(u.enterprise_code, '') <> ''
+		  AND u.role = 'personal'
+	`).Error
 }
 
 func normalizeLegacyJSONColumns(db *gorm.DB) error {
