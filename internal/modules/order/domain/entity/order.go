@@ -236,7 +236,7 @@ type Order struct {
 	TotalAmount        float64          `gorm:"type:decimal(12,2);comment:总金额(元)" json:"total_amount"`
 	TaxTotalAmount     float64          `gorm:"type:decimal(12,2);comment:含税总金额(元)" json:"tax_total_amount"`
 	Currency           string           `gorm:"type:varchar(10);default:CNY;comment:币种" json:"currency"`
-	Status             OrderStatus      `gorm:"type:tinyint;default:0;comment:订单状态" json:"status"`
+	Status             OrderStatus      `gorm:"type:tinyint;default:3;comment:订单状态" json:"status"`
 	ContractInfo       *ContractInfo    `gorm:"type:json;comment:合同信息" json:"contract_info"`
 	PaymentInfo        *PaymentInfo     `gorm:"type:json;comment:支付信息" json:"payment_info"`
 	DeliveryInfo       *DeliveryInfo    `gorm:"type:json;comment:配送信息" json:"delivery_info"`

@@ -187,10 +187,9 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权取消该订单")
 	}
-	currentStatus := effectiveOrderStatus(order)
-	if currentStatus != orderEntity.OrderStatusPendingPayment &&
-		currentStatus != orderEntity.OrderStatusPendingConfirm &&
-		currentStatus != orderEntity.OrderStatusPendingContract {
+	if order.Status != orderEntity.OrderStatusPendingPayment &&
+		order.Status != orderEntity.OrderStatusPendingConfirm &&
+		order.Status != orderEntity.OrderStatusPendingContract {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可取消")
 	}
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
@@ -391,7 +390,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权上传支付凭证")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingPayment {
+	if order.Status != orderEntity.OrderStatusPendingPayment {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可上传支付凭证")
 	}
 	if !isHTTPURL(req.VoucherURL) {
@@ -413,6 +412,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 		GPSLatitude:   req.GPSLatitude,
 		GPSLongitude:  req.GPSLongitude,
 	}
+	order.Status = orderEntity.OrderStatusPaid
 	order.UpdatedBy = operatorID
 
 	if err := s.orderRepo.Update(ctx, order); err != nil {
@@ -441,7 +441,7 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收款")
 	}
-	currentStatus := effectiveOrderStatus(order)
+	currentStatus := order.Status
 	if currentStatus != orderEntity.OrderStatusPendingPayment && currentStatus != orderEntity.OrderStatusPaid {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收款")
 	}
@@ -471,7 +471,7 @@ func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, op
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权录入提货信息")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingDelivery {
+	if order.Status != orderEntity.OrderStatusPendingDelivery {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可录入提货信息")
 	}
 
@@ -515,7 +515,7 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	if order.SellerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认出库")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusPendingDelivery {
+	if order.Status != orderEntity.OrderStatusPendingDelivery {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认出库")
 	}
 	if order.DeliveryInfo == nil || order.DeliveryInfo.PickupCode == "" {
@@ -547,7 +547,7 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
 	}
-	if effectiveOrderStatus(order) != orderEntity.OrderStatusDelivering {
+	if order.Status != orderEntity.OrderStatusDelivering {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
 	}
 	if !isHTTPURL(req.ReceiptVoucher) {
@@ -662,7 +662,7 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		TotalAmount:    order.TotalAmount,
 		TaxTotalAmount: order.TaxTotalAmount,
 		Currency:       order.Currency,
-		Status:         int(effectiveOrderStatus(order)),
+		Status:         int(order.Status),
 		Expired:        isOrderExpired(order),
 		ExpiresAt:      order.ExpiresAt,
 		CreatedAt:      order.CreatedAt,
@@ -681,7 +681,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		return nil
 	}
 
-	status := effectiveOrderStatus(order)
+	status := order.Status
 	items := []dto.TimelineItem{
 		{
 			Key:         "created",
@@ -1008,38 +1008,11 @@ func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEn
 	return nil
 }
 
-func effectiveOrderStatus(order *orderEntity.Order) orderEntity.OrderStatus {
-	if order == nil {
-		return orderEntity.OrderStatusDraft
-	}
-	if order.Status != orderEntity.OrderStatusDraft {
-		if order.Status == orderEntity.OrderStatusPendingPayment && order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-			return orderEntity.OrderStatusPaid
-		}
-		return order.Status
-	}
-	// Draft 分支：当前 Create 方法不会产出 Draft 订单（Status 直接设为 PendingPayment），
-	// 此分支仅用于数据修复/迁移场景中可能存在的 Draft 订单，根据已有字段倒推实际状态。
-	if order.ReceiptAt != nil || order.ReceiptVoucher != "" {
-		return orderEntity.OrderStatusCompleted
-	}
-	if order.DeliveryInfo != nil && order.DeliveryInfo.PickupCode != "" {
-		return orderEntity.OrderStatusPendingDelivery
-	}
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		return orderEntity.OrderStatusPaid
-	}
-	return orderEntity.OrderStatusPendingPayment
-}
-
 func isOrderExpired(order *orderEntity.Order) bool {
 	if order == nil {
 		return false
 	}
 	if order.Status != orderEntity.OrderStatusPendingPayment {
-		return false
-	}
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
 		return false
 	}
 	if order.ExpiresAt == nil || order.ExpiresAt.After(time.Now()) {

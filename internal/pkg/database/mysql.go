@@ -20,7 +20,7 @@ func InitMySQL(cfg *config.DatabaseConfig) error {
 	var err error
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true, // use singular table name
+			SingularTable: true,
 		},
 	})
 	if err != nil {
@@ -32,7 +32,6 @@ func InitMySQL(cfg *config.DatabaseConfig) error {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
 	}
 
-	// Set connection pool
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)

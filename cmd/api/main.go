@@ -295,20 +295,21 @@ func normalizeLegacyStatusColumns(db *gorm.DB) error {
 	if isStringColumnType(productStatusType) {
 		stmt := `
 			UPDATE products
-			SET status = CASE LOWER(TRIM(status))
-				WHEN 'draft' THEN '0'
-				WHEN 'pending' THEN '1'
-				WHEN 'pending_review' THEN '1'
-				WHEN 'submitted' THEN '1'
-				WHEN 'approved' THEN '2'
-				WHEN 'on_sale' THEN '2'
-				WHEN 'onsale' THEN '2'
-				WHEN 'published' THEN '2'
-				WHEN 'off_sale' THEN '3'
-				WHEN 'offsale' THEN '3'
-				WHEN 'disabled' THEN '3'
-				WHEN 'rejected' THEN '4'
-				WHEN 'reject' THEN '4'
+			SET status = CASE
+				WHEN LOWER(TRIM(status)) = 'draft' THEN '0'
+				WHEN LOWER(TRIM(status)) = 'pending' THEN '1'
+				WHEN LOWER(TRIM(status)) = 'pending_review' THEN '1'
+				WHEN LOWER(TRIM(status)) = 'submitted' THEN '1'
+				WHEN LOWER(TRIM(status)) = 'approved' THEN '2'
+				WHEN LOWER(TRIM(status)) = 'on_sale' THEN '2'
+				WHEN LOWER(TRIM(status)) = 'onsale' THEN '2'
+				WHEN LOWER(TRIM(status)) = 'published' THEN '2'
+				WHEN LOWER(TRIM(status)) = 'off_sale' THEN '3'
+				WHEN LOWER(TRIM(status)) = 'offsale' THEN '3'
+				WHEN LOWER(TRIM(status)) = 'disabled' THEN '3'
+				WHEN LOWER(TRIM(status)) = 'rejected' THEN '4'
+				WHEN LOWER(TRIM(status)) = 'reject' THEN '4'
+				WHEN TRIM(status) REGEXP '^[0-9]+$' THEN TRIM(status)
 				ELSE '0'
 			END
 			WHERE status IS NOT NULL AND TRIM(status) <> ''
@@ -325,19 +326,20 @@ func normalizeLegacyStatusColumns(db *gorm.DB) error {
 	if isStringColumnType(orderStatusType) {
 		stmt := `
 			UPDATE orders
-			SET status = CASE LOWER(TRIM(status))
-				WHEN 'draft' THEN '0'
-				WHEN 'pending_confirm' THEN '1'
-				WHEN 'pending_contract' THEN '2'
-				WHEN 'pending_payment' THEN '3'
-				WHEN 'paid' THEN '4'
-				WHEN 'pending_delivery' THEN '5'
-				WHEN 'delivering' THEN '6'
-				WHEN 'delivered' THEN '7'
-				WHEN 'completed' THEN '8'
-				WHEN 'cancelled' THEN '9'
-				WHEN 'frozen' THEN '10'
-				WHEN 'exception' THEN '11'
+			SET status = CASE
+				WHEN LOWER(TRIM(status)) = 'draft' THEN '0'
+				WHEN LOWER(TRIM(status)) = 'pending_confirm' THEN '1'
+				WHEN LOWER(TRIM(status)) = 'pending_contract' THEN '2'
+				WHEN LOWER(TRIM(status)) = 'pending_payment' THEN '3'
+				WHEN LOWER(TRIM(status)) = 'paid' THEN '4'
+				WHEN LOWER(TRIM(status)) = 'pending_delivery' THEN '5'
+				WHEN LOWER(TRIM(status)) = 'delivering' THEN '6'
+				WHEN LOWER(TRIM(status)) = 'delivered' THEN '7'
+				WHEN LOWER(TRIM(status)) = 'completed' THEN '8'
+				WHEN LOWER(TRIM(status)) = 'cancelled' THEN '9'
+				WHEN LOWER(TRIM(status)) = 'frozen' THEN '10'
+				WHEN LOWER(TRIM(status)) = 'exception' THEN '11'
+				WHEN TRIM(status) REGEXP '^[0-9]+$' THEN TRIM(status)
 				ELSE '0'
 			END
 			WHERE status IS NOT NULL AND TRIM(status) <> ''
