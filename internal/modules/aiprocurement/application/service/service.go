@@ -34,7 +34,10 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 	if prompt == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("采购指令不能为空")
 	}
-	parsed := parseInstruction(prompt)
+	parsed, ok, err := parseInstructionWithModel(ctx, prompt)
+	if err != nil || !ok {
+		parsed = parseInstructionByRule(prompt)
+	}
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
@@ -160,7 +163,7 @@ func (s *ProcurementService) SubmitReview(ctx context.Context, id, userID, enter
 	return toProcurementInfo(item), nil
 }
 
-func parseInstruction(prompt string) entity.ParsedInstruction {
+func parseInstructionByRule(prompt string) entity.ParsedInstruction {
 	quantity, unit := extractQuantity(prompt)
 	productName := extractProductName(prompt)
 	keywords := buildKeywords(productName, prompt)

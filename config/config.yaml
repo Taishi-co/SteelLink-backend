@@ -57,3 +57,34 @@ storage:
   private_base_url: https://steellink-user-pri-1321917249.cos.ap-beijing.myqcloud.com
   admin_base_url: https://steellink-admin-1321917249.cos.ap-beijing.myqcloud.com
   max_file_size_mb: 20
+
+ai_procurement:
+  model_parsing_enabled: false
+  provider: minimax
+  base_url: https://api.minimax.io/v1/chat/completions
+  api_key_env: MINIMAX_API_KEY
+  model: MiniMax-M2.7
+  temperature: 0.2
+  top_p: 0.9
+  max_tokens: 1200
+  timeout_sec: 20
+  confidence_threshold: 0.78
+  vector_search:
+    enabled: false
+    provider: milvus
+    endpoint: localhost:19530
+    database: steellink_ai
+    username: ""
+    password_env: MILVUS_PASSWORD
+    product_collection: ai_product_embeddings
+    supplier_collection: ai_supplier_embeddings
+    finance_product_collection: ai_finance_product_embeddings
+    embedding_provider: minimax
+    embedding_base_url: https://api.minimax.io/v1/embeddings
+    embedding_api_key_env: MINIMAX_API_KEY
+    embedding_model: embo-01
+    dimension: 1536
+    top_k: 10
+    min_score: 0.65
+    hybrid_keyword_weight: 0.35
+    hybrid_vector_weight: 0.65
