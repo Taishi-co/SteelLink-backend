@@ -39,3 +39,47 @@ kafka:
   brokers:
     - ${KAFKA_BROKER:localhost:9092}
   group_id: steellink-backend
+
+storage:
+  provider: ${STORAGE_PROVIDER:tencent_cos}
+  region: ${COS_REGION:ap-beijing}
+  secret_id: ${COS_SECRET_ID:}
+  secret_key: ${COS_SECRET_KEY:}
+  public_bucket: ${COS_PUBLIC_BUCKET:}
+  private_bucket: ${COS_PRIVATE_BUCKET:}
+  admin_bucket: ${COS_ADMIN_BUCKET:}
+  public_base_url: ${COS_PUBLIC_BASE_URL:}
+  private_base_url: ${COS_PRIVATE_BASE_URL:}
+  admin_base_url: ${COS_ADMIN_BASE_URL:}
+  max_file_size_mb: ${STORAGE_MAX_FILE_SIZE_MB:20}
+
+ai_procurement:
+  model_parsing_enabled: ${AI_PROCUREMENT_MODEL_PARSING_ENABLED:false}
+  provider: ${AI_PROCUREMENT_PROVIDER:minimax}
+  base_url: ${AI_PROCUREMENT_BASE_URL:https://api.minimax.io/v1/chat/completions}
+  api_key_env: ${AI_PROCUREMENT_API_KEY_ENV:MINIMAX_API_KEY}
+  model: ${AI_PROCUREMENT_MODEL:MiniMax-M2.7}
+  temperature: ${AI_PROCUREMENT_TEMPERATURE:0.2}
+  top_p: ${AI_PROCUREMENT_TOP_P:0.9}
+  max_tokens: ${AI_PROCUREMENT_MAX_TOKENS:1200}
+  timeout_sec: ${AI_PROCUREMENT_TIMEOUT_SEC:20}
+  confidence_threshold: ${AI_PROCUREMENT_CONFIDENCE_THRESHOLD:0.78}
+  vector_search:
+    enabled: ${AI_PROCUREMENT_VECTOR_SEARCH_ENABLED:false}
+    provider: ${AI_PROCUREMENT_VECTOR_PROVIDER:milvus}
+    endpoint: ${MILVUS_ENDPOINT:localhost:19530}
+    database: ${MILVUS_DATABASE:steellink_ai}
+    username: ${MILVUS_USERNAME:}
+    password_env: ${MILVUS_PASSWORD_ENV:MILVUS_PASSWORD}
+    product_collection: ${AI_PRODUCT_VECTOR_COLLECTION:ai_product_embeddings}
+    supplier_collection: ${AI_SUPPLIER_VECTOR_COLLECTION:ai_supplier_embeddings}
+    finance_product_collection: ${AI_FINANCE_PRODUCT_VECTOR_COLLECTION:ai_finance_product_embeddings}
+    embedding_provider: ${AI_EMBEDDING_PROVIDER:minimax}
+    embedding_base_url: ${AI_EMBEDDING_BASE_URL:https://api.minimax.io/v1/embeddings}
+    embedding_api_key_env: ${AI_EMBEDDING_API_KEY_ENV:MINIMAX_API_KEY}
+    embedding_model: ${AI_EMBEDDING_MODEL:embo-01}
+    dimension: ${AI_EMBEDDING_DIMENSION:1536}
+    top_k: ${AI_VECTOR_TOP_K:10}
+    min_score: ${AI_VECTOR_MIN_SCORE:0.65}
+    hybrid_keyword_weight: ${AI_HYBRID_KEYWORD_WEIGHT:0.35}
+    hybrid_vector_weight: ${AI_HYBRID_VECTOR_WEIGHT:0.65}

@@ -12,13 +12,14 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Log      LogConfig      `mapstructure:"log"`
-	Kafka    KafkaConfig    `mapstructure:"kafka"`
-	Storage  StorageConfig  `mapstructure:"storage"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	JWT           JWTConfig           `mapstructure:"jwt"`
+	Log           LogConfig           `mapstructure:"log"`
+	Kafka         KafkaConfig         `mapstructure:"kafka"`
+	Storage       StorageConfig       `mapstructure:"storage"`
+	AIProcurement AIProcurementConfig `mapstructure:"ai_procurement"`
 }
 
 type ServerConfig struct {
@@ -106,6 +107,62 @@ func (c StorageConfig) MaxFileSizeBytes() int64 {
 	return c.MaxFileSizeMB << 20
 }
 
+type AIProcurementConfig struct {
+	ModelParsingEnabled bool               `mapstructure:"model_parsing_enabled"`
+	Provider            string             `mapstructure:"provider"`
+	BaseURL             string             `mapstructure:"base_url"`
+	APIKeyEnv           string             `mapstructure:"api_key_env"`
+	Model               string             `mapstructure:"model"`
+	Temperature         float64            `mapstructure:"temperature"`
+	TopP                float64            `mapstructure:"top_p"`
+	MaxTokens           int                `mapstructure:"max_tokens"`
+	TimeoutSec          int                `mapstructure:"timeout_sec"`
+	ConfidenceThreshold float64            `mapstructure:"confidence_threshold"`
+	VectorSearch        VectorSearchConfig `mapstructure:"vector_search"`
+}
+
+func (c AIProcurementConfig) APIKey() string {
+	if c.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.APIKeyEnv)
+}
+
+type VectorSearchConfig struct {
+	Enabled                  bool    `mapstructure:"enabled"`
+	Provider                 string  `mapstructure:"provider"`
+	Endpoint                 string  `mapstructure:"endpoint"`
+	Database                 string  `mapstructure:"database"`
+	Username                 string  `mapstructure:"username"`
+	PasswordEnv              string  `mapstructure:"password_env"`
+	ProductCollection        string  `mapstructure:"product_collection"`
+	SupplierCollection       string  `mapstructure:"supplier_collection"`
+	FinanceProductCollection string  `mapstructure:"finance_product_collection"`
+	EmbeddingProvider        string  `mapstructure:"embedding_provider"`
+	EmbeddingBaseURL         string  `mapstructure:"embedding_base_url"`
+	EmbeddingAPIKeyEnv       string  `mapstructure:"embedding_api_key_env"`
+	EmbeddingModel           string  `mapstructure:"embedding_model"`
+	Dimension                int     `mapstructure:"dimension"`
+	TopK                     int     `mapstructure:"top_k"`
+	MinScore                 float64 `mapstructure:"min_score"`
+	HybridKeywordWeight      float64 `mapstructure:"hybrid_keyword_weight"`
+	HybridVectorWeight       float64 `mapstructure:"hybrid_vector_weight"`
+}
+
+func (c VectorSearchConfig) Password() string {
+	if c.PasswordEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.PasswordEnv)
+}
+
+func (c VectorSearchConfig) EmbeddingAPIKey() string {
+	if c.EmbeddingAPIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.EmbeddingAPIKeyEnv)
+}
+
 var GlobalConfig *Config
 
 func Init(configPath string) error {
@@ -126,6 +183,7 @@ func Init(configPath string) error {
 	}
 
 	applyEnvOverrides(GlobalConfig)
+	applyAIProcurementDefaults(&GlobalConfig.AIProcurement)
 
 	if GlobalConfig.JWT.Secret == "" || GlobalConfig.JWT.Secret == "change-me" {
 		env := os.Getenv("APP_ENV")
@@ -136,6 +194,88 @@ func Init(configPath string) error {
 	}
 
 	return nil
+}
+
+func applyAIProcurementDefaults(c *AIProcurementConfig) {
+	if c.Provider == "" {
+		c.Provider = "rule_based"
+	}
+	if c.BaseURL == "" {
+		c.BaseURL = "https://api.minimax.io/v1/chat/completions"
+	}
+	if c.APIKeyEnv == "" {
+		c.APIKeyEnv = "MINIMAX_API_KEY"
+	}
+	if c.Model == "" {
+		c.Model = "MiniMax-M2.7"
+	}
+	if c.Temperature <= 0 || c.Temperature > 1 {
+		c.Temperature = 0.2
+	}
+	if c.TopP <= 0 || c.TopP > 1 {
+		c.TopP = 0.9
+	}
+	if c.MaxTokens <= 0 {
+		c.MaxTokens = 1200
+	}
+	if c.TimeoutSec <= 0 {
+		c.TimeoutSec = 20
+	}
+	if c.ConfidenceThreshold <= 0 || c.ConfidenceThreshold > 1 {
+		c.ConfidenceThreshold = 0.78
+	}
+	applyVectorSearchDefaults(&c.VectorSearch)
+}
+
+func applyVectorSearchDefaults(c *VectorSearchConfig) {
+	if c.Provider == "" {
+		c.Provider = "milvus"
+	}
+	if c.Endpoint == "" {
+		c.Endpoint = "localhost:19530"
+	}
+	if c.Database == "" {
+		c.Database = "steellink_ai"
+	}
+	if c.PasswordEnv == "" {
+		c.PasswordEnv = "MILVUS_PASSWORD"
+	}
+	if c.ProductCollection == "" {
+		c.ProductCollection = "ai_product_embeddings"
+	}
+	if c.SupplierCollection == "" {
+		c.SupplierCollection = "ai_supplier_embeddings"
+	}
+	if c.FinanceProductCollection == "" {
+		c.FinanceProductCollection = "ai_finance_product_embeddings"
+	}
+	if c.EmbeddingProvider == "" {
+		c.EmbeddingProvider = "minimax"
+	}
+	if c.EmbeddingBaseURL == "" {
+		c.EmbeddingBaseURL = "https://api.minimax.io/v1/embeddings"
+	}
+	if c.EmbeddingAPIKeyEnv == "" {
+		c.EmbeddingAPIKeyEnv = "MINIMAX_API_KEY"
+	}
+	if c.EmbeddingModel == "" {
+		c.EmbeddingModel = "embo-01"
+	}
+	if c.Dimension <= 0 {
+		c.Dimension = 1536
+	}
+	if c.TopK <= 0 {
+		c.TopK = 10
+	}
+	if c.MinScore <= 0 || c.MinScore > 1 {
+		c.MinScore = 0.65
+	}
+	if c.HybridKeywordWeight <= 0 {
+		c.HybridKeywordWeight = 0.35
+	}
+	if c.HybridVectorWeight <= 0 {
+		c.HybridVectorWeight = 0.65
+	}
 }
 
 // applyEnvOverrides reads os environment (including values from a loaded .env file)
@@ -286,6 +426,120 @@ func applyEnvOverrides(c *Config) {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			c.Storage.MaxFileSizeMB = n
 		}
+	}
+
+	if v := os.Getenv("AI_PROCUREMENT_MODEL_PARSING_ENABLED"); v != "" {
+		c.AIProcurement.ModelParsingEnabled = parseBool(v)
+	}
+	if v := os.Getenv("AI_PROCUREMENT_PROVIDER"); v != "" {
+		c.AIProcurement.Provider = v
+	}
+	if v := os.Getenv("AI_PROCUREMENT_BASE_URL"); v != "" {
+		c.AIProcurement.BaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("AI_PROCUREMENT_API_KEY_ENV"); v != "" {
+		c.AIProcurement.APIKeyEnv = v
+	}
+	if v := os.Getenv("AI_PROCUREMENT_MODEL"); v != "" {
+		c.AIProcurement.Model = v
+	}
+	if v := os.Getenv("AI_PROCUREMENT_TEMPERATURE"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.Temperature = n
+		}
+	}
+	if v := os.Getenv("AI_PROCUREMENT_TOP_P"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.TopP = n
+		}
+	}
+	if v := os.Getenv("AI_PROCUREMENT_MAX_TOKENS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.MaxTokens = n
+		}
+	}
+	if v := os.Getenv("AI_PROCUREMENT_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.TimeoutSec = n
+		}
+	}
+	if v := os.Getenv("AI_PROCUREMENT_CONFIDENCE_THRESHOLD"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.ConfidenceThreshold = n
+		}
+	}
+	if v := os.Getenv("AI_PROCUREMENT_VECTOR_SEARCH_ENABLED"); v != "" {
+		c.AIProcurement.VectorSearch.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("AI_PROCUREMENT_VECTOR_PROVIDER"); v != "" {
+		c.AIProcurement.VectorSearch.Provider = v
+	}
+	if v := os.Getenv("MILVUS_ENDPOINT"); v != "" {
+		c.AIProcurement.VectorSearch.Endpoint = v
+	}
+	if v := os.Getenv("MILVUS_DATABASE"); v != "" {
+		c.AIProcurement.VectorSearch.Database = v
+	}
+	if v := os.Getenv("MILVUS_USERNAME"); v != "" {
+		c.AIProcurement.VectorSearch.Username = v
+	}
+	if v := os.Getenv("MILVUS_PASSWORD_ENV"); v != "" {
+		c.AIProcurement.VectorSearch.PasswordEnv = v
+	}
+	if v := os.Getenv("AI_PRODUCT_VECTOR_COLLECTION"); v != "" {
+		c.AIProcurement.VectorSearch.ProductCollection = v
+	}
+	if v := os.Getenv("AI_SUPPLIER_VECTOR_COLLECTION"); v != "" {
+		c.AIProcurement.VectorSearch.SupplierCollection = v
+	}
+	if v := os.Getenv("AI_FINANCE_PRODUCT_VECTOR_COLLECTION"); v != "" {
+		c.AIProcurement.VectorSearch.FinanceProductCollection = v
+	}
+	if v := os.Getenv("AI_EMBEDDING_PROVIDER"); v != "" {
+		c.AIProcurement.VectorSearch.EmbeddingProvider = v
+	}
+	if v := os.Getenv("AI_EMBEDDING_BASE_URL"); v != "" {
+		c.AIProcurement.VectorSearch.EmbeddingBaseURL = v
+	}
+	if v := os.Getenv("AI_EMBEDDING_API_KEY_ENV"); v != "" {
+		c.AIProcurement.VectorSearch.EmbeddingAPIKeyEnv = v
+	}
+	if v := os.Getenv("AI_EMBEDDING_MODEL"); v != "" {
+		c.AIProcurement.VectorSearch.EmbeddingModel = v
+	}
+	if v := os.Getenv("AI_EMBEDDING_DIMENSION"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.VectorSearch.Dimension = n
+		}
+	}
+	if v := os.Getenv("AI_VECTOR_TOP_K"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.VectorSearch.TopK = n
+		}
+	}
+	if v := os.Getenv("AI_VECTOR_MIN_SCORE"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.VectorSearch.MinScore = n
+		}
+	}
+	if v := os.Getenv("AI_HYBRID_KEYWORD_WEIGHT"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.VectorSearch.HybridKeywordWeight = n
+		}
+	}
+	if v := os.Getenv("AI_HYBRID_VECTOR_WEIGHT"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			c.AIProcurement.VectorSearch.HybridVectorWeight = n
+		}
+	}
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on", "enabled":
+		return true
+	default:
+		return false
 	}
 }
 
