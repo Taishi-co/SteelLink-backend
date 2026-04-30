@@ -12,6 +12,7 @@ func AutoMigrate() error {
 	db := database.GetDB()
 	if err := db.AutoMigrate(
 		&marketentity.BiddingActivity{},
+		&marketentity.BiddingQuote{},
 		&marketentity.ProcurementActivity{},
 		&marketentity.ProcurementLog{},
 	); err != nil {
