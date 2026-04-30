@@ -105,11 +105,11 @@ func (s *ProductService) GetPublicByID(ctx context.Context, id uint64) (*dto.Pro
 		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
 	}
 
-	return toProductInfo(product), nil
+	return toProductInfoPublic(product), nil
 }
 
 // List 获取商品列表
-func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) (*dto.ProductListResponse, error) {
+func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest, public bool) (*dto.ProductListResponse, error) {
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -137,9 +137,13 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 		return nil, ecode.ErrDatabase
 	}
 
+	convFn := toProductInfo
+	if public {
+		convFn = toProductInfoPublic
+	}
 	list := make([]*dto.ProductInfo, 0, len(products))
 	for _, product := range products {
-		list = append(list, toProductInfo(product))
+		list = append(list, convFn(product))
 	}
 
 	return &dto.ProductListResponse{
@@ -209,6 +213,14 @@ func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int
 }
 
 func toProductInfo(product *entity.Product) *dto.ProductInfo {
+	return toProductInfoWithVisibility(product, false)
+}
+
+func toProductInfoPublic(product *entity.Product) *dto.ProductInfo {
+	return toProductInfoWithVisibility(product, true)
+}
+
+func toProductInfoWithVisibility(product *entity.Product, public bool) *dto.ProductInfo {
 	if product == nil {
 		return nil
 	}
@@ -240,6 +252,13 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		}
 	}
 
+	quantity := product.Quantity
+	lockedQty := product.LockedQty
+	if public {
+		quantity = 0
+		lockedQty = 0
+	}
+
 	return &dto.ProductInfo{
 		ID:            product.ID,
 		ProductNo:     product.ProductNo,
@@ -250,9 +269,9 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		Spec:          spec,
 		WarehouseInfo: warehouseInfo,
 		BundleNo:      product.BundleNo,
-		Quantity:      product.Quantity,
+		Quantity:      quantity,
 		AvailableQty:  product.AvailableQty,
-		LockedQty:     product.LockedQty,
+		LockedQty:     lockedQty,
 		UnitPrice:     product.UnitPrice,
 		MinOrderQty:   product.MinOrderQty,
 		Currency:      product.Currency,

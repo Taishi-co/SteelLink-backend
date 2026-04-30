@@ -74,9 +74,9 @@ type ProductInfo struct {
 	Spec          ProductSpec   `json:"spec"`
 	WarehouseInfo WarehouseInfo `json:"warehouse_info"`
 	BundleNo      string        `json:"bundle_no"`
-	Quantity      float64       `json:"quantity"`
+	Quantity      float64       `json:"quantity,omitempty"`
 	AvailableQty  float64       `json:"available_qty"`
-	LockedQty     float64       `json:"locked_qty"`
+	LockedQty     float64       `json:"locked_qty,omitempty"`
 	UnitPrice     float64       `json:"unit_price"`
 	MinOrderQty   float64       `json:"min_order_qty"`
 	Currency      string        `json:"currency"`

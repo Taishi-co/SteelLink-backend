@@ -525,9 +525,35 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 		return nil, ecode.ErrBadRequest.WithMessage("提货码不正确")
 	}
 
-	order.Status = orderEntity.OrderStatusDelivering
-	order.UpdatedBy = operatorID
-	if err := s.orderRepo.Update(ctx, order); err != nil {
+	db := database.GetDB()
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在")
+			}
+			if !product.DeductStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("库存扣减异常")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
+
+		order.Status = orderEntity.OrderStatusDelivering
+		order.UpdatedBy = operatorID
+		if saveErr := tx.Save(order).Error; saveErr != nil {
+			return saveErr
+		}
+		return nil
+	}); err != nil {
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
 		return nil, ecode.ErrDatabase.WithMessage("确认出库失败")
 	}
 	return toOrderInfo(order), nil

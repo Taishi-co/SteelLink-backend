@@ -114,7 +114,7 @@ func (h *ProductHandler) List(c *gin.Context) {
 		req.Status = &defaultStatus
 	}
 
-	result, err := h.productService.List(c.Request.Context(), &req)
+	result, err := h.productService.List(c.Request.Context(), &req, middleware.GetClaims(c) == nil)
 	if err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return
