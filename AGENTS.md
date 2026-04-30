@@ -36,6 +36,7 @@
 - `./harness/verify.sh`
 - `./harness/review.sh docs/features/<feature-id>`
 - `./harness/release.sh docs/features/<feature-id>`
+- `./harness/lark-pr-doc.sh docs/features/<feature-id> --pr-url <github-pr-url> --pr-title "<pr-title>"`
 - `./harness/deploy.sh staging`
 - `./harness/deploy.sh prod`
 
@@ -47,6 +48,7 @@
 - 涉及角色、权限、审批、风控时，必须核对 `docs/domain/role-permission-matrix.md`
 - 涉及路由、handler、middleware、model、数据库、环境变量、Docker 或部署改动时，必须在 feature 文档中写明影响范围
 - 提交 PR 前必须确认当前分支来自最新 `main`
+- 提交 GitHub PR 后必须用 `./harness/lark-pr-doc.sh` 基于 feature PRD 产物创建飞书文档，并把链接写入共享 PR 记录的 `Backend` 段落
 - 分支命名必须符合 `feat|fix|docs|chore|refactor|test|hotfix/<feature-id>-<slug>`
 - 如果当前目录尚未初始化为 Git worktree，先补齐新的仓库 remote/clone，再执行 `branch-guard` 与 PR 流程
 
@@ -55,6 +57,7 @@
 提交结果时至少说明：
 
 - 当前对应的 feature 文档路径
+- 飞书 PRD/PR 记录文档链接，或说明为什么未能写入共享 PR 记录
 - 已执行的 harness 命令
 - 是否完成 test/package 验证
 - 是否存在遗留风险、人工验证点或部署前依赖
