@@ -10,8 +10,6 @@ func AutoMigrate() error {
 	return db.AutoMigrate(
 		&tradeentity.Product{},
 		&tradeentity.ProductAuditLog{},
-		&tradeentity.Order{},
-		&tradeentity.OrderItem{},
 		&tradeentity.OrderContract{},
 		&tradeentity.PaymentReceipt{},
 		&tradeentity.PickupCode{},
