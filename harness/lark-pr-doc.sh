@@ -10,6 +10,7 @@ DRY_RUN=0
 
 INDEX_DOC="${LARK_PR_INDEX_DOC:-https://hwdz01k44ey.feishu.cn/wiki/OC6Owz2b3ijTuOkeW8NciN6onBe}"
 PARENT_WIKI_NODE="${LARK_PR_WIKI_NODE:-OC6Owz2b3ijTuOkeW8NciN6onBe}"
+FALLBACK_WIKI_SPACE="${LARK_PR_FALLBACK_WIKI_SPACE:-my_library}"
 
 usage() {
   cat <<'USAGE'
@@ -22,6 +23,7 @@ the generated link under the repository section in the shared PR index.
 Environment overrides:
   LARK_PR_INDEX_DOC   Shared PR index document URL or token
   LARK_PR_WIKI_NODE   Parent wiki node token for newly created PR docs
+  LARK_PR_FALLBACK_WIKI_SPACE  Wiki space used when parent node creation is denied
   PR_URL              GitHub PR URL, if not passed as --pr-url
   PR_TITLE            GitHub PR title, if not passed as --pr-title
 USAGE
@@ -164,7 +166,12 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
-CREATE_OUTPUT="$(lark-cli "${CREATE_ARGS[@]}")"
+if ! CREATE_OUTPUT="$(lark-cli "${CREATE_ARGS[@]}" 2>&1)"; then
+  echo "warning: failed to create PR document under parent wiki node; falling back to wiki space ${FALLBACK_WIKI_SPACE}" >&2
+  echo "${CREATE_OUTPUT}" >&2
+  CREATE_ARGS=(docs +create --title "${DOC_TITLE}" --markdown "${TMP_MARKDOWN_ARG}" --wiki-space "${FALLBACK_WIKI_SPACE}")
+  CREATE_OUTPUT="$(lark-cli "${CREATE_ARGS[@]}")"
+fi
 DOC_URL="$(
   CREATE_OUTPUT="${CREATE_OUTPUT}" node <<'NODE'
 const input = process.env.CREATE_OUTPUT || "";
