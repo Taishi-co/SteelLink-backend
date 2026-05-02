@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -14,28 +16,39 @@ import (
 )
 
 type Client struct {
+	provider   string
 	baseURL    string
 	apiKey     string
+	groupID    string
 	model      string
 	httpClient *http.Client
 }
 
-type request struct {
+type openAIRequest struct {
 	Model string   `json:"model"`
 	Input []string `json:"input"`
+}
+
+type minimaxRequest struct {
+	Model string   `json:"model"`
+	Texts []string `json:"texts"`
+	Type  string   `json:"type"`
 }
 
 type response struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
+	Vectors [][]float32 `json:"vectors"`
 }
 
 func NewClient(cfg config.VectorSearchConfig) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(cfg.EmbeddingBaseURL, "/"),
-		apiKey:  cfg.EmbeddingAPIKey(),
-		model:   cfg.EmbeddingModel,
+		provider: strings.ToLower(strings.TrimSpace(cfg.EmbeddingProvider)),
+		baseURL:  strings.TrimRight(cfg.EmbeddingBaseURL, "/"),
+		apiKey:   cfg.EmbeddingAPIKey(),
+		groupID:  os.Getenv("MINIMAX_GROUP_ID"),
+		model:    cfg.EmbeddingModel,
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
@@ -54,11 +67,11 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("embedding api key is empty")
 	}
 
-	payload, err := json.Marshal(request{Model: c.model, Input: []string{text}})
+	endpoint, payload, err := c.buildRequest(text)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +96,46 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
-	if len(parsed.Data) == 0 || len(parsed.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("embedding service returned empty embedding")
+	if len(parsed.Vectors) > 0 && len(parsed.Vectors[0]) > 0 {
+		return parsed.Vectors[0], nil
 	}
-	return parsed.Data[0].Embedding, nil
+	if len(parsed.Data) > 0 && len(parsed.Data[0].Embedding) > 0 {
+		return parsed.Data[0].Embedding, nil
+	}
+	return nil, fmt.Errorf("embedding service returned empty embedding")
+}
+
+func (c *Client) buildRequest(text string) (string, []byte, error) {
+	if c.provider == "minimax" {
+		payload, err := json.Marshal(minimaxRequest{
+			Model: c.model,
+			Texts: []string{text},
+			Type:  "db",
+		})
+		if err != nil {
+			return "", nil, err
+		}
+		return c.minimaxEndpoint(), payload, nil
+	}
+	payload, err := json.Marshal(openAIRequest{Model: c.model, Input: []string{text}})
+	if err != nil {
+		return "", nil, err
+	}
+	return c.baseURL, payload, nil
+}
+
+func (c *Client) minimaxEndpoint() string {
+	if c.groupID == "" {
+		return c.baseURL
+	}
+	parsed, err := url.Parse(c.baseURL)
+	if err != nil {
+		return c.baseURL
+	}
+	query := parsed.Query()
+	if query.Get("group_id") == "" {
+		query.Set("group_id", c.groupID)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
