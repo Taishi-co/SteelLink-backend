@@ -27,3 +27,10 @@
 - 商品、供应商和融资产品同步失败不影响 AI 采购主接口可用性。
 - `go test ./...` 通过。
 - `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/api` 通过。
+- `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/aiprocurement-vector-sync` 通过。
+
+## 同步命令
+
+- `--schedule=manual` 执行一次商品向量同步后退出。
+- `--schedule=minute|hour|day` 按固定间隔重复同步，收到 SIGINT/SIGTERM 后退出。
+- `--target=suppliers|finance` 当前为预留 no-op，不影响产品同步。
