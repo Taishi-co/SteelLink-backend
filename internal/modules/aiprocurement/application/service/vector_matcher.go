@@ -22,11 +22,7 @@ type productVectorMatcher struct {
 }
 
 func newProductVectorMatcher(productRepo productRepository.ProductRepository) *productVectorMatcher {
-	globalCfg := config.Get()
-	if globalCfg == nil {
-		return nil
-	}
-	cfg := globalCfg.AIProcurement.VectorSearch
+	cfg := config.GetAIProcurement().VectorSearch
 	if !cfg.Enabled {
 		return nil
 	}

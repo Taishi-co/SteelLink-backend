@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
@@ -20,7 +21,6 @@ import (
 type ProcurementService struct {
 	procurementRepo repository.ProcurementRepository
 	productRepo     productRepository.ProductRepository
-	vectorMatcher   *productVectorMatcher
 }
 
 func NewProcurementService() *ProcurementService {
@@ -28,11 +28,11 @@ func NewProcurementService() *ProcurementService {
 	return &ProcurementService{
 		procurementRepo: persistence.NewProcurementRepository(),
 		productRepo:     productRepo,
-		vectorMatcher:   newProductVectorMatcher(productRepo),
 	}
 }
 
 func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.ParseResponse, error) {
+	config.RefreshAIProcurementRuntimeConfig(ctx)
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("采购指令不能为空")
@@ -183,8 +183,8 @@ func parseInstructionByRule(prompt string) entity.ParsedInstruction {
 }
 
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
-	if s.vectorMatcher != nil {
-		matches, err := s.vectorMatcher.Match(ctx, parsed)
+	if matcher := newProductVectorMatcher(s.productRepo); matcher != nil {
+		matches, err := matcher.Match(ctx, parsed)
 		if err == nil && len(matches) > 0 {
 			return matches, nil
 		}

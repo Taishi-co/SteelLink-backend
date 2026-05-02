@@ -47,12 +47,11 @@ type parsedInstructionPayload struct {
 }
 
 func parseInstructionWithModel(ctx context.Context, prompt string) (entity.ParsedInstruction, bool, error) {
-	cfg := config.Get()
-	if cfg == nil || !cfg.AIProcurement.ModelParsingEnabled {
+	modelCfg := config.GetAIProcurement()
+	if !modelCfg.ModelParsingEnabled {
 		return entity.ParsedInstruction{}, false, nil
 	}
 
-	modelCfg := cfg.AIProcurement
 	apiKey := modelCfg.APIKey()
 	if apiKey == "" {
 		return entity.ParsedInstruction{}, false, nil

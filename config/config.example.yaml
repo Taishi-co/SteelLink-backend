@@ -83,3 +83,8 @@ ai_procurement:
     min_score: ${AI_VECTOR_MIN_SCORE:0.65}
     hybrid_keyword_weight: ${AI_HYBRID_KEYWORD_WEIGHT:0.35}
     hybrid_vector_weight: ${AI_HYBRID_VECTOR_WEIGHT:0.65}
+  runtime_config:
+    enabled: ${AI_PROCUREMENT_RUNTIME_CONFIG_ENABLED:false}
+    endpoint: ${AI_PROCUREMENT_RUNTIME_CONFIG_ENDPOINT:}
+    token_env: ${AI_PROCUREMENT_RUNTIME_CONFIG_TOKEN_ENV:AI_PROCUREMENT_CONFIG_SYNC_TOKEN}
+    cache_ttl_sec: ${AI_PROCUREMENT_RUNTIME_CONFIG_CACHE_TTL_SEC:30}
