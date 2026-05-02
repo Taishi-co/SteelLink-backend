@@ -9,6 +9,11 @@ import (
 func RegisterRoutes(r *gin.RouterGroup) {
 	procurementHandler := handler.NewProcurementHandler()
 
+	internalGroup := r.Group("/internal/ai-procurements")
+	{
+		internalGroup.POST("/vector-sync", procurementHandler.SyncVectors)
+	}
+
 	group := r.Group("/ai-procurements")
 	group.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
 	{

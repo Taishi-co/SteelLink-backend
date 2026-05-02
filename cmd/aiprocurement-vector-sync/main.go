@@ -1,54 +1,70 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/Taishi-co/SteelLink-backend/config"
-	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
-	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
-	"github.com/Taishi-co/SteelLink-backend/internal/pkg/embedding"
-	"github.com/Taishi-co/SteelLink-backend/internal/pkg/vectorstore"
-	"github.com/joho/godotenv"
-	"gorm.io/gorm"
 )
 
 type syncOptions struct {
-	configPath   string
+	endpoint     string
+	token        string
+	tokenEnv     string
 	target       string
 	schedule     string
 	batchSize    int
 	limit        int
 	createSchema bool
+	timeout      time.Duration
+}
+
+type syncRequest struct {
+	Target       string `json:"target"`
+	BatchSize    int    `json:"batch_size"`
+	Limit        int    `json:"limit"`
+	CreateSchema bool   `json:"create_schema"`
+}
+
+type apiResponse struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 }
 
 func main() {
 	opts := syncOptions{}
-	flag.StringVar(&opts.configPath, "config", "config/config.yaml", "config file path")
+	flag.StringVar(&opts.endpoint, "endpoint", "", "backend vector sync endpoint, defaults to AI_PROCUREMENT_VECTOR_SYNC_ENDPOINT")
+	flag.StringVar(&opts.token, "token", "", "backend vector sync token; prefer token env in production")
+	flag.StringVar(&opts.tokenEnv, "token-env", "AI_PROCUREMENT_VECTOR_SYNC_TOKEN", "environment variable that stores backend vector sync token")
 	flag.StringVar(&opts.target, "target", "products", "sync target: products, suppliers, finance, all")
 	flag.StringVar(&opts.schedule, "schedule", "manual", "schedule: manual, minute, hour, day")
-	flag.IntVar(&opts.batchSize, "batch-size", 100, "products per batch")
+	flag.IntVar(&opts.batchSize, "batch-size", 100, "products per backend batch")
 	flag.IntVar(&opts.limit, "limit", 0, "max products to sync, 0 means no limit")
-	flag.BoolVar(&opts.createSchema, "create-schema", true, "create pgvector extension/table/indexes when possible")
+	flag.BoolVar(&opts.createSchema, "create-schema", true, "ask backend to create pgvector extension/table/indexes when possible")
+	flag.DurationVar(&opts.timeout, "timeout", 30*time.Minute, "HTTP request timeout")
 	flag.Parse()
 
-	_ = godotenv.Load()
-	if err := config.Init(opts.configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "init config failed: %v\n", err)
+	opts.endpoint = resolveEndpoint(opts.endpoint)
+	if opts.token == "" && opts.tokenEnv != "" {
+		opts.token = os.Getenv(opts.tokenEnv)
+	}
+	if opts.endpoint == "" {
+		fmt.Fprintln(os.Stderr, "backend vector sync endpoint is required; set --endpoint or AI_PROCUREMENT_VECTOR_SYNC_ENDPOINT")
 		os.Exit(1)
 	}
-	cfg := config.Get()
-	if err := database.InitMySQL(&cfg.Database); err != nil {
-		fmt.Fprintf(os.Stderr, "connect mysql failed: %v\n", err)
+	if opts.token == "" {
+		fmt.Fprintf(os.Stderr, "backend vector sync token is required; set --token or %s\n", opts.tokenEnv)
 		os.Exit(1)
 	}
-	defer database.CloseMySQL()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -59,6 +75,21 @@ func main() {
 	}
 }
 
+func resolveEndpoint(value string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	if envValue := strings.TrimSpace(os.Getenv("AI_PROCUREMENT_VECTOR_SYNC_ENDPOINT")); envValue != "" {
+		return envValue
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("STEELLINK_BACKEND_BASE_URL")), "/")
+	if baseURL == "" {
+		return ""
+	}
+	return baseURL + "/api/v1/internal/ai-procurements/vector-sync"
+}
+
 func runScheduled(ctx context.Context, opts syncOptions) error {
 	interval, once, err := parseSchedule(opts.schedule)
 	if err != nil {
@@ -66,10 +97,10 @@ func runScheduled(ctx context.Context, opts syncOptions) error {
 	}
 	for {
 		startedAt := time.Now()
-		if err := runOnce(ctx, opts); err != nil {
+		if err := callBackend(ctx, opts); err != nil {
 			return err
 		}
-		fmt.Printf("vector sync finished schedule=%s target=%s duration=%s\n", opts.schedule, opts.target, time.Since(startedAt).Round(time.Millisecond))
+		fmt.Printf("vector sync request finished schedule=%s target=%s duration=%s\n", opts.schedule, opts.target, time.Since(startedAt).Round(time.Millisecond))
 		if once {
 			return nil
 		}
@@ -98,159 +129,44 @@ func parseSchedule(value string) (time.Duration, bool, error) {
 	}
 }
 
-func runOnce(ctx context.Context, opts syncOptions) error {
-	target := strings.ToLower(strings.TrimSpace(opts.target))
-	if target == "" {
-		target = "products"
+func callBackend(ctx context.Context, opts syncOptions) error {
+	body, err := json.Marshal(syncRequest{
+		Target:       opts.target,
+		BatchSize:    opts.batchSize,
+		Limit:        opts.limit,
+		CreateSchema: opts.createSchema,
+	})
+	if err != nil {
+		return err
 	}
-	switch target {
-	case "products":
-		return syncProducts(ctx, opts)
-	case "suppliers", "supplier":
-		fmt.Println("supplier vector sync is reserved; no-op in this version")
-		return nil
-	case "finance", "finance-products", "finance_products":
-		fmt.Println("finance product vector sync is reserved; no-op in this version")
-		return nil
-	case "all":
-		if err := syncProducts(ctx, opts); err != nil {
-			return err
-		}
-		fmt.Println("supplier vector sync is reserved; no-op in this version")
-		fmt.Println("finance product vector sync is reserved; no-op in this version")
-		return nil
-	default:
-		return fmt.Errorf("unsupported target %q", opts.target)
+	reqCtx, cancel := context.WithTimeout(ctx, opts.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, opts.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
-}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-AI-Procurement-Sync-Token", opts.token)
 
-func syncProducts(ctx context.Context, opts syncOptions) error {
-	cfg := config.GetAIProcurement().VectorSearch
-	if cfg.Provider != "pgvector" {
-		return fmt.Errorf("vector provider must be pgvector, got %q", cfg.Provider)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
-	if cfg.ConnectionString() == "" {
-		return fmt.Errorf("%s is not configured", cfg.ConnectionEnv)
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
-	if opts.batchSize <= 0 {
-		opts.batchSize = 100
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("backend returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
 	}
-
-	store := vectorstore.NewPGVectorClient(cfg)
-	if opts.createSchema {
-		if err := store.EnsureProductSchema(ctx, cfg.Dimension); err != nil {
-			return fmt.Errorf("ensure pgvector product schema failed: %w", err)
-		}
+	var parsed apiResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return fmt.Errorf("decode backend response failed: %w", err)
 	}
-	embedder := embedding.NewClient(cfg)
-
-	var synced int
-	var lastID uint64
-	db := database.GetDB()
-	for {
-		remaining := opts.limit - synced
-		if opts.limit > 0 && remaining <= 0 {
-			break
-		}
-		batchSize := opts.batchSize
-		if opts.limit > 0 && remaining < batchSize {
-			batchSize = remaining
-		}
-		products, err := listProducts(ctx, db, lastID, batchSize)
-		if err != nil {
-			return err
-		}
-		if len(products) == 0 {
-			break
-		}
-		for _, product := range products {
-			text := buildProductEmbeddingText(product)
-			vector, err := embedder.Embed(ctx, text)
-			if err != nil {
-				return fmt.Errorf("embed product %d failed: %w", product.ID, err)
-			}
-			if err := store.UpsertProduct(ctx, vectorstore.ProductEmbedding{
-				ProductID:    product.ID,
-				ProductNo:    product.ProductNo,
-				ProductName:  product.Name,
-				Category:     productCategory(product),
-				EnterpriseID: product.EnterpriseID,
-				Text:         text,
-				Embedding:    vector,
-				Status:       int(product.Status),
-				AvailableQty: product.AvailableQty,
-				UnitPrice:    product.UnitPrice,
-			}); err != nil {
-				return fmt.Errorf("upsert product %d vector failed: %w", product.ID, err)
-			}
-			synced++
-			lastID = product.ID
-		}
-		fmt.Printf("synced product vectors count=%d last_id=%d\n", synced, lastID)
+	if parsed.Code != 0 {
+		return fmt.Errorf("backend returned code=%d message=%s", parsed.Code, parsed.Message)
 	}
-	fmt.Printf("product vector sync complete count=%d\n", synced)
+	fmt.Printf("backend response: %s\n", strings.TrimSpace(string(parsed.Data)))
 	return nil
-}
-
-func listProducts(ctx context.Context, db *gorm.DB, lastID uint64, limit int) ([]*productEntity.Product, error) {
-	var products []*productEntity.Product
-	err := db.WithContext(ctx).
-		Where("id > ?", lastID).
-		Order("id ASC").
-		Limit(limit).
-		Find(&products).Error
-	return products, err
-}
-
-func buildProductEmbeddingText(product *productEntity.Product) string {
-	parts := []string{
-		"商品:" + product.Name,
-		"品类:" + product.Category,
-		"子品类:" + product.SubCategory,
-		"钢厂:" + product.SteelMill,
-		fmt.Sprintf("库存:%.2f", product.AvailableQty),
-		fmt.Sprintf("价格:%.2f", product.UnitPrice),
-		fmt.Sprintf("交期:%d天", product.DeliveryDays),
-	}
-	if product.Spec != nil {
-		parts = append(parts,
-			"材质:"+product.Spec.Material,
-			"规格:"+product.Spec.Spec,
-			"厚度:"+product.Spec.Thickness,
-			"宽度:"+product.Spec.Width,
-			"长度:"+product.Spec.Length,
-			"表面:"+product.Spec.Surface,
-			"加工:"+product.Spec.Processing,
-		)
-	}
-	if product.WarehouseInfo != nil {
-		parts = append(parts,
-			"仓库:"+product.WarehouseInfo.WarehouseName,
-			"省份:"+product.WarehouseInfo.Province,
-			"城市:"+product.WarehouseInfo.City,
-			"地址:"+product.WarehouseInfo.Address,
-		)
-	}
-	if product.Description != "" {
-		parts = append(parts, "描述:"+product.Description)
-	}
-	return strings.Join(compactParts(parts), "；")
-}
-
-func productCategory(product *productEntity.Product) string {
-	if product.SubCategory != "" {
-		return product.SubCategory
-	}
-	return product.Category
-}
-
-func compactParts(parts []string) []string {
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" && !strings.HasSuffix(part, ":") {
-			out = append(out, part)
-		}
-	}
-	return out
 }
