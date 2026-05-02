@@ -6,7 +6,8 @@
 - 在 `.env.example` 中补齐 pgvector 和 embedding 推荐环境变量。
 - 新增 `internal/pkg/embedding`，通过 OpenAI-compatible embeddings API 生成采购查询向量。
 - 新增 `internal/pkg/vectorstore`，通过 pgvector 搜索 `ai_product_embeddings` 商品向量表。
-- 新增 `cmd/aiprocurement-vector-sync`，支持手动、每分钟、每小时、每天同步 MySQL 商品向量到 pgvector。
+- 新增 `POST /api/v1/internal/ai-procurements/vector-sync`，由后端 API 负责读取 MySQL、生成 embedding 并写入 pgvector。
+- 新增轻量 `cmd/aiprocurement-vector-sync`，仅负责手动、每分钟、每小时、每天调用后端同步接口。
 - 将 `matchProducts` 改为向量优先、MySQL 规则兜底；向量默认关闭，不改变当前生产行为。
 
 ## 已完成实施
@@ -19,12 +20,18 @@
    - 回读 MySQL 商品详情并过滤上架状态、品类和可用库存
    - 按向量相似度、关键词、库存满足率做 hybrid 重排
 3. pgvector 或 embedding 不可用、无命中、命中商品已下架时，自动回退原 MySQL 规则匹配。
-4. 商品向量同步命令支持：
+4. 商品向量同步接口支持：
+   - `target=products`
+   - `batch_size`
+   - `limit`
+   - `create_schema`
+   - `target=suppliers|finance|all` 作为后续供应商/融资产品同步入口预留。
+5. 商品向量同步命令支持：
    - `--target=products --schedule=manual`
    - `--target=products --schedule=minute`
    - `--target=products --schedule=hour`
    - `--target=products --schedule=day`
-   - `--target=suppliers|finance|all` 作为后续供应商/融资产品同步入口预留。
+   - 通过 `AI_PROCUREMENT_VECTOR_SYNC_ENDPOINT` 和 `AI_PROCUREMENT_VECTOR_SYNC_TOKEN` 调用后端接口，不再直接加载 MySQL、embedding、pgvector 配置。
 
 ## 后续实施步骤
 
