@@ -52,17 +52,26 @@ func (p *ParsedInstruction) Scan(value interface{}) error {
 }
 
 type MatchedProduct struct {
-	ProductID    uint64  `json:"product_id"`
-	ProductNo    string  `json:"product_no"`
-	ProductName  string  `json:"product_name"`
-	Category     string  `json:"category"`
-	SteelMill    string  `json:"steel_mill"`
-	Quantity     float64 `json:"quantity"`
-	UnitPrice    float64 `json:"unit_price"`
-	TotalAmount  float64 `json:"total_amount"`
-	Score        int     `json:"score"`
-	MatchReason  string  `json:"match_reason"`
-	EnterpriseID uint64  `json:"enterprise_id"`
+	ProductID     uint64         `json:"product_id"`
+	ProductNo     string         `json:"product_no"`
+	ProductName   string         `json:"product_name"`
+	Category      string         `json:"category"`
+	SteelMill     string         `json:"steel_mill"`
+	Quantity      float64        `json:"quantity"`
+	AvailableQty  float64        `json:"available_qty"`
+	UnitPrice     float64        `json:"unit_price"`
+	TotalAmount   float64        `json:"total_amount"`
+	Score         int            `json:"score"`
+	MatchReason   string         `json:"match_reason"`
+	EnterpriseID  uint64         `json:"enterprise_id"`
+	Spec          map[string]any `json:"spec,omitempty"`
+	Warehouse     map[string]any `json:"warehouse,omitempty"`
+	BundleNo      string         `json:"bundle_no,omitempty"`
+	DeliveryDays  int            `json:"delivery_days,omitempty"`
+	QuoteValidity int            `json:"quote_validity,omitempty"`
+	QualityCert   string         `json:"quality_cert,omitempty"`
+	Description   string         `json:"description,omitempty"`
+	Selected      bool           `json:"selected,omitempty"`
 }
 
 type MatchedProducts []MatchedProduct
@@ -76,13 +85,22 @@ func (m *MatchedProducts) Scan(value interface{}) error {
 }
 
 type OrderDraft struct {
-	OrderNo       string  `json:"order_no"`
-	ProductName   string  `json:"product_name"`
-	Quantity      float64 `json:"quantity"`
-	Unit          string  `json:"unit"`
-	EstimatedAmt  float64 `json:"estimated_amount"`
-	PaymentMethod string  `json:"payment_method"`
-	DeliveryNote  string  `json:"delivery_note"`
+	OrderID         uint64         `json:"order_id"`
+	OrderNo         string         `json:"order_no"`
+	ProductID       uint64         `json:"product_id"`
+	ProductName     string         `json:"product_name"`
+	Quantity        float64        `json:"quantity"`
+	Unit            string         `json:"unit"`
+	EstimatedAmt    float64        `json:"estimated_amount"`
+	PaymentMethod   string         `json:"payment_method"`
+	DeliveryNote    string         `json:"delivery_note"`
+	ContactName     string         `json:"contact_name,omitempty"`
+	ContactPhone    string         `json:"contact_phone,omitempty"`
+	WarehouseName   string         `json:"warehouse_name,omitempty"`
+	DeliveryAddress string         `json:"delivery_address,omitempty"`
+	DeliveryMethod  string         `json:"delivery_method,omitempty"`
+	Remark          string         `json:"remark,omitempty"`
+	OrderDetail     map[string]any `json:"order_detail,omitempty"`
 }
 
 func (o OrderDraft) Value() (driver.Value, error) {
@@ -148,6 +166,7 @@ type AIProcurement struct {
 	OrderDraft        OrderDraft        `gorm:"type:json;comment:订单草稿" json:"order_draft"`
 	FinancePlans      FinancePlans      `gorm:"type:json;comment:融资匹配方案" json:"finance_plans"`
 	AuditItems        AuditItems        `gorm:"type:json;comment:审核提交检查项" json:"audit_items"`
+	HistorySaved      bool              `gorm:"default:true;index;comment:是否保存到历史AI采购" json:"history_saved"`
 	EnterpriseID      uint64            `gorm:"index;comment:所属企业ID" json:"enterprise_id"`
 	CreatedBy         uint64            `gorm:"index;comment:创建者" json:"created_by"`
 	CreatedAt         time.Time         `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`

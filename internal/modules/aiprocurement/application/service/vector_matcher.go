@@ -82,17 +82,25 @@ func (m *productVectorMatcher) Match(ctx context.Context, parsed entity.ParsedIn
 			continue
 		}
 		matches = append(matches, entity.MatchedProduct{
-			ProductID:    product.ID,
-			ProductNo:    product.ProductNo,
-			ProductName:  product.Name,
-			Category:     product.SubCategory,
-			SteelMill:    product.SteelMill,
-			Quantity:     qty,
-			UnitPrice:    product.UnitPrice,
-			TotalAmount:  qty * product.UnitPrice,
-			Score:        int(math.Round(score)),
-			MatchReason:  fmt.Sprintf("向量召回匹配，结合商品语义、品类和库存重排，pgvector相似度 %.2f", hit.Score),
-			EnterpriseID: product.EnterpriseID,
+			ProductID:     product.ID,
+			ProductNo:     product.ProductNo,
+			ProductName:   product.Name,
+			Category:      product.SubCategory,
+			SteelMill:     product.SteelMill,
+			Quantity:      qty,
+			AvailableQty:  product.AvailableQty,
+			UnitPrice:     product.UnitPrice,
+			TotalAmount:   qty * product.UnitPrice,
+			Score:         int(math.Round(score)),
+			MatchReason:   fmt.Sprintf("向量召回匹配，结合商品语义、品类和库存重排，pgvector相似度 %.2f", hit.Score),
+			EnterpriseID:  product.EnterpriseID,
+			Spec:          structToMap(product.Spec),
+			Warehouse:     structToMap(product.WarehouseInfo),
+			BundleNo:      product.BundleNo,
+			DeliveryDays:  product.DeliveryDays,
+			QuoteValidity: product.QuoteValidity,
+			QualityCert:   product.QualityCert,
+			Description:   product.Description,
 		})
 	}
 	return matches, nil
