@@ -66,11 +66,12 @@ ai_procurement:
   confidence_threshold: ${AI_PROCUREMENT_CONFIDENCE_THRESHOLD:0.78}
   vector_search:
     enabled: ${AI_PROCUREMENT_VECTOR_SEARCH_ENABLED:false}
-    provider: ${AI_PROCUREMENT_VECTOR_PROVIDER:milvus}
-    endpoint: ${MILVUS_ENDPOINT:localhost:19530}
-    database: ${MILVUS_DATABASE:steellink_ai}
-    username: ${MILVUS_USERNAME:}
-    password_env: ${MILVUS_PASSWORD_ENV:MILVUS_PASSWORD}
+    provider: ${AI_PROCUREMENT_VECTOR_PROVIDER:pgvector}
+    endpoint: ${PGVECTOR_ENDPOINT:}
+    database: ${PGVECTOR_DATABASE:steellink_vectors}
+    username: ${PGVECTOR_USERNAME:}
+    password_env: ${PGVECTOR_PASSWORD_ENV:PGVECTOR_PASSWORD}
+    connection_env: ${PGVECTOR_DSN_ENV:PGVECTOR_DSN}
     product_collection: ${AI_PRODUCT_VECTOR_COLLECTION:ai_product_embeddings}
     supplier_collection: ${AI_SUPPLIER_VECTOR_COLLECTION:ai_supplier_embeddings}
     finance_product_collection: ${AI_FINANCE_PRODUCT_VECTOR_COLLECTION:ai_finance_product_embeddings}

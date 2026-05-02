@@ -17,7 +17,7 @@ import (
 type productVectorMatcher struct {
 	cfg         config.VectorSearchConfig
 	embedder    *embedding.Client
-	vectorStore *vectorstore.MilvusClient
+	vectorStore *vectorstore.PGVectorClient
 	productRepo productRepository.ProductRepository
 }
 
@@ -26,10 +26,13 @@ func newProductVectorMatcher(productRepo productRepository.ProductRepository) *p
 	if !cfg.Enabled {
 		return nil
 	}
+	if cfg.Provider != "" && cfg.Provider != "pgvector" {
+		return nil
+	}
 	return &productVectorMatcher{
 		cfg:         cfg,
 		embedder:    embedding.NewClient(cfg),
-		vectorStore: vectorstore.NewMilvusClient(cfg),
+		vectorStore: vectorstore.NewPGVectorClient(cfg),
 		productRepo: productRepo,
 	}
 }
@@ -88,7 +91,7 @@ func (m *productVectorMatcher) Match(ctx context.Context, parsed entity.ParsedIn
 			UnitPrice:    product.UnitPrice,
 			TotalAmount:  qty * product.UnitPrice,
 			Score:        int(math.Round(score)),
-			MatchReason:  fmt.Sprintf("向量召回匹配，结合商品语义、品类和库存重排，Milvus相似度 %.2f", hit.Score),
+			MatchReason:  fmt.Sprintf("向量召回匹配，结合商品语义、品类和库存重排，pgvector相似度 %.2f", hit.Score),
 			EnterpriseID: product.EnterpriseID,
 		})
 	}

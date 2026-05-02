@@ -7,6 +7,7 @@
 - [x] `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/api` 已通过
 - [ ] 已确认生产环境设置 `AI_PROCUREMENT_CONFIG_SYNC_TOKEN`
 - [ ] 已确认 Admin runtime config endpoint 可从 Backend 服务器访问
+- [ ] 已确认生产环境设置 `PGVECTOR_DSN`
 
 ## 发布后验证
 

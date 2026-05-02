@@ -11,7 +11,8 @@
 
 - 业务后端只读取 Admin 保存的环境变量名，不读取 Admin 明文密钥。
 - MiniMax API Key 仍来自业务后端 `MINIMAX_API_KEY`。
-- Milvus 密码仍来自业务后端 `MILVUS_PASSWORD` 或 Admin 配置中的 password env 对应变量。
+- pgvector DSN 仍来自业务后端 `PGVECTOR_DSN` 或 Admin 配置中的 connection env 对应变量。
+- Postgres 密码仍来自业务后端 `PGVECTOR_PASSWORD` 或 Admin 配置中的 password env 对应变量。
 
 ## 回归
 

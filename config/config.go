@@ -141,6 +141,7 @@ type VectorSearchConfig struct {
 	Database                 string  `mapstructure:"database"`
 	Username                 string  `mapstructure:"username"`
 	PasswordEnv              string  `mapstructure:"password_env"`
+	ConnectionEnv            string  `mapstructure:"connection_env"`
 	ProductCollection        string  `mapstructure:"product_collection"`
 	SupplierCollection       string  `mapstructure:"supplier_collection"`
 	FinanceProductCollection string  `mapstructure:"finance_product_collection"`
@@ -188,6 +189,7 @@ type aiProcurementAdminConfig struct {
 		VectorDatabase           string  `json:"vectorDatabase"`
 		VectorUsername           string  `json:"vectorUsername"`
 		VectorPasswordEnv        string  `json:"vectorPasswordEnv"`
+		VectorConnectionEnv      string  `json:"vectorConnectionEnv"`
 		ProductCollection        string  `json:"productCollection"`
 		SupplierCollection       string  `json:"supplierCollection"`
 		FinanceProductCollection string  `json:"financeProductCollection"`
@@ -208,6 +210,18 @@ func (c VectorSearchConfig) Password() string {
 		return ""
 	}
 	return os.Getenv(c.PasswordEnv)
+}
+
+func (c VectorSearchConfig) ConnectionString() string {
+	if c.ConnectionEnv != "" {
+		if value := os.Getenv(c.ConnectionEnv); value != "" {
+			return value
+		}
+	}
+	if strings.HasPrefix(c.Endpoint, "postgres://") || strings.HasPrefix(c.Endpoint, "postgresql://") {
+		return c.Endpoint
+	}
+	return ""
 }
 
 func (c VectorSearchConfig) EmbeddingAPIKey() string {
@@ -300,16 +314,16 @@ func applyRuntimeConfigDefaults(c *RuntimeConfig) {
 
 func applyVectorSearchDefaults(c *VectorSearchConfig) {
 	if c.Provider == "" {
-		c.Provider = "milvus"
-	}
-	if c.Endpoint == "" {
-		c.Endpoint = "localhost:19530"
+		c.Provider = "pgvector"
 	}
 	if c.Database == "" {
-		c.Database = "steellink_ai"
+		c.Database = "steellink_vectors"
+	}
+	if c.ConnectionEnv == "" {
+		c.ConnectionEnv = "PGVECTOR_DSN"
 	}
 	if c.PasswordEnv == "" {
-		c.PasswordEnv = "MILVUS_PASSWORD"
+		c.PasswordEnv = "PGVECTOR_PASSWORD"
 	}
 	if c.ProductCollection == "" {
 		c.ProductCollection = "ai_product_embeddings"
@@ -545,17 +559,20 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("AI_PROCUREMENT_VECTOR_PROVIDER"); v != "" {
 		c.AIProcurement.VectorSearch.Provider = v
 	}
-	if v := os.Getenv("MILVUS_ENDPOINT"); v != "" {
+	if v := os.Getenv("PGVECTOR_ENDPOINT"); v != "" {
 		c.AIProcurement.VectorSearch.Endpoint = v
 	}
-	if v := os.Getenv("MILVUS_DATABASE"); v != "" {
+	if v := os.Getenv("PGVECTOR_DATABASE"); v != "" {
 		c.AIProcurement.VectorSearch.Database = v
 	}
-	if v := os.Getenv("MILVUS_USERNAME"); v != "" {
+	if v := os.Getenv("PGVECTOR_USERNAME"); v != "" {
 		c.AIProcurement.VectorSearch.Username = v
 	}
-	if v := os.Getenv("MILVUS_PASSWORD_ENV"); v != "" {
+	if v := os.Getenv("PGVECTOR_PASSWORD_ENV"); v != "" {
 		c.AIProcurement.VectorSearch.PasswordEnv = v
+	}
+	if v := os.Getenv("PGVECTOR_DSN_ENV"); v != "" {
+		c.AIProcurement.VectorSearch.ConnectionEnv = v
 	}
 	if v := os.Getenv("AI_PRODUCT_VECTOR_COLLECTION"); v != "" {
 		c.AIProcurement.VectorSearch.ProductCollection = v
@@ -739,6 +756,9 @@ func applyAdminAIProcurementConfig(target *AIProcurementConfig, source aiProcure
 	}
 	if source.Matching.VectorPasswordEnv != "" {
 		target.VectorSearch.PasswordEnv = source.Matching.VectorPasswordEnv
+	}
+	if source.Matching.VectorConnectionEnv != "" {
+		target.VectorSearch.ConnectionEnv = source.Matching.VectorConnectionEnv
 	}
 	if source.Matching.ProductCollection != "" {
 		target.VectorSearch.ProductCollection = source.Matching.ProductCollection

@@ -7,7 +7,7 @@ AI采购模型解析和向量召回已经支持 env/config 配置，但运营希
 ## 目标
 
 - SteelLink-backend 支持从 SteelLink-admin 拉取 AI采购运行时配置。
-- Admin 配置覆盖模型解析开关、模型参数、向量召回开关、Milvus 和 embedding 元数据。
+- Admin 配置覆盖模型解析开关、模型参数、向量召回开关、pgvector 和 embedding 元数据。
 - 真实密钥仍只从业务后端环境变量读取。
 - 拉取失败时保留本地 env/config 配置并继续规则兜底。
 
@@ -20,7 +20,7 @@ AI采购模型解析和向量召回已经支持 env/config 配置，但运营希
 
 ## 非范围
 
-- 不从 Admin 同步真实 API Key 或 Milvus 密码。
+- 不从 Admin 同步真实 API Key、pgvector DSN 或 Postgres 密码。
 - 不实现 Admin 推送配置到业务后端。
 - 不实现配置变更审计，审计仍在 Admin 后端记录。
 
