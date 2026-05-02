@@ -76,7 +76,7 @@ ai_procurement:
     supplier_collection: ${AI_SUPPLIER_VECTOR_COLLECTION:ai_supplier_embeddings}
     finance_product_collection: ${AI_FINANCE_PRODUCT_VECTOR_COLLECTION:ai_finance_product_embeddings}
     embedding_provider: ${AI_EMBEDDING_PROVIDER:minimax}
-    embedding_base_url: ${AI_EMBEDDING_BASE_URL:https://api.minimax.io/v1/embeddings}
+    embedding_base_url: ${AI_EMBEDDING_BASE_URL:https://api.minimax.chat/v1/embeddings}
     embedding_api_key_env: ${AI_EMBEDDING_API_KEY_ENV:MINIMAX_API_KEY}
     embedding_model: ${AI_EMBEDDING_MODEL:embo-01}
     dimension: ${AI_EMBEDDING_DIMENSION:1536}

@@ -338,7 +338,7 @@ func applyVectorSearchDefaults(c *VectorSearchConfig) {
 		c.EmbeddingProvider = "minimax"
 	}
 	if c.EmbeddingBaseURL == "" {
-		c.EmbeddingBaseURL = "https://api.minimax.io/v1/embeddings"
+		c.EmbeddingBaseURL = "https://api.minimax.chat/v1/embeddings"
 	}
 	if c.EmbeddingAPIKeyEnv == "" {
 		c.EmbeddingAPIKeyEnv = "MINIMAX_API_KEY"
