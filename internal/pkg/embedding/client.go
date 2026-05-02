@@ -39,7 +39,11 @@ type response struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
-	Vectors [][]float32 `json:"vectors"`
+	BaseResp struct {
+		StatusCode int    `json:"status_code"`
+		StatusMsg  string `json:"status_msg"`
+	} `json:"base_resp"`
+	Vectors json.RawMessage `json:"vectors"`
 }
 
 func NewClient(cfg config.VectorSearchConfig) *Client {
@@ -96,13 +100,16 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
-	if len(parsed.Vectors) > 0 && len(parsed.Vectors[0]) > 0 {
-		return parsed.Vectors[0], nil
+	if parsed.BaseResp.StatusCode != 0 {
+		return nil, fmt.Errorf("embedding service returned status_code=%d status_msg=%s", parsed.BaseResp.StatusCode, parsed.BaseResp.StatusMsg)
+	}
+	if vector := parseVectors(parsed.Vectors); len(vector) > 0 {
+		return vector, nil
 	}
 	if len(parsed.Data) > 0 && len(parsed.Data[0].Embedding) > 0 {
 		return parsed.Data[0].Embedding, nil
 	}
-	return nil, fmt.Errorf("embedding service returned empty embedding")
+	return nil, fmt.Errorf("embedding service returned empty embedding: %s", trimBody(body))
 }
 
 func (c *Client) buildRequest(text string) (string, []byte, error) {
@@ -138,4 +145,39 @@ func (c *Client) minimaxEndpoint() string {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func parseVectors(raw json.RawMessage) []float32 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var matrix [][]float32
+	if err := json.Unmarshal(raw, &matrix); err == nil && len(matrix) > 0 && len(matrix[0]) > 0 {
+		return matrix[0]
+	}
+	var objects []struct {
+		Embedding []float32 `json:"embedding"`
+		Vector    []float32 `json:"vector"`
+	}
+	if err := json.Unmarshal(raw, &objects); err == nil && len(objects) > 0 {
+		if len(objects[0].Embedding) > 0 {
+			return objects[0].Embedding
+		}
+		if len(objects[0].Vector) > 0 {
+			return objects[0].Vector
+		}
+	}
+	var vector []float32
+	if err := json.Unmarshal(raw, &vector); err == nil && len(vector) > 0 {
+		return vector
+	}
+	return nil
+}
+
+func trimBody(body []byte) string {
+	value := strings.TrimSpace(string(body))
+	if len(value) <= 500 {
+		return value
+	}
+	return value[:500] + "..."
 }
