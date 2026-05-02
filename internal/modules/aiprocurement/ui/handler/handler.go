@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -28,6 +30,53 @@ func (h *ProcurementHandler) Parse(c *gin.Context) {
 		return
 	}
 	result, err := h.svc.Parse(c.Request.Context(), req.Prompt)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) ConfirmInstruction(c *gin.Context) {
+	var req dto.ConfirmInstructionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.svc.ConfirmInstruction(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) MatchProducts(c *gin.Context) {
+	var req dto.MatchProductsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.svc.MatchProducts(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) GenerateOrder(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req dto.GenerateOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.svc.GenerateOrder(c.Request.Context(), &req, claims.UserID, claims.EnterpriseID)
 	if err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return
@@ -103,7 +152,36 @@ func (h *ProcurementHandler) SubmitReview(c *gin.Context) {
 		response.BadRequest(c, "无效的AI采购单ID")
 		return
 	}
-	result, svcErr := h.svc.SubmitReview(c.Request.Context(), id, claims.UserID, claims.EnterpriseID)
+	var req dto.SubmitReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.svc.SubmitReviewWithOptions(c.Request.Context(), id, claims.UserID, claims.EnterpriseID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) MatchFinance(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的AI采购单ID")
+		return
+	}
+	var req dto.MatchFinanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.svc.MatchFinance(c.Request.Context(), id, claims.UserID, claims.EnterpriseID, &req)
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return

@@ -50,6 +50,9 @@ func (r *procurementRepository) List(ctx context.Context, query *repository.Proc
 	if query.CreatedBy > 0 {
 		db = db.Where("created_by = ?", query.CreatedBy)
 	}
+	if query.HistorySaved != nil {
+		db = db.Where("history_saved = ?", *query.HistorySaved)
+	}
 	if query.Status != "" {
 		db = db.Where("status = ?", query.Status)
 	}

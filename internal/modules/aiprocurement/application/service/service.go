@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
+	orderService "github.com/Taishi-co/SteelLink-backend/internal/modules/order/application/service"
+	orderDTO "github.com/Taishi-co/SteelLink-backend/internal/modules/order/ui/dto"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
@@ -21,6 +24,7 @@ import (
 type ProcurementService struct {
 	procurementRepo repository.ProcurementRepository
 	productRepo     productRepository.ProductRepository
+	orderSvc        *orderService.OrderService
 }
 
 func NewProcurementService() *ProcurementService {
@@ -28,6 +32,7 @@ func NewProcurementService() *ProcurementService {
 	return &ProcurementService{
 		procurementRepo: persistence.NewProcurementRepository(),
 		productRepo:     productRepo,
+		orderSvc:        orderService.NewOrderService(),
 	}
 }
 
@@ -41,21 +46,122 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 	if err != nil || !ok {
 		parsed = parseInstructionByRule(prompt)
 	}
+	return &dto.ParseResponse{
+		Parsed:          parsed,
+		MatchedProducts: entity.MatchedProducts{},
+		OrderDraft:      entity.OrderDraft{},
+		FinancePlans:    entity.FinancePlans{},
+		AuditItems:      buildAuditItems(parsed, nil, nil),
+		Stages:          buildStages(entity.StageInstructionParsing, false, parsed.FinancingRequired),
+	}, nil
+}
+
+func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.ConfirmInstructionRequest) (*dto.ParseResponse, error) {
+	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	return &dto.ParseResponse{
+		Parsed:          parsed,
+		MatchedProducts: entity.MatchedProducts{},
+		OrderDraft:      entity.OrderDraft{},
+		FinancePlans:    entity.FinancePlans{},
+		AuditItems:      buildAuditItems(parsed, nil, nil),
+		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
+	}, nil
+}
+
+func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
+	parsed := normalizeParsedInput(req.Parsed, "")
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
 	}
-	orderDraft := buildOrderDraft(parsed, matches)
-	financePlans := buildFinancePlans(parsed, orderDraft.EstimatedAmt)
-	auditItems := buildAuditItems(parsed, matches, financePlans)
-	return &dto.ParseResponse{
-		Parsed:          parsed,
+	return &dto.MatchProductsResponse{
 		MatchedProducts: matches,
-		OrderDraft:      orderDraft,
-		FinancePlans:    financePlans,
-		AuditItems:      auditItems,
-		Stages:          buildStages(entity.StageReviewSubmission, false),
+		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
 	}, nil
+}
+
+func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.GenerateOrderRequest, userID, enterpriseID uint64) (*dto.GenerateOrderResponse, error) {
+	if userID == 0 {
+		return nil, ecode.ErrUnauthorized.WithMessage("未登录")
+	}
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能生成AI采购订单")
+	}
+	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	selected := req.SelectedProduct
+	if selected.ProductID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再生成订单")
+	}
+	quantity := req.OrderForm.Quantity
+	if quantity <= 0 {
+		quantity = parsed.Quantity
+	}
+	orderInfo, err := s.orderSvc.Create(ctx, &orderDTO.CreateOrderRequest{
+		ProductID: selected.ProductID,
+		Quantity:  quantity,
+	}, userID, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
+	selected.Selected = true
+	selected.Quantity = quantity
+	selected.TotalAmount = quantity * selected.UnitPrice
+	orderDraft := buildOrderDraftFromForm(parsed, selected, req.OrderForm, orderInfo)
+	financePlans := entity.FinancePlans{}
+	nextStage := entity.StageReviewSubmission
+	status := entity.ProcurementStatusOrderGenerated
+	if parsed.FinancingRequired {
+		nextStage = entity.StageFinancingMatching
+		status = entity.ProcurementStatusFinancingReady
+	}
+	procurement := &entity.AIProcurement{
+		Prompt:            strings.TrimSpace(req.Prompt),
+		ProductName:       parsed.ProductName,
+		Category:          parsed.Category,
+		Quantity:          quantity,
+		Unit:              parsed.Unit,
+		Usage:             parsed.Usage,
+		FinancingRequired: parsed.FinancingRequired,
+		CurrentStage:      nextStage,
+		Status:            status,
+		ParsedInstruction: parsed,
+		MatchedProducts:   entity.MatchedProducts{selected},
+		OrderDraft:        orderDraft,
+		FinancePlans:      financePlans,
+		AuditItems:        buildAuditItems(parsed, entity.MatchedProducts{selected}, financePlans),
+		HistorySaved:      false,
+		EnterpriseID:      enterpriseID,
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+	}
+	if err := s.procurementRepo.Create(ctx, procurement); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建AI采购流程记录失败")
+	}
+	return &dto.GenerateOrderResponse{Procurement: toProcurementInfo(procurement), OrderDraft: orderDraft}, nil
+}
+
+func (s *ProcurementService) MatchFinance(ctx context.Context, id, userID, enterpriseID uint64, req *dto.MatchFinanceRequest) (*dto.ProcurementInfo, error) {
+	item, err := s.findOwned(ctx, id, userID, enterpriseID, "匹配融资")
+	if err != nil {
+		return nil, err
+	}
+	item.FinancingRequired = req.FinancingRequired
+	item.ParsedInstruction.FinancingRequired = req.FinancingRequired
+	if req.FinancingRequired {
+		item.FinancePlans = buildFinancePlans(item.ParsedInstruction, item.OrderDraft.EstimatedAmt)
+		item.CurrentStage = entity.StageFinancingMatching
+		item.Status = entity.ProcurementStatusFinancingReady
+	} else {
+		item.FinancePlans = entity.FinancePlans{}
+		item.CurrentStage = entity.StageReviewSubmission
+		item.Status = entity.ProcurementStatusOrderGenerated
+	}
+	item.AuditItems = buildAuditItems(item.ParsedInstruction, item.MatchedProducts, item.FinancePlans)
+	item.UpdatedBy = userID
+	if err := s.procurementRepo.Update(ctx, item); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("融资匹配更新失败")
+	}
+	return toProcurementInfo(item), nil
 }
 
 func (s *ProcurementService) Create(ctx context.Context, req *dto.CreateProcurementRequest, userID, enterpriseID uint64) (*dto.ProcurementInfo, error) {
@@ -69,6 +175,14 @@ func (s *ProcurementService) Create(ctx context.Context, req *dto.CreateProcurem
 	if err != nil {
 		return nil, err
 	}
+	matches, err := s.matchProducts(ctx, parsedResult.Parsed)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
+	}
+	parsedResult.MatchedProducts = matches
+	parsedResult.OrderDraft = buildOrderDraft(parsedResult.Parsed, matches)
+	parsedResult.FinancePlans = buildFinancePlans(parsedResult.Parsed, parsedResult.OrderDraft.EstimatedAmt)
+	parsedResult.AuditItems = buildAuditItems(parsedResult.Parsed, matches, parsedResult.FinancePlans)
 	procurement := &entity.AIProcurement{
 		Prompt:            strings.TrimSpace(req.Prompt),
 		ProductName:       parsedResult.Parsed.ProductName,
@@ -112,6 +226,7 @@ func (s *ProcurementService) ListMine(ctx context.Context, req *dto.ProcurementL
 	if req.PageSize <= 0 {
 		req.PageSize = 10
 	}
+	historySaved := true
 	items, total, err := s.procurementRepo.List(ctx, &repository.ProcurementQuery{
 		Page:         req.Page,
 		PageSize:     req.PageSize,
@@ -119,6 +234,7 @@ func (s *ProcurementService) ListMine(ctx context.Context, req *dto.ProcurementL
 		Status:       entity.ProcurementStatus(req.Status),
 		EnterpriseID: enterpriseID,
 		CreatedBy:    userID,
+		HistorySaved: &historySaved,
 	})
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -141,6 +257,38 @@ func (s *ProcurementService) GetByID(ctx context.Context, id, userID, enterprise
 }
 
 func (s *ProcurementService) SubmitReview(ctx context.Context, id, userID, enterpriseID uint64) (*dto.ProcurementInfo, error) {
+	return s.SubmitReviewWithOptions(ctx, id, userID, enterpriseID, &dto.SubmitReviewRequest{SaveHistory: boolPtr(true)})
+}
+
+func (s *ProcurementService) SubmitReviewWithOptions(ctx context.Context, id, userID, enterpriseID uint64, req *dto.SubmitReviewRequest) (*dto.ProcurementInfo, error) {
+	item, err := s.findOwned(ctx, id, userID, enterpriseID, "提交")
+	if err != nil {
+		return nil, err
+	}
+	if len(item.MatchedProducts) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("没有可提交审核的商品匹配结果")
+	}
+	if item.OrderDraft.OrderID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请先生成真实订单后再提交审核")
+	}
+	now := time.Now()
+	item.CurrentStage = entity.StageReviewSubmission
+	item.Status = entity.ProcurementStatusReviewSubmitted
+	item.ReviewSubmittedAt = &now
+	if req != nil && req.SaveHistory != nil {
+		item.HistorySaved = *req.SaveHistory
+	} else {
+		item.HistorySaved = true
+	}
+	item.UpdatedBy = userID
+	item.AuditItems = markAuditSubmitted(item.AuditItems)
+	if err := s.procurementRepo.Update(ctx, item); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("提交审核失败")
+	}
+	return toProcurementInfo(item), nil
+}
+
+func (s *ProcurementService) findOwned(ctx context.Context, id, userID, enterpriseID uint64, action string) (*entity.AIProcurement, error) {
 	item, err := s.procurementRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -149,21 +297,9 @@ func (s *ProcurementService) SubmitReview(ctx context.Context, id, userID, enter
 		return nil, ecode.ErrNotFound.WithMessage("AI采购单不存在")
 	}
 	if item.CreatedBy != userID && item.EnterpriseID != enterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("无权提交该AI采购单")
+		return nil, ecode.ErrForbidden.WithMessage("无权" + action + "该AI采购单")
 	}
-	if len(item.MatchedProducts) == 0 {
-		return nil, ecode.ErrBadRequest.WithMessage("没有可提交审核的商品匹配结果")
-	}
-	now := time.Now()
-	item.CurrentStage = entity.StageReviewSubmission
-	item.Status = entity.ProcurementStatusReviewSubmitted
-	item.ReviewSubmittedAt = &now
-	item.UpdatedBy = userID
-	item.AuditItems = markAuditSubmitted(item.AuditItems)
-	if err := s.procurementRepo.Update(ctx, item); err != nil {
-		return nil, ecode.ErrDatabase.WithMessage("提交审核失败")
-	}
-	return toProcurementInfo(item), nil
+	return item, nil
 }
 
 func parseInstructionByRule(prompt string) entity.ParsedInstruction {
@@ -182,6 +318,15 @@ func parseInstructionByRule(prompt string) entity.ParsedInstruction {
 	}
 }
 
+func normalizeParsedInput(parsed entity.ParsedInstruction, prompt string) entity.ParsedInstruction {
+	parsed.ProductName = strings.TrimSpace(parsed.ProductName)
+	parsed.Category = strings.TrimSpace(parsed.Category)
+	parsed.Unit = strings.TrimSpace(parsed.Unit)
+	parsed.Usage = strings.TrimSpace(parsed.Usage)
+	normalizeParsedInstruction(&parsed, prompt)
+	return parsed
+}
+
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
 	if matcher := newProductVectorMatcher(s.productRepo); matcher != nil {
 		matches, err := matcher.Match(ctx, parsed)
@@ -196,7 +341,7 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 	status := int(productEntity.ProductStatusOnSale)
 	products, _, err := s.productRepo.List(ctx, &productRepository.ProductQuery{
 		Page:     1,
-		PageSize: 5,
+		PageSize: 10,
 		Keyword:  parsed.ProductName,
 		Category: parsed.Category,
 		Status:   &status,
@@ -208,7 +353,7 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 	if len(products) == 0 && parsed.Category != "" {
 		products, _, err = s.productRepo.List(ctx, &productRepository.ProductQuery{
 			Page:     1,
-			PageSize: 5,
+			PageSize: 10,
 			Category: parsed.Category,
 			Status:   &status,
 			SortBy:   "stock_desc",
@@ -241,17 +386,25 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 			score = 95
 		}
 		matches = append(matches, entity.MatchedProduct{
-			ProductID:    product.ID,
-			ProductNo:    product.ProductNo,
-			ProductName:  product.Name,
-			Category:     product.SubCategory,
-			SteelMill:    product.SteelMill,
-			Quantity:     qty,
-			UnitPrice:    product.UnitPrice,
-			TotalAmount:  qty * product.UnitPrice,
-			Score:        score,
-			MatchReason:  "按商品名称、品类、可用库存综合匹配",
-			EnterpriseID: product.EnterpriseID,
+			ProductID:     product.ID,
+			ProductNo:     product.ProductNo,
+			ProductName:   product.Name,
+			Category:      product.SubCategory,
+			SteelMill:     product.SteelMill,
+			Quantity:      qty,
+			AvailableQty:  product.AvailableQty,
+			UnitPrice:     product.UnitPrice,
+			TotalAmount:   qty * product.UnitPrice,
+			Score:         score,
+			MatchReason:   "按商品名称、品类、可用库存综合匹配",
+			EnterpriseID:  product.EnterpriseID,
+			Spec:          structToMap(product.Spec),
+			Warehouse:     structToMap(product.WarehouseInfo),
+			BundleNo:      product.BundleNo,
+			DeliveryDays:  product.DeliveryDays,
+			QuoteValidity: product.QuoteValidity,
+			QualityCert:   product.QualityCert,
+			Description:   product.Description,
 		})
 	}
 	return matches, nil
@@ -269,6 +422,45 @@ func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProd
 		EstimatedAmt:  amount,
 		PaymentMethod: "线上合同 + 对公转账",
 		DeliveryNote:  "按匹配供应商交付周期生成订单",
+	}
+}
+
+func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.MatchedProduct, form dto.OrderForm, orderInfo *orderDTO.OrderInfo) entity.OrderDraft {
+	quantity := form.Quantity
+	if quantity <= 0 {
+		quantity = parsed.Quantity
+	}
+	amount := quantity * selected.UnitPrice
+	orderID := uint64(0)
+	orderNo := ""
+	orderDetail := map[string]any{}
+	if orderInfo != nil {
+		orderID = orderInfo.ID
+		orderNo = orderInfo.OrderNo
+		amount = orderInfo.TotalAmount
+		orderDetail = structToMap(orderInfo)
+	}
+	deliveryNote := strings.TrimSpace(form.DeliveryNote)
+	if deliveryNote == "" {
+		deliveryNote = form.DeliveryMethod + "；" + form.DeliveryAddress
+	}
+	return entity.OrderDraft{
+		OrderID:         orderID,
+		OrderNo:         orderNo,
+		ProductID:       selected.ProductID,
+		ProductName:     selected.ProductName,
+		Quantity:        quantity,
+		Unit:            parsed.Unit,
+		EstimatedAmt:    amount,
+		PaymentMethod:   form.PaymentMethod,
+		DeliveryNote:    deliveryNote,
+		ContactName:     strings.TrimSpace(form.ContactName),
+		ContactPhone:    strings.TrimSpace(form.ContactPhone),
+		WarehouseName:   strings.TrimSpace(form.WarehouseName),
+		DeliveryAddress: strings.TrimSpace(form.DeliveryAddress),
+		DeliveryMethod:  strings.TrimSpace(form.DeliveryMethod),
+		Remark:          strings.TrimSpace(form.Remark),
+		OrderDetail:     orderDetail,
 	}
 }
 
@@ -413,7 +605,8 @@ func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
 		OrderDraft:        item.OrderDraft,
 		FinancePlans:      item.FinancePlans,
 		AuditItems:        item.AuditItems,
-		Stages:            buildStages(item.CurrentStage, item.Status == entity.ProcurementStatusReviewSubmitted),
+		Stages:            buildStages(item.CurrentStage, item.Status == entity.ProcurementStatusReviewSubmitted, item.FinancingRequired),
+		HistorySaved:      item.HistorySaved,
 		EnterpriseID:      item.EnterpriseID,
 		CreatedBy:         item.CreatedBy,
 		CreatedAt:         item.CreatedAt,
@@ -422,7 +615,7 @@ func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
 	}
 }
 
-func buildStages(current entity.WorkflowStage, submitted bool) []dto.StageInfo {
+func buildStages(current entity.WorkflowStage, submitted bool, includeFinance bool) []dto.StageInfo {
 	names := map[entity.WorkflowStage]string{
 		entity.StageInstructionParsing: "指令解析",
 		entity.StageProductMatching:    "商品匹配",
@@ -437,15 +630,24 @@ func buildStages(current entity.WorkflowStage, submitted bool) []dto.StageInfo {
 		entity.StageFinancingMatching:  "匹配订单融资和备选金融产品",
 		entity.StageReviewSubmission:   "提交平台审核并进入后续履约",
 	}
+	workflowStages := entity.WorkflowStages()
+	if !includeFinance {
+		workflowStages = []entity.WorkflowStage{
+			entity.StageInstructionParsing,
+			entity.StageProductMatching,
+			entity.StageOrderGeneration,
+			entity.StageReviewSubmission,
+		}
+	}
 	currentIndex := 0
-	for idx, stage := range entity.WorkflowStages() {
+	for idx, stage := range workflowStages {
 		if stage == current {
 			currentIndex = idx
 			break
 		}
 	}
-	stages := make([]dto.StageInfo, 0, len(entity.WorkflowStages()))
-	for idx, stage := range entity.WorkflowStages() {
+	stages := make([]dto.StageInfo, 0, len(workflowStages))
+	for idx, stage := range workflowStages {
 		status := "pending"
 		if idx < currentIndex || submitted {
 			status = "completed"
@@ -456,4 +658,23 @@ func buildStages(current entity.WorkflowStage, submitted bool) []dto.StageInfo {
 		stages = append(stages, dto.StageInfo{Code: stage, Name: names[stage], Status: status, Description: descriptions[stage]})
 	}
 	return stages
+}
+
+func structToMap(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(bytes, &result); err != nil {
+		return nil
+	}
+	return result
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

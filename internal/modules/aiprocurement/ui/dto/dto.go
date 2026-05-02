@@ -14,6 +14,38 @@ type CreateProcurementRequest struct {
 	Prompt string `json:"prompt" binding:"required"`
 }
 
+type ConfirmInstructionRequest struct {
+	Prompt string                   `json:"prompt"`
+	Parsed entity.ParsedInstruction `json:"parsed" binding:"required"`
+}
+
+type MatchProductsRequest struct {
+	Parsed entity.ParsedInstruction `json:"parsed" binding:"required"`
+}
+
+type GenerateOrderRequest struct {
+	Prompt          string                   `json:"prompt"`
+	Parsed          entity.ParsedInstruction `json:"parsed" binding:"required"`
+	SelectedProduct entity.MatchedProduct    `json:"selected_product" binding:"required"`
+	OrderForm       OrderForm                `json:"order_form" binding:"required"`
+}
+
+type OrderForm struct {
+	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
+	ContactName     string  `json:"contact_name" binding:"required"`
+	ContactPhone    string  `json:"contact_phone" binding:"required"`
+	WarehouseName   string  `json:"warehouse_name" binding:"required"`
+	DeliveryAddress string  `json:"delivery_address" binding:"required"`
+	DeliveryMethod  string  `json:"delivery_method" binding:"required"`
+	PaymentMethod   string  `json:"payment_method" binding:"required"`
+	DeliveryNote    string  `json:"delivery_note"`
+	Remark          string  `json:"remark"`
+}
+
+type MatchFinanceRequest struct {
+	FinancingRequired bool `json:"financing_required"`
+}
+
 type ProcurementListRequest struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size"`
@@ -22,7 +54,8 @@ type ProcurementListRequest struct {
 }
 
 type SubmitReviewRequest struct {
-	Remark string `json:"remark"`
+	Remark      string `json:"remark"`
+	SaveHistory *bool  `json:"save_history"`
 }
 
 type VectorSyncRequest struct {
@@ -56,6 +89,16 @@ type ParseResponse struct {
 	Stages          []StageInfo              `json:"stages"`
 }
 
+type MatchProductsResponse struct {
+	MatchedProducts entity.MatchedProducts `json:"matched_products"`
+	Stages          []StageInfo            `json:"stages"`
+}
+
+type GenerateOrderResponse struct {
+	Procurement *ProcurementInfo  `json:"procurement"`
+	OrderDraft  entity.OrderDraft `json:"order_draft"`
+}
+
 type ProcurementInfo struct {
 	ID                uint64                   `json:"id"`
 	ProcurementNo     string                   `json:"procurement_no"`
@@ -74,6 +117,7 @@ type ProcurementInfo struct {
 	FinancePlans      entity.FinancePlans      `json:"finance_plans"`
 	AuditItems        entity.AuditItems        `json:"audit_items"`
 	Stages            []StageInfo              `json:"stages"`
+	HistorySaved      bool                     `json:"history_saved"`
 	EnterpriseID      uint64                   `json:"enterprise_id"`
 	CreatedBy         uint64                   `json:"created_by"`
 	CreatedAt         time.Time                `json:"created_at"`

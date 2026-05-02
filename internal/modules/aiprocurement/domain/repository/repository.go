@@ -20,4 +20,5 @@ type ProcurementQuery struct {
 	Status       entity.ProcurementStatus
 	EnterpriseID uint64
 	CreatedBy    uint64
+	HistorySaved *bool
 }
