@@ -25,6 +25,21 @@ type SubmitReviewRequest struct {
 	Remark string `json:"remark"`
 }
 
+type VectorSyncRequest struct {
+	Target       string `json:"target"`
+	BatchSize    int    `json:"batch_size"`
+	Limit        int    `json:"limit"`
+	CreateSchema *bool  `json:"create_schema"`
+}
+
+type VectorSyncResponse struct {
+	Target          string   `json:"target"`
+	Synced          int      `json:"synced"`
+	LastID          uint64   `json:"last_id"`
+	ReservedTargets []string `json:"reserved_targets,omitempty"`
+	Message         string   `json:"message"`
+}
+
 type StageInfo struct {
 	Code        entity.WorkflowStage `json:"code"`
 	Name        string               `json:"name"`

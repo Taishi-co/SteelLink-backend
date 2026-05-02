@@ -31,6 +31,8 @@
 
 ## 同步命令
 
-- `--schedule=manual` 执行一次商品向量同步后退出。
+- `POST /api/v1/internal/ai-procurements/vector-sync` 使用 `X-AI-Procurement-Sync-Token` 校验内部同步 token。
+- 后端接口负责读取 MySQL、调用 embedding、写入 pgvector；脚本只调用后端接口。
+- `--schedule=manual` 调用一次后端商品向量同步接口后退出。
 - `--schedule=minute|hour|day` 按固定间隔重复同步，收到 SIGINT/SIGTERM 后退出。
 - `--target=suppliers|finance` 当前为预留 no-op，不影响产品同步。

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/application/service"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
@@ -107,4 +109,38 @@ func (h *ProcurementHandler) SubmitReview(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) SyncVectors(c *gin.Context) {
+	if !validateVectorSyncToken(c) {
+		response.Unauthorized(c, "无效的向量同步令牌")
+		return
+	}
+	var req dto.VectorSyncRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.svc.SyncVectors(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func validateVectorSyncToken(c *gin.Context) bool {
+	expected := os.Getenv("AI_PROCUREMENT_VECTOR_SYNC_TOKEN")
+	if expected == "" {
+		expected = os.Getenv("AI_PROCUREMENT_CONFIG_SYNC_TOKEN")
+	}
+	if expected == "" {
+		return false
+	}
+	token := strings.TrimSpace(c.GetHeader("X-AI-Procurement-Sync-Token"))
+	if token == "" {
+		auth := strings.TrimSpace(c.GetHeader("Authorization"))
+		token = strings.TrimPrefix(auth, "Bearer ")
+	}
+	return token != "" && token == expected
 }
