@@ -66,11 +66,12 @@ ai_procurement:
   confidence_threshold: ${AI_PROCUREMENT_CONFIDENCE_THRESHOLD:0.78}
   vector_search:
     enabled: ${AI_PROCUREMENT_VECTOR_SEARCH_ENABLED:false}
-    provider: ${AI_PROCUREMENT_VECTOR_PROVIDER:milvus}
-    endpoint: ${MILVUS_ENDPOINT:localhost:19530}
-    database: ${MILVUS_DATABASE:steellink_ai}
-    username: ${MILVUS_USERNAME:}
-    password_env: ${MILVUS_PASSWORD_ENV:MILVUS_PASSWORD}
+    provider: ${AI_PROCUREMENT_VECTOR_PROVIDER:pgvector}
+    endpoint: ${PGVECTOR_ENDPOINT:}
+    database: ${PGVECTOR_DATABASE:steellink_vectors}
+    username: ${PGVECTOR_USERNAME:}
+    password_env: ${PGVECTOR_PASSWORD_ENV:PGVECTOR_PASSWORD}
+    connection_env: ${PGVECTOR_DSN_ENV:PGVECTOR_DSN}
     product_collection: ${AI_PRODUCT_VECTOR_COLLECTION:ai_product_embeddings}
     supplier_collection: ${AI_SUPPLIER_VECTOR_COLLECTION:ai_supplier_embeddings}
     finance_product_collection: ${AI_FINANCE_PRODUCT_VECTOR_COLLECTION:ai_finance_product_embeddings}
@@ -83,3 +84,8 @@ ai_procurement:
     min_score: ${AI_VECTOR_MIN_SCORE:0.65}
     hybrid_keyword_weight: ${AI_HYBRID_KEYWORD_WEIGHT:0.35}
     hybrid_vector_weight: ${AI_HYBRID_VECTOR_WEIGHT:0.65}
+  runtime_config:
+    enabled: ${AI_PROCUREMENT_RUNTIME_CONFIG_ENABLED:false}
+    endpoint: ${AI_PROCUREMENT_RUNTIME_CONFIG_ENDPOINT:}
+    token_env: ${AI_PROCUREMENT_RUNTIME_CONFIG_TOKEN_ENV:AI_PROCUREMENT_CONFIG_SYNC_TOKEN}
+    cache_ttl_sec: ${AI_PROCUREMENT_RUNTIME_CONFIG_CACHE_TTL_SEC:30}

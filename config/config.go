@@ -1,11 +1,16 @@
 package config
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -119,6 +124,7 @@ type AIProcurementConfig struct {
 	TimeoutSec          int                `mapstructure:"timeout_sec"`
 	ConfidenceThreshold float64            `mapstructure:"confidence_threshold"`
 	VectorSearch        VectorSearchConfig `mapstructure:"vector_search"`
+	RuntimeConfig       RuntimeConfig      `mapstructure:"runtime_config"`
 }
 
 func (c AIProcurementConfig) APIKey() string {
@@ -135,6 +141,7 @@ type VectorSearchConfig struct {
 	Database                 string  `mapstructure:"database"`
 	Username                 string  `mapstructure:"username"`
 	PasswordEnv              string  `mapstructure:"password_env"`
+	ConnectionEnv            string  `mapstructure:"connection_env"`
 	ProductCollection        string  `mapstructure:"product_collection"`
 	SupplierCollection       string  `mapstructure:"supplier_collection"`
 	FinanceProductCollection string  `mapstructure:"finance_product_collection"`
@@ -149,11 +156,72 @@ type VectorSearchConfig struct {
 	HybridVectorWeight       float64 `mapstructure:"hybrid_vector_weight"`
 }
 
+type RuntimeConfig struct {
+	Enabled     bool   `mapstructure:"enabled"`
+	Endpoint    string `mapstructure:"endpoint"`
+	TokenEnv    string `mapstructure:"token_env"`
+	CacheTTLSec int    `mapstructure:"cache_ttl_sec"`
+}
+
+type aiProcurementAdminResponse struct {
+	Code int                      `json:"code"`
+	Data aiProcurementAdminConfig `json:"data"`
+}
+
+type aiProcurementAdminConfig struct {
+	Enabled bool `json:"enabled"`
+	Model   struct {
+		ParsingEnabled      bool    `json:"parsingEnabled"`
+		Provider            string  `json:"provider"`
+		BaseURL             string  `json:"baseUrl"`
+		APIKeyEnv           string  `json:"apiKeyEnv"`
+		Model               string  `json:"model"`
+		Temperature         float64 `json:"temperature"`
+		TopP                float64 `json:"topP"`
+		MaxTokens           int     `json:"maxTokens"`
+		TimeoutSec          int     `json:"timeoutSec"`
+		ConfidenceThreshold float64 `json:"confidenceThreshold"`
+	} `json:"model"`
+	Matching struct {
+		VectorEnabled            bool    `json:"vectorEnabled"`
+		VectorProvider           string  `json:"vectorProvider"`
+		VectorEndpoint           string  `json:"vectorEndpoint"`
+		VectorDatabase           string  `json:"vectorDatabase"`
+		VectorUsername           string  `json:"vectorUsername"`
+		VectorPasswordEnv        string  `json:"vectorPasswordEnv"`
+		VectorConnectionEnv      string  `json:"vectorConnectionEnv"`
+		ProductCollection        string  `json:"productCollection"`
+		SupplierCollection       string  `json:"supplierCollection"`
+		FinanceProductCollection string  `json:"financeProductCollection"`
+		EmbeddingProvider        string  `json:"embeddingProvider"`
+		EmbeddingBaseURL         string  `json:"embeddingBaseUrl"`
+		EmbeddingAPIKeyEnv       string  `json:"embeddingApiKeyEnv"`
+		EmbeddingModel           string  `json:"embeddingModel"`
+		EmbeddingDimension       int     `json:"embeddingDimension"`
+		VectorTopK               int     `json:"vectorTopK"`
+		VectorMinScore           float64 `json:"vectorMinScore"`
+		HybridKeywordWeight      float64 `json:"hybridKeywordWeight"`
+		HybridVectorWeight       float64 `json:"hybridVectorWeight"`
+	} `json:"matching"`
+}
+
 func (c VectorSearchConfig) Password() string {
 	if c.PasswordEnv == "" {
 		return ""
 	}
 	return os.Getenv(c.PasswordEnv)
+}
+
+func (c VectorSearchConfig) ConnectionString() string {
+	if c.ConnectionEnv != "" {
+		if value := os.Getenv(c.ConnectionEnv); value != "" {
+			return value
+		}
+	}
+	if strings.HasPrefix(c.Endpoint, "postgres://") || strings.HasPrefix(c.Endpoint, "postgresql://") {
+		return c.Endpoint
+	}
+	return ""
 }
 
 func (c VectorSearchConfig) EmbeddingAPIKey() string {
@@ -164,6 +232,13 @@ func (c VectorSearchConfig) EmbeddingAPIKey() string {
 }
 
 var GlobalConfig *Config
+
+var aiProcurementRuntimeCache struct {
+	mu            sync.Mutex
+	lastAttemptAt time.Time
+}
+
+var aiProcurementConfigMu sync.RWMutex
 
 func Init(configPath string) error {
 	viper.SetConfigFile(configPath)
@@ -225,20 +300,30 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 		c.ConfidenceThreshold = 0.78
 	}
 	applyVectorSearchDefaults(&c.VectorSearch)
+	applyRuntimeConfigDefaults(&c.RuntimeConfig)
+}
+
+func applyRuntimeConfigDefaults(c *RuntimeConfig) {
+	if c.TokenEnv == "" {
+		c.TokenEnv = "AI_PROCUREMENT_CONFIG_SYNC_TOKEN"
+	}
+	if c.CacheTTLSec <= 0 {
+		c.CacheTTLSec = 30
+	}
 }
 
 func applyVectorSearchDefaults(c *VectorSearchConfig) {
 	if c.Provider == "" {
-		c.Provider = "milvus"
-	}
-	if c.Endpoint == "" {
-		c.Endpoint = "localhost:19530"
+		c.Provider = "pgvector"
 	}
 	if c.Database == "" {
-		c.Database = "steellink_ai"
+		c.Database = "steellink_vectors"
+	}
+	if c.ConnectionEnv == "" {
+		c.ConnectionEnv = "PGVECTOR_DSN"
 	}
 	if c.PasswordEnv == "" {
-		c.PasswordEnv = "MILVUS_PASSWORD"
+		c.PasswordEnv = "PGVECTOR_PASSWORD"
 	}
 	if c.ProductCollection == "" {
 		c.ProductCollection = "ai_product_embeddings"
@@ -474,17 +559,20 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("AI_PROCUREMENT_VECTOR_PROVIDER"); v != "" {
 		c.AIProcurement.VectorSearch.Provider = v
 	}
-	if v := os.Getenv("MILVUS_ENDPOINT"); v != "" {
+	if v := os.Getenv("PGVECTOR_ENDPOINT"); v != "" {
 		c.AIProcurement.VectorSearch.Endpoint = v
 	}
-	if v := os.Getenv("MILVUS_DATABASE"); v != "" {
+	if v := os.Getenv("PGVECTOR_DATABASE"); v != "" {
 		c.AIProcurement.VectorSearch.Database = v
 	}
-	if v := os.Getenv("MILVUS_USERNAME"); v != "" {
+	if v := os.Getenv("PGVECTOR_USERNAME"); v != "" {
 		c.AIProcurement.VectorSearch.Username = v
 	}
-	if v := os.Getenv("MILVUS_PASSWORD_ENV"); v != "" {
+	if v := os.Getenv("PGVECTOR_PASSWORD_ENV"); v != "" {
 		c.AIProcurement.VectorSearch.PasswordEnv = v
+	}
+	if v := os.Getenv("PGVECTOR_DSN_ENV"); v != "" {
+		c.AIProcurement.VectorSearch.ConnectionEnv = v
 	}
 	if v := os.Getenv("AI_PRODUCT_VECTOR_COLLECTION"); v != "" {
 		c.AIProcurement.VectorSearch.ProductCollection = v
@@ -532,6 +620,20 @@ func applyEnvOverrides(c *Config) {
 			c.AIProcurement.VectorSearch.HybridVectorWeight = n
 		}
 	}
+	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_ENABLED"); v != "" {
+		c.AIProcurement.RuntimeConfig.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_ENDPOINT"); v != "" {
+		c.AIProcurement.RuntimeConfig.Endpoint = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_TOKEN_ENV"); v != "" {
+		c.AIProcurement.RuntimeConfig.TokenEnv = v
+	}
+	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_CACHE_TTL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.RuntimeConfig.CacheTTLSec = n
+		}
+	}
 }
 
 func parseBool(value string) bool {
@@ -545,4 +647,153 @@ func parseBool(value string) bool {
 
 func Get() *Config {
 	return GlobalConfig
+}
+
+func RefreshAIProcurementRuntimeConfig(ctx context.Context) {
+	if GlobalConfig == nil || !GlobalConfig.AIProcurement.RuntimeConfig.Enabled {
+		return
+	}
+	runtimeCfg := GlobalConfig.AIProcurement.RuntimeConfig
+	if runtimeCfg.Endpoint == "" {
+		return
+	}
+	ttl := time.Duration(runtimeCfg.CacheTTLSec) * time.Second
+	if ttl <= 0 {
+		ttl = 30 * time.Second
+	}
+
+	aiProcurementRuntimeCache.mu.Lock()
+	if time.Since(aiProcurementRuntimeCache.lastAttemptAt) < ttl {
+		aiProcurementRuntimeCache.mu.Unlock()
+		return
+	}
+	aiProcurementRuntimeCache.lastAttemptAt = time.Now()
+	aiProcurementRuntimeCache.mu.Unlock()
+
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, runtimeCfg.Endpoint, nil)
+	if err != nil {
+		return
+	}
+	if runtimeCfg.TokenEnv != "" {
+		if token := os.Getenv(runtimeCfg.TokenEnv); token != "" {
+			req.Header.Set("X-Internal-Token", token)
+		}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return
+	}
+	var payload aiProcurementAdminResponse
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Code != 0 {
+		return
+	}
+	aiProcurementConfigMu.Lock()
+	defer aiProcurementConfigMu.Unlock()
+	applyAdminAIProcurementConfig(&GlobalConfig.AIProcurement, payload.Data)
+}
+
+func GetAIProcurement() AIProcurementConfig {
+	aiProcurementConfigMu.RLock()
+	defer aiProcurementConfigMu.RUnlock()
+	if GlobalConfig == nil {
+		return AIProcurementConfig{}
+	}
+	return GlobalConfig.AIProcurement
+}
+
+func applyAdminAIProcurementConfig(target *AIProcurementConfig, source aiProcurementAdminConfig) {
+	target.ModelParsingEnabled = source.Enabled && source.Model.ParsingEnabled
+	if source.Model.Provider != "" {
+		target.Provider = source.Model.Provider
+	}
+	if source.Model.BaseURL != "" {
+		target.BaseURL = strings.TrimRight(source.Model.BaseURL, "/")
+	}
+	if source.Model.APIKeyEnv != "" {
+		target.APIKeyEnv = source.Model.APIKeyEnv
+	}
+	if source.Model.Model != "" {
+		target.Model = source.Model.Model
+	}
+	if source.Model.Temperature > 0 && source.Model.Temperature <= 1 {
+		target.Temperature = source.Model.Temperature
+	}
+	if source.Model.TopP > 0 && source.Model.TopP <= 1 {
+		target.TopP = source.Model.TopP
+	}
+	if source.Model.MaxTokens > 0 {
+		target.MaxTokens = source.Model.MaxTokens
+	}
+	if source.Model.TimeoutSec > 0 {
+		target.TimeoutSec = source.Model.TimeoutSec
+	}
+	if source.Model.ConfidenceThreshold > 0 {
+		target.ConfidenceThreshold = source.Model.ConfidenceThreshold
+	}
+
+	target.VectorSearch.Enabled = source.Enabled && source.Matching.VectorEnabled
+	if source.Matching.VectorProvider != "" {
+		target.VectorSearch.Provider = source.Matching.VectorProvider
+	}
+	if source.Matching.VectorEndpoint != "" {
+		target.VectorSearch.Endpoint = source.Matching.VectorEndpoint
+	}
+	if source.Matching.VectorDatabase != "" {
+		target.VectorSearch.Database = source.Matching.VectorDatabase
+	}
+	if source.Matching.VectorUsername != "" {
+		target.VectorSearch.Username = source.Matching.VectorUsername
+	}
+	if source.Matching.VectorPasswordEnv != "" {
+		target.VectorSearch.PasswordEnv = source.Matching.VectorPasswordEnv
+	}
+	if source.Matching.VectorConnectionEnv != "" {
+		target.VectorSearch.ConnectionEnv = source.Matching.VectorConnectionEnv
+	}
+	if source.Matching.ProductCollection != "" {
+		target.VectorSearch.ProductCollection = source.Matching.ProductCollection
+	}
+	if source.Matching.SupplierCollection != "" {
+		target.VectorSearch.SupplierCollection = source.Matching.SupplierCollection
+	}
+	if source.Matching.FinanceProductCollection != "" {
+		target.VectorSearch.FinanceProductCollection = source.Matching.FinanceProductCollection
+	}
+	if source.Matching.EmbeddingProvider != "" {
+		target.VectorSearch.EmbeddingProvider = source.Matching.EmbeddingProvider
+	}
+	if source.Matching.EmbeddingBaseURL != "" {
+		target.VectorSearch.EmbeddingBaseURL = strings.TrimRight(source.Matching.EmbeddingBaseURL, "/")
+	}
+	if source.Matching.EmbeddingAPIKeyEnv != "" {
+		target.VectorSearch.EmbeddingAPIKeyEnv = source.Matching.EmbeddingAPIKeyEnv
+	}
+	if source.Matching.EmbeddingModel != "" {
+		target.VectorSearch.EmbeddingModel = source.Matching.EmbeddingModel
+	}
+	if source.Matching.EmbeddingDimension > 0 {
+		target.VectorSearch.Dimension = source.Matching.EmbeddingDimension
+	}
+	if source.Matching.VectorTopK > 0 {
+		target.VectorSearch.TopK = source.Matching.VectorTopK
+	}
+	if source.Matching.VectorMinScore > 0 {
+		target.VectorSearch.MinScore = source.Matching.VectorMinScore
+	}
+	if source.Matching.HybridKeywordWeight > 0 {
+		target.VectorSearch.HybridKeywordWeight = source.Matching.HybridKeywordWeight
+	}
+	if source.Matching.HybridVectorWeight > 0 {
+		target.VectorSearch.HybridVectorWeight = source.Matching.HybridVectorWeight
+	}
 }

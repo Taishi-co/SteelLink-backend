@@ -35,12 +35,12 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 
 ## 目标
 
-- 引入 Milvus 作为 AI 采购向量召回层。
-- 商品、供应商、融资产品分别建立向量集合。
+- 引入 pgvector 作为 AI 采购向量召回层。
+- 商品、供应商、融资产品分别建立向量表。
 - AI 采购匹配采用 hybrid 策略：关键词/结构化过滤 + 向量召回 + 业务重排。
 - 当前版本先补齐配置与设计面，保留 MySQL 规则匹配作为默认兜底。
 
-## Milvus 集合设计
+## pgvector 表设计
 
 ### `ai_product_embeddings`
 
@@ -91,8 +91,8 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 
 1. 意图识别输出结构化字段。
 2. 生成 query embedding，文本包含商品、用途、数量、地域、融资诉求。
-3. Milvus 搜索商品集合，使用状态、品类、区域、库存等 scalar filter。
-4. Milvus 搜索供应商集合，召回可履约供应商。
+3. pgvector 搜索商品向量表，使用状态、品类、区域、库存等 scalar filter。
+4. pgvector 搜索供应商向量表，召回可履约供应商。
 5. 如 `financing_required=true`，搜索融资产品集合。
 6. 对召回结果做重排：
    - 向量相似度
@@ -101,7 +101,7 @@ AI 采购解析入口在 `ProcurementService.Parse`：
    - 价格容忍度
    - 供应商认证/履约优先级
    - 融资金额和资料适配
-7. 如果 Milvus 或 embedding 服务不可用，回退当前 MySQL 规则匹配。
+7. 如果 pgvector 或 embedding 服务不可用，回退当前 MySQL 规则匹配。
 
 ## 配置
 
@@ -111,9 +111,9 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 - `provider`
 - `endpoint`
 - `database`
-- `product_collection`
+- `product_collection`，pgvector 模式下表示商品向量表名
 - `supplier_collection`
-- `finance_product_collection`
+- `finance_product_collection`，pgvector 模式下表示融资产品向量表名
 - `embedding_provider`
 - `embedding_base_url`
 - `embedding_api_key_env`
@@ -131,10 +131,10 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 - 补齐后端配置、环境变量和管理端配置项。
 - 默认关闭向量召回。
 
-### P1: Milvus 基础设施
+### P1: pgvector 基础设施
 
-- 增加 Milvus client。
-- 增加集合初始化脚本。
+- 增加 pgvector client。
+- 增加向量表初始化脚本。
 - 增加商品/供应商/融资产品 embedding 同步 job。
 
 ### P2: 查询链路接入

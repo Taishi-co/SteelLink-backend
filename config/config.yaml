@@ -71,11 +71,12 @@ ai_procurement:
   confidence_threshold: 0.78
   vector_search:
     enabled: false
-    provider: milvus
-    endpoint: localhost:19530
-    database: steellink_ai
+    provider: pgvector
+    endpoint: ""
+    database: steellink_vectors
     username: ""
-    password_env: MILVUS_PASSWORD
+    password_env: PGVECTOR_PASSWORD
+    connection_env: PGVECTOR_DSN
     product_collection: ai_product_embeddings
     supplier_collection: ai_supplier_embeddings
     finance_product_collection: ai_finance_product_embeddings
@@ -88,3 +89,8 @@ ai_procurement:
     min_score: 0.65
     hybrid_keyword_weight: 0.35
     hybrid_vector_weight: 0.65
+  runtime_config:
+    enabled: false
+    endpoint: ""
+    token_env: AI_PROCUREMENT_CONFIG_SYNC_TOKEN
+    cache_ttl_sec: 30
