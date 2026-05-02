@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	marketentity "github.com/Taishi-co/SteelLink-backend/internal/modules/market/domain/entity"
@@ -285,6 +286,20 @@ func (s *MarketService) AwardBidding(ctx context.Context, enterpriseID, biddingI
 		}
 		return nil, ecode.ErrDatabase
 	}
+	var lowestQuote marketentity.BiddingQuote
+	if err := s.db.WithContext(ctx).
+		Where("bidding_id = ?", biddingID).
+		Order("unit_price ASC, id ASC").
+		First(&lowestQuote).Error; err != nil {
+		if IsNotFound(err) {
+			return nil, ecode.ErrBadRequest.WithMessage("暂无可定标报价")
+		}
+		return nil, ecode.ErrDatabase
+	}
+	awardReason := strings.TrimSpace(req.AwardReason)
+	if quote.ID != lowestQuote.ID && awardReason == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("选择非最低价报价时必须填写定标原因")
+	}
 	closedAt := time.Now()
 	dealAmount := quote.UnitPrice * quote.Quantity
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -298,6 +313,7 @@ func (s *MarketService) AwardBidding(ctx context.Context, enterpriseID, biddingI
 			"status":            marketentity.BiddingStatusAwarded,
 			"award_quote_id":    quote.ID,
 			"award_supplier_id": quote.SupplierID,
+			"award_reason":      awardReason,
 			"supplier_name":     quote.SupplierName,
 			"current_price":     quote.UnitPrice,
 			"deal_amount":       dealAmount,
@@ -310,6 +326,35 @@ func (s *MarketService) AwardBidding(ctx context.Context, enterpriseID, biddingI
 		return nil, ecode.ErrDatabase.WithMessage("定标失败")
 	}
 	return s.GetBidding(ctx, biddingID, enterpriseID)
+}
+
+func (s *MarketService) ReconcileExpiredBiddings(ctx context.Context, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var activities []marketentity.BiddingActivity
+	if err := s.db.WithContext(ctx).
+		Where("status IN ? AND ended_at <= ?", []marketentity.BiddingStatus{
+			marketentity.BiddingStatusBidding,
+			marketentity.BiddingStatusOngoing,
+			marketentity.BiddingStatusSprint,
+		}, time.Now()).
+		Order("ended_at ASC").
+		Limit(limit).
+		Find(&activities).Error; err != nil {
+		return 0, err
+	}
+	var changed int64
+	for i := range activities {
+		before := activities[i].Status
+		if err := s.reconcileBiddingState(ctx, &activities[i]); err != nil {
+			return changed, err
+		}
+		if activities[i].Status != before {
+			changed++
+		}
+	}
+	return changed, nil
 }
 
 func (s *MarketService) CreateBiddingOrder(ctx context.Context, enterpriseID, userID, biddingID uint64) (*marketdto.CreateBiddingOrderResponse, error) {
@@ -538,9 +583,13 @@ func toBiddingItem(activity marketentity.BiddingActivity, quotes []marketentity.
 	}
 	supplierName := activity.SupplierName
 	awardSupplierID := activity.AwardSupplierID
+	awardReason := activity.AwardReason
 	if scope == BiddingViewPublic && activity.Status != marketentity.BiddingStatusAwarded && activity.Status != marketentity.BiddingStatusOrderCreated {
 		supplierName = ""
 		awardSupplierID = 0
+	}
+	if scope != BiddingViewBuyer {
+		awardReason = ""
 	}
 	return marketdto.BiddingActivityItem{
 		ID:              activity.ID,
@@ -562,6 +611,7 @@ func toBiddingItem(activity marketentity.BiddingActivity, quotes []marketentity.
 		QuoteCount:      activity.QuoteCount,
 		AwardQuoteID:    activity.AwardQuoteID,
 		AwardSupplierID: awardSupplierID,
+		AwardReason:     awardReason,
 		OrderID:         activity.OrderID,
 		SupplierName:    supplierName,
 		SavingRate:      activity.SavingRate,

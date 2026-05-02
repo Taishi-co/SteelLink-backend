@@ -15,6 +15,7 @@ import (
 	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	aiProcurementPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
 	aiProcurementRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/router"
+	marketservice "github.com/Taishi-co/SteelLink-backend/internal/modules/market/application/service"
 	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
 	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
@@ -198,6 +199,10 @@ func main() {
 		logger.Info("Local file storage enabled", zap.String("dir", localDir))
 	}
 
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	go startBiddingStateReconciler(backgroundCtx, marketservice.NewMarketService())
+
 	// Start server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -233,6 +238,27 @@ func main() {
 	}
 
 	logger.Info("Server exited")
+}
+
+func startBiddingStateReconciler(ctx context.Context, service *marketservice.MarketService) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, err := service.ReconcileExpiredBiddings(ctx, 100)
+			if err != nil {
+				logger.Error("Failed to reconcile expired biddings", zap.Error(err))
+				continue
+			}
+			if changed > 0 {
+				logger.Info("Reconciled expired biddings", zap.Int64("changed", changed))
+			}
+		}
+	}
 }
 
 func repairLegacyEnterpriseUserRoles(db *gorm.DB) error {

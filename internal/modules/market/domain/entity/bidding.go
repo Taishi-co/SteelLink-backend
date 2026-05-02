@@ -43,6 +43,7 @@ type BiddingActivity struct {
 	QuoteCount      int            `gorm:"comment:报价次数" json:"quote_count"`
 	AwardQuoteID    uint64         `gorm:"index;comment:中标报价ID" json:"award_quote_id"`
 	AwardSupplierID uint64         `gorm:"index;comment:中标供应商企业ID" json:"award_supplier_id"`
+	AwardReason     string         `gorm:"type:varchar(500);comment:定标原因" json:"award_reason"`
 	OrderID         uint64         `gorm:"index;comment:生成订单ID" json:"order_id"`
 	SupplierName    string         `gorm:"type:varchar(120);comment:中标方" json:"supplier_name"`
 	SavingRate      float64        `gorm:"type:decimal(8,2);comment:节省比例" json:"saving_rate"`

@@ -38,6 +38,7 @@ type BiddingActivityItem struct {
 	QuoteCount      int                `json:"quote_count"`
 	AwardQuoteID    uint64             `json:"award_quote_id"`
 	AwardSupplierID uint64             `json:"award_supplier_id"`
+	AwardReason     string             `json:"award_reason"`
 	OrderID         uint64             `json:"order_id"`
 	SupplierName    string             `json:"supplier_name"`
 	SavingRate      float64            `json:"saving_rate"`
@@ -86,7 +87,8 @@ type SubmitBiddingQuoteRequest struct {
 }
 
 type AwardBiddingRequest struct {
-	QuoteID uint64 `json:"quote_id" binding:"required"`
+	QuoteID     uint64 `json:"quote_id" binding:"required"`
+	AwardReason string `json:"award_reason"`
 }
 
 type CreateBiddingOrderResponse struct {
