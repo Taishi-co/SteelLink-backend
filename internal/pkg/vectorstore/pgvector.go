@@ -27,11 +27,125 @@ type ProductHit struct {
 	Score        float64
 }
 
+type ProductEmbedding struct {
+	ProductID    uint64
+	ProductNo    string
+	ProductName  string
+	Category     string
+	EnterpriseID uint64
+	Text         string
+	Embedding    []float32
+	Status       int
+	AvailableQty float64
+	UnitPrice    float64
+}
+
 func NewPGVectorClient(cfg config.VectorSearchConfig) *PGVectorClient {
 	return &PGVectorClient{
 		dsn:   cfg.ConnectionString(),
 		table: cfg.ProductCollection,
 	}
+}
+
+func (c *PGVectorClient) EnsureProductSchema(ctx context.Context, dimension int) error {
+	if c.dsn == "" || c.table == "" {
+		return fmt.Errorf("pgvector config is incomplete")
+	}
+	if dimension <= 0 {
+		dimension = 1536
+	}
+	db, err := sql.Open("pgx", c.dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, fmt.Sprintf(`
+CREATE TABLE IF NOT EXISTS %s (
+	product_id BIGINT PRIMARY KEY,
+	product_no VARCHAR(64) NOT NULL,
+	product_name VARCHAR(255) NOT NULL,
+	category VARCHAR(100) NOT NULL DEFAULT '',
+	enterprise_id BIGINT NOT NULL DEFAULT 0,
+	text TEXT NOT NULL,
+	embedding vector(%d) NOT NULL,
+	status INTEGER NOT NULL DEFAULT 0,
+	available_qty NUMERIC(18,4) NOT NULL DEFAULT 0,
+	unit_price NUMERIC(18,4) NOT NULL DEFAULT 0,
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)`, quoteIdentifier(c.table), dimension))
+	if err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (embedding vector_cosine_ops)`,
+		quoteIdentifier(c.table+"_embedding_hnsw_idx"),
+		quoteIdentifier(c.table),
+	)); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS %s ON %s (category)`,
+		quoteIdentifier(c.table+"_category_idx"),
+		quoteIdentifier(c.table),
+	)); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS %s ON %s (enterprise_id)`,
+		quoteIdentifier(c.table+"_enterprise_id_idx"),
+		quoteIdentifier(c.table),
+	))
+	return err
+}
+
+func (c *PGVectorClient) UpsertProduct(ctx context.Context, item ProductEmbedding) error {
+	if c.dsn == "" || c.table == "" {
+		return fmt.Errorf("pgvector config is incomplete")
+	}
+	if item.ProductID == 0 {
+		return fmt.Errorf("product_id is required")
+	}
+	if len(item.Embedding) == 0 {
+		return fmt.Errorf("embedding is required")
+	}
+	db, err := sql.Open("pgx", c.dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	query := fmt.Sprintf(`
+INSERT INTO %s (
+	product_id, product_no, product_name, category, enterprise_id, text, embedding, status, available_qty, unit_price, updated_at
+) VALUES (
+	$1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10, now()
+)
+ON CONFLICT (product_id) DO UPDATE SET
+	product_no = EXCLUDED.product_no,
+	product_name = EXCLUDED.product_name,
+	category = EXCLUDED.category,
+	enterprise_id = EXCLUDED.enterprise_id,
+	text = EXCLUDED.text,
+	embedding = EXCLUDED.embedding,
+	status = EXCLUDED.status,
+	available_qty = EXCLUDED.available_qty,
+	unit_price = EXCLUDED.unit_price,
+	updated_at = now()`, quoteIdentifier(c.table))
+	_, err = db.ExecContext(ctx, query,
+		item.ProductID,
+		item.ProductNo,
+		item.ProductName,
+		item.Category,
+		item.EnterpriseID,
+		item.Text,
+		vectorLiteral(item.Embedding),
+		item.Status,
+		item.AvailableQty,
+		item.UnitPrice,
+	)
+	return err
 }
 
 func (c *PGVectorClient) SearchProducts(ctx context.Context, vector []float32, topK int) ([]ProductHit, error) {

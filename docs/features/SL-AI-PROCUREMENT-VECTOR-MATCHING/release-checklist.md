@@ -11,6 +11,7 @@
 - [x] `gofmt` 已执行
 - [x] `go test ./...` 已通过
 - [x] `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/api` 已通过
+- [x] `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/aiprocurement-vector-sync` 已通过
 - [x] 默认 `AI_PROCUREMENT_VECTOR_SEARCH_ENABLED=false`
 - [x] `.env.example` 不包含真实 pgvector DSN/Postgres 密码或 embedding API Key
 - [ ] 已确认 pgvector 表命名、维度和 embedding 模型一致
