@@ -20,12 +20,15 @@ import (
 type ProcurementService struct {
 	procurementRepo repository.ProcurementRepository
 	productRepo     productRepository.ProductRepository
+	vectorMatcher   *productVectorMatcher
 }
 
 func NewProcurementService() *ProcurementService {
+	productRepo := productPersistence.NewProductRepository()
 	return &ProcurementService{
 		procurementRepo: persistence.NewProcurementRepository(),
-		productRepo:     productPersistence.NewProductRepository(),
+		productRepo:     productRepo,
+		vectorMatcher:   newProductVectorMatcher(productRepo),
 	}
 }
 
@@ -180,6 +183,16 @@ func parseInstructionByRule(prompt string) entity.ParsedInstruction {
 }
 
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
+	if s.vectorMatcher != nil {
+		matches, err := s.vectorMatcher.Match(ctx, parsed)
+		if err == nil && len(matches) > 0 {
+			return matches, nil
+		}
+	}
+	return s.matchProductsByRule(ctx, parsed)
+}
+
+func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
 	status := int(productEntity.ProductStatusOnSale)
 	products, _, err := s.productRepo.List(ctx, &productRepository.ProductQuery{
 		Page:     1,
