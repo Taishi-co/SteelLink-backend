@@ -6,6 +6,7 @@
 - 在 `.env.example` 中补齐 pgvector 和 embedding 推荐环境变量。
 - 新增 `internal/pkg/embedding`，支持 MiniMax 原生 embeddings API：`texts`、`type=db`、`group_id` query，并保留 OpenAI-compatible fallback。
 - 新增 `internal/pkg/vectorstore`，通过 pgvector 搜索 `ai_product_embeddings` 商品向量表。
+- pgvector 商品表只保存向量召回最小索引字段，商品状态、库存、价格等业务字段仍以 MySQL 为准。
 - 新增 `POST /api/v1/internal/ai-procurements/vector-sync`，由后端 API 负责读取 MySQL、生成 embedding 并写入 pgvector。
 - 新增轻量 `cmd/aiprocurement-vector-sync`，仅负责手动、每分钟、每小时、每天调用后端同步接口。
 - 将 `matchProducts` 改为向量优先、MySQL 规则兜底；向量默认关闭，不改变当前生产行为。

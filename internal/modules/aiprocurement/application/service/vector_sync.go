@@ -106,11 +106,7 @@ func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.Ve
 				ProductName:  product.Name,
 				Category:     productCategory(product),
 				EnterpriseID: product.EnterpriseID,
-				Text:         text,
 				Embedding:    vector,
-				Status:       int(product.Status),
-				AvailableQty: product.AvailableQty,
-				UnitPrice:    product.UnitPrice,
 			}); err != nil {
 				return nil, ecode.ErrDatabase.WithMessagef("upsert product %d vector failed: %v", product.ID, err)
 			}

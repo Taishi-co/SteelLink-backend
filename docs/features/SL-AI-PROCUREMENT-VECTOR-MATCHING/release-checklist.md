@@ -15,7 +15,7 @@
 - [x] 默认 `AI_PROCUREMENT_VECTOR_SEARCH_ENABLED=false`
 - [x] `.env.example` 不包含真实 pgvector DSN/Postgres 密码或 embedding API Key
 - [ ] 已确认 pgvector 表命名、维度和 embedding 模型一致
-- [ ] 已确认 `ai_product_embeddings` 中存在 `product_id` 字段并能关联 MySQL `products.id`
+- [x] 已确认 `ai_product_embeddings` 中存在 `product_id` 字段并能关联 MySQL `products.id`
 
 ## 回滚信息
 

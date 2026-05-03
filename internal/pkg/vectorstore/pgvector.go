@@ -33,11 +33,7 @@ type ProductEmbedding struct {
 	ProductName  string
 	Category     string
 	EnterpriseID uint64
-	Text         string
 	Embedding    []float32
-	Status       int
-	AvailableQty float64
-	UnitPrice    float64
 }
 
 func NewPGVectorClient(cfg config.VectorSearchConfig) *PGVectorClient {
@@ -69,12 +65,7 @@ CREATE TABLE IF NOT EXISTS %s (
 	product_name VARCHAR(255) NOT NULL,
 	category VARCHAR(100) NOT NULL DEFAULT '',
 	enterprise_id BIGINT NOT NULL DEFAULT 0,
-	text TEXT NOT NULL,
-	embedding vector(%d) NOT NULL,
-	status INTEGER NOT NULL DEFAULT 0,
-	available_qty NUMERIC(18,4) NOT NULL DEFAULT 0,
-	unit_price NUMERIC(18,4) NOT NULL DEFAULT 0,
-	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	embedding vector(%d) NOT NULL
 )`, quoteIdentifier(c.table), dimension))
 	if err != nil {
 		return err
@@ -118,32 +109,23 @@ func (c *PGVectorClient) UpsertProduct(ctx context.Context, item ProductEmbeddin
 	defer db.Close()
 	query := fmt.Sprintf(`
 INSERT INTO %s (
-	product_id, product_no, product_name, category, enterprise_id, text, embedding, status, available_qty, unit_price, updated_at
+	product_id, product_no, product_name, category, enterprise_id, embedding
 ) VALUES (
-	$1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10, now()
+	$1, $2, $3, $4, $5, $6::vector
 )
 ON CONFLICT (product_id) DO UPDATE SET
 	product_no = EXCLUDED.product_no,
 	product_name = EXCLUDED.product_name,
 	category = EXCLUDED.category,
 	enterprise_id = EXCLUDED.enterprise_id,
-	text = EXCLUDED.text,
-	embedding = EXCLUDED.embedding,
-	status = EXCLUDED.status,
-	available_qty = EXCLUDED.available_qty,
-	unit_price = EXCLUDED.unit_price,
-	updated_at = now()`, quoteIdentifier(c.table))
+	embedding = EXCLUDED.embedding`, quoteIdentifier(c.table))
 	_, err = db.ExecContext(ctx, query,
 		item.ProductID,
 		item.ProductNo,
 		item.ProductName,
 		item.Category,
 		item.EnterpriseID,
-		item.Text,
 		vectorLiteral(item.Embedding),
-		item.Status,
-		item.AvailableQty,
-		item.UnitPrice,
 	)
 	return err
 }
