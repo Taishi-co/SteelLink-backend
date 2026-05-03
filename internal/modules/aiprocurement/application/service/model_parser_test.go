@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Taishi-co/SteelLink-backend/config"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
 )
 
 func TestBuildModelParserPayloadUsesAnthropicMessagesShape(t *testing.T) {
@@ -81,10 +82,65 @@ func TestParsedInstructionPayloadAcceptsStringQuantity(t *testing.T) {
 	}
 }
 
+func TestParsedInstructionPayloadAcceptsStringFinancingRequired(t *testing.T) {
+	var payload parsedInstructionPayload
+	err := json.Unmarshal([]byte(`{
+		"product_name": "热轧板卷",
+		"category": "热轧板卷",
+		"quantity": 100,
+		"unit": "吨",
+		"usage": "企业生产采购",
+		"financing_required": "否",
+		"keywords": ["热轧板卷"],
+		"confidence": 0.88
+	}`), &payload)
+	if err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if bool(payload.FinancingRequired) {
+		t.Fatal("financing_required = true, want false")
+	}
+}
+
+func TestNormalizeParsedInstructionUsesExplicitCategoryHint(t *testing.T) {
+	parsed := parsedInstructionPayload{
+		ProductName:       "热轧板卷",
+		Category:          "热轧板卷",
+		Quantity:          quantity(100),
+		Unit:              "吨",
+		Usage:             "企业生产采购",
+		FinancingRequired: false,
+		Keywords:          []string{"热轧板卷"},
+		Confidence:        0.8,
+	}
+	result := toParsedInstruction(parsed)
+	normalizeParsedInstruction(&result, "我想买100吨的钢，品类为热轧板卷")
+
+	if result.ProductName != "钢" {
+		t.Fatalf("product_name = %q, want 钢", result.ProductName)
+	}
+	if result.Category != "热轧板卷" {
+		t.Fatalf("category = %q, want 热轧板卷", result.Category)
+	}
+}
+
 func TestModelParserRequestURLCompletesAnthropicBasePath(t *testing.T) {
 	got := modelParserRequestURL("https://api.minimaxi.com/anthropic")
 	want := "https://api.minimaxi.com/anthropic/v1/messages"
 	if got != want {
 		t.Fatalf("modelParserRequestURL = %q, want %q", got, want)
+	}
+}
+
+func toParsedInstruction(payload parsedInstructionPayload) entity.ParsedInstruction {
+	return entity.ParsedInstruction{
+		ProductName:       payload.ProductName,
+		Category:          payload.Category,
+		Quantity:          float64(payload.Quantity),
+		Unit:              payload.Unit,
+		Usage:             payload.Usage,
+		FinancingRequired: bool(payload.FinancingRequired),
+		Keywords:          payload.Keywords,
+		Confidence:        payload.Confidence,
 	}
 }

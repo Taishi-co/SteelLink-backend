@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ type parsedInstructionPayload struct {
 	Quantity          quantity `json:"quantity"`
 	Unit              string   `json:"unit"`
 	Usage             string   `json:"usage"`
-	FinancingRequired bool     `json:"financing_required"`
+	FinancingRequired boolText `json:"financing_required"`
 	Keywords          []string `json:"keywords"`
 	Confidence        float64  `json:"confidence"`
 }
@@ -180,7 +181,7 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		Quantity:          float64(parsed.Quantity),
 		Unit:              strings.TrimSpace(parsed.Unit),
 		Usage:             strings.TrimSpace(parsed.Usage),
-		FinancingRequired: parsed.FinancingRequired,
+		FinancingRequired: bool(parsed.FinancingRequired),
 		Keywords:          compactStrings(parsed.Keywords),
 		Confidence:        parsed.Confidence,
 	}
@@ -220,6 +221,30 @@ func (q *quantity) UnmarshalJSON(data []byte) error {
 	}
 	*q = quantity(parsed)
 	return nil
+}
+
+type boolText bool
+
+func (b *boolText) UnmarshalJSON(data []byte) error {
+	var value bool
+	if err := json.Unmarshal(data, &value); err == nil {
+		*b = boolText(value)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "", "false", "否", "不需要", "无需", "no", "n", "0":
+		*b = false
+		return nil
+	case "true", "是", "需要", "融资", "yes", "y", "1":
+		*b = true
+		return nil
+	default:
+		return fmt.Errorf("parse financing_required %q", text)
+	}
 }
 
 func buildModelParserPayload(modelCfg config.AIProcurementConfig, prompt string) ([]byte, error) {
@@ -291,7 +316,9 @@ func modelParserSystemPrompt() string {
 		"你是钢材B2B平台的采购指令解析器。",
 		"只输出JSON，不要输出解释、Markdown或代码块。",
 		"JSON字段必须包含 product_name, category, quantity, unit, usage, financing_required, keywords, confidence。",
-		"category 使用钢材或工业品类短名称；quantity 是数字；confidence 取值0到1。",
+		"字段类型必须严格为 JSON 原生类型：quantity 是数字，financing_required 是布尔值，keywords 是字符串数组，confidence 是0到1的数字。",
+		"product_name 填采购对象本体，不要填泛化占位词；category 填用户明确说的品类或最具体钢材品类短名称。",
+		"如果用户说“品类为X/品类是X”，X 必须进入 category；product_name 保留品类短语前的采购对象。例如“我想买100吨的钢，品类为热轧板卷”输出 product_name=钢, category=热轧板卷。",
 	}, "\n")
 }
 
@@ -322,6 +349,7 @@ func compactStrings(values []string) []string {
 
 func normalizeParsedInstruction(parsed *entity.ParsedInstruction, prompt string) {
 	fallback := parseInstructionByRule(prompt)
+	applyExplicitCategoryHint(parsed, prompt)
 	if parsed.ProductName == "" {
 		parsed.ProductName = fallback.ProductName
 	}
@@ -343,4 +371,46 @@ func normalizeParsedInstruction(parsed *entity.ParsedInstruction, prompt string)
 	if parsed.Confidence <= 0 || parsed.Confidence > 1 {
 		parsed.Confidence = fallback.Confidence
 	}
+}
+
+func applyExplicitCategoryHint(parsed *entity.ParsedInstruction, prompt string) {
+	category := extractExplicitCategory(prompt)
+	if category == "" {
+		return
+	}
+	parsed.Category = category
+	productName := extractExplicitProductBeforeCategory(prompt)
+	if productName != "" && (parsed.ProductName == "" || parsed.ProductName == category || strings.Contains(category, parsed.ProductName)) {
+		parsed.ProductName = productName
+	}
+}
+
+func extractExplicitCategory(prompt string) string {
+	re := regexp.MustCompile(`品类(?:为|是|:|：)\s*([^，,。；;\s]+)`)
+	matches := re.FindStringSubmatch(prompt)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
+func extractExplicitProductBeforeCategory(prompt string) string {
+	re := regexp.MustCompile(`品类(?:为|是|:|：)`)
+	loc := re.FindStringIndex(prompt)
+	if loc == nil || loc[0] == 0 {
+		return ""
+	}
+	before := strings.TrimSpace(prompt[:loc[0]])
+	before = strings.TrimRight(before, "，,。；; ")
+	segments := regexp.MustCompile(`[，,。；;]`).Split(before, -1)
+	if len(segments) > 0 {
+		before = strings.TrimSpace(segments[len(segments)-1])
+	}
+	before = regexp.MustCompile(`^(我想买|我要买|我想采购|我要采购|需要采购|需要买|采购|购买|买|需要)`).ReplaceAllString(before, "")
+	before = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?\s*(吨|套|件|支|张|批|个|台)?`).ReplaceAllString(before, "")
+	before = strings.TrimSpace(strings.TrimLeft(before, "的 "))
+	if before == "" || before == "品类" {
+		return ""
+	}
+	return before
 }

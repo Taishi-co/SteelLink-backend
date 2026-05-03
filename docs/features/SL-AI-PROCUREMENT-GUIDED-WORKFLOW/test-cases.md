@@ -16,6 +16,7 @@
 | TC-05 | 需要融资 | 订单已生成且融资需求为 true | 调用 `POST /ai-procurements/:id/match-finance` | 返回融资方案并保持融资匹配阶段 |
 | TC-06 | 不需要融资 | 订单已生成且融资需求为 false | 调用 `POST /ai-procurements/:id/match-finance` | 返回空融资方案并进入审核提交阶段 |
 | TC-07 | 提交并保存历史 | 订单已生成 | 调用 `POST /ai-procurements/:id/submit-review` 且 `save_history=true` | 状态更新为审核提交，记录出现在我的AI采购 |
+| TC-08 | 显式品类解析 | 已开启大模型解析 | 输入 `我想买100吨的钢，品类为热轧板卷` 调用 `POST /ai-procurements/parse` | 返回 `product_name=钢`、`category=热轧板卷`、`quantity=100`、`unit=吨` |
 
 ## Exception Path
 
@@ -25,6 +26,7 @@
 | TC-EX-02 | 未选商品生成订单 | 已确认 parsed | 调用 `generate-order` 但 product_id 为空 | 返回业务错误 |
 | TC-EX-03 | 未生成订单提交审核 | 仅有旧 AI采购草稿 | 调用 `submit-review` | 返回请先生成真实订单 |
 | TC-EX-04 | 不保存历史 | 订单已生成 | `submit-review` 传 `save_history=false` | 提交成功但不会出现在我的AI采购列表 |
+| TC-EX-05 | 模型布尔字段抖动 | 大模型返回 `financing_required` 为字符串 | 解析模型响应 | 不因 `"true"`、`"false"`、`"是"`、`"否"` 类型抖动整体回落规则解析 |
 
 ## 权限测试
 
