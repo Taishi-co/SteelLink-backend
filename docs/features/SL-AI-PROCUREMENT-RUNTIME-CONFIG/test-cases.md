@@ -22,3 +22,4 @@
 - 向量召回失败仍回退 MySQL 规则匹配。
 - 模型解析开启且配置完整时，日志包含 `AI procurement model parser started` 与 `AI procurement model parser succeeded`。
 - 模型解析关闭、密钥缺失或模型失败时，日志包含跳过或失败原因，并记录 `AI procurement parse fallback to rule parser`。
+- `POST /api/v1/ai-procurements/match-products` 日志应包含匹配入口、向量匹配跳过/成功/失败、规则查询阶段和参考方案兜底原因。

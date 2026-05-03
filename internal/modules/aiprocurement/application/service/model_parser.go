@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,7 +56,7 @@ type anthropicMessageResponse struct {
 type parsedInstructionPayload struct {
 	ProductName       string   `json:"product_name"`
 	Category          string   `json:"category"`
-	Quantity          float64  `json:"quantity"`
+	Quantity          quantity `json:"quantity"`
 	Unit              string   `json:"unit"`
 	Usage             string   `json:"usage"`
 	FinancingRequired bool     `json:"financing_required"`
@@ -176,7 +177,7 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 	result := entity.ParsedInstruction{
 		ProductName:       strings.TrimSpace(parsed.ProductName),
 		Category:          strings.TrimSpace(parsed.Category),
-		Quantity:          parsed.Quantity,
+		Quantity:          float64(parsed.Quantity),
 		Unit:              strings.TrimSpace(parsed.Unit),
 		Usage:             strings.TrimSpace(parsed.Usage),
 		FinancingRequired: parsed.FinancingRequired,
@@ -194,6 +195,31 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		zap.Float64("confidence", result.Confidence),
 	)
 	return result, true, nil
+}
+
+type quantity float64
+
+func (q *quantity) UnmarshalJSON(data []byte) error {
+	var number float64
+	if err := json.Unmarshal(data, &number); err == nil {
+		*q = quantity(number)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		*q = 0
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return fmt.Errorf("parse quantity %q: %w", text, err)
+	}
+	*q = quantity(parsed)
+	return nil
 }
 
 func buildModelParserPayload(modelCfg config.AIProcurementConfig, prompt string) ([]byte, error) {
