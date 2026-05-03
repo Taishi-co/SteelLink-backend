@@ -61,6 +61,26 @@ func TestExtractModelParserContentReadsAnthropicTextContent(t *testing.T) {
 	}
 }
 
+func TestParsedInstructionPayloadAcceptsStringQuantity(t *testing.T) {
+	var payload parsedInstructionPayload
+	err := json.Unmarshal([]byte(`{
+		"product_name": "螺纹钢",
+		"category": "钢材",
+		"quantity": "20",
+		"unit": "吨",
+		"usage": "施工",
+		"financing_required": false,
+		"keywords": ["螺纹钢"],
+		"confidence": 0.88
+	}`), &payload)
+	if err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if got := float64(payload.Quantity); got != 20 {
+		t.Fatalf("quantity = %v, want 20", got)
+	}
+}
+
 func TestModelParserRequestURLCompletesAnthropicBasePath(t *testing.T) {
 	got := modelParserRequestURL("https://api.minimaxi.com/anthropic")
 	want := "https://api.minimaxi.com/anthropic/v1/messages"

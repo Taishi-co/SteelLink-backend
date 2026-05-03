@@ -345,17 +345,57 @@ func normalizeParsedInput(parsed entity.ParsedInstruction, prompt string) entity
 }
 
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
+	cfg := config.GetAIProcurement().VectorSearch
+	logAIProcurementInfo("AI procurement product matching started",
+		zap.String("product_name", parsed.ProductName),
+		zap.String("category", parsed.Category),
+		zap.Float64("quantity", parsed.Quantity),
+		zap.String("unit", parsed.Unit),
+		zap.Bool("vector_enabled", cfg.Enabled),
+		zap.String("vector_provider", cfg.Provider),
+		zap.String("product_collection", cfg.ProductCollection),
+		zap.Int("top_k", cfg.TopK),
+	)
 	if matcher := newProductVectorMatcher(s.productRepo); matcher != nil {
 		matches, err := matcher.Match(ctx, parsed)
 		if err == nil && len(matches) > 0 {
+			logAIProcurementInfo("AI procurement vector matching succeeded",
+				zap.Int("matched_count", len(matches)),
+				zap.String("product_name", parsed.ProductName),
+				zap.String("category", parsed.Category),
+			)
 			return matches, nil
 		}
+		if err != nil {
+			logAIProcurementWarn("AI procurement vector matching failed; falling back to rule matching",
+				zap.String("product_name", parsed.ProductName),
+				zap.String("category", parsed.Category),
+				zap.Error(err),
+			)
+		} else {
+			logAIProcurementInfo("AI procurement vector matching returned no matches; falling back to rule matching",
+				zap.String("product_name", parsed.ProductName),
+				zap.String("category", parsed.Category),
+			)
+		}
+	} else {
+		logAIProcurementInfo("AI procurement vector matching skipped; falling back to rule matching",
+			zap.String("reason", vectorMatcherSkipReason(cfg)),
+			zap.Bool("vector_enabled", cfg.Enabled),
+			zap.String("vector_provider", cfg.Provider),
+		)
 	}
 	return s.matchProductsByRule(ctx, parsed)
 }
 
 func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
 	status := int(productEntity.ProductStatusOnSale)
+	logAIProcurementInfo("AI procurement rule product query started",
+		zap.String("stage", "keyword_category"),
+		zap.String("keyword", parsed.ProductName),
+		zap.String("category", parsed.Category),
+		zap.Int("status", status),
+	)
 	products, _, err := s.productRepo.List(ctx, &productRepository.ProductQuery{
 		Page:     1,
 		PageSize: 10,
@@ -365,9 +405,26 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 		SortBy:   "stock_desc",
 	})
 	if err != nil {
+		logAIProcurementWarn("AI procurement rule product query failed",
+			zap.String("stage", "keyword_category"),
+			zap.String("keyword", parsed.ProductName),
+			zap.String("category", parsed.Category),
+			zap.Error(err),
+		)
 		return nil, err
 	}
+	logAIProcurementInfo("AI procurement rule product query finished",
+		zap.String("stage", "keyword_category"),
+		zap.Int("matched_count", len(products)),
+		zap.String("keyword", parsed.ProductName),
+		zap.String("category", parsed.Category),
+	)
 	if len(products) == 0 && parsed.Category != "" {
+		logAIProcurementInfo("AI procurement rule product query started",
+			zap.String("stage", "category_only"),
+			zap.String("category", parsed.Category),
+			zap.Int("status", status),
+		)
 		products, _, err = s.productRepo.List(ctx, &productRepository.ProductQuery{
 			Page:     1,
 			PageSize: 10,
@@ -376,10 +433,25 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 			SortBy:   "stock_desc",
 		})
 		if err != nil {
+			logAIProcurementWarn("AI procurement rule product query failed",
+				zap.String("stage", "category_only"),
+				zap.String("category", parsed.Category),
+				zap.Error(err),
+			)
 			return nil, err
 		}
+		logAIProcurementInfo("AI procurement rule product query finished",
+			zap.String("stage", "category_only"),
+			zap.Int("matched_count", len(products)),
+			zap.String("category", parsed.Category),
+		)
 	}
 	if len(products) == 0 {
+		logAIProcurementWarn("AI procurement product matching returned reference plan",
+			zap.String("reason", "no_spot_products_matched"),
+			zap.String("product_name", parsed.ProductName),
+			zap.String("category", parsed.Category),
+		)
 		return entity.MatchedProducts{
 			{
 				ProductName: parsed.ProductName,
@@ -424,7 +496,22 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 			Description:   product.Description,
 		})
 	}
+	logAIProcurementInfo("AI procurement rule matching succeeded",
+		zap.Int("matched_count", len(matches)),
+		zap.String("product_name", parsed.ProductName),
+		zap.String("category", parsed.Category),
+	)
 	return matches, nil
+}
+
+func vectorMatcherSkipReason(cfg config.VectorSearchConfig) string {
+	if !cfg.Enabled {
+		return "vector_search_disabled"
+	}
+	if cfg.Provider != "" && cfg.Provider != "pgvector" {
+		return "unsupported_vector_provider"
+	}
+	return "vector_matcher_unavailable"
 }
 
 func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {
