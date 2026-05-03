@@ -36,6 +36,22 @@ type chatCompletionResponse struct {
 	} `json:"choices"`
 }
 
+type anthropicMessageRequest struct {
+	Model       string        `json:"model"`
+	System      string        `json:"system,omitempty"`
+	Messages    []chatMessage `json:"messages"`
+	MaxTokens   int           `json:"max_tokens"`
+	Temperature float64       `json:"temperature,omitempty"`
+	TopP        float64       `json:"top_p,omitempty"`
+}
+
+type anthropicMessageResponse struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
 type parsedInstructionPayload struct {
 	ProductName       string   `json:"product_name"`
 	Category          string   `json:"category"`
@@ -75,6 +91,7 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		)
 		return entity.ParsedInstruction{}, false, nil
 	}
+	requestURL := modelParserRequestURL(modelCfg.BaseURL)
 
 	timeout := time.Duration(modelCfg.TimeoutSec) * time.Second
 	if timeout <= 0 {
@@ -83,7 +100,7 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 	startedAt := time.Now()
 	logAIProcurementInfo("AI procurement model parser started",
 		zap.String("provider", modelCfg.Provider),
-		zap.String("base_url", modelCfg.BaseURL),
+		zap.String("base_url", requestURL),
 		zap.String("model", modelCfg.Model),
 		zap.Int("timeout_sec", int(timeout.Seconds())),
 		zap.Int("prompt_len", len([]rune(prompt))),
@@ -91,30 +108,12 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	reqBody := chatCompletionRequest{
-		Model: modelCfg.Model,
-		Messages: []chatMessage{
-			{
-				Role: "system",
-				Content: strings.Join([]string{
-					"你是钢材B2B平台的采购指令解析器。",
-					"只输出JSON，不要输出解释、Markdown或代码块。",
-					"JSON字段必须包含 product_name, category, quantity, unit, usage, financing_required, keywords, confidence。",
-					"category 使用钢材或工业品类短名称；quantity 是数字；confidence 取值0到1。",
-				}, "\n"),
-			},
-			{Role: "user", Content: prompt},
-		},
-		Temperature:         modelCfg.Temperature,
-		TopP:                modelCfg.TopP,
-		MaxCompletionTokens: modelCfg.MaxTokens,
-	}
-	payload, err := json.Marshal(reqBody)
+	payload, err := buildModelParserPayload(modelCfg, prompt)
 	if err != nil {
 		return entity.ParsedInstruction{}, true, err
 	}
 
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, modelCfg.BaseURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, requestURL, bytes.NewReader(payload))
 	if err != nil {
 		return entity.ParsedInstruction{}, true, err
 	}
@@ -149,19 +148,8 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		return entity.ParsedInstruction{}, true, err
 	}
 
-	var completion chatCompletionResponse
-	if err := json.Unmarshal(body, &completion); err != nil {
-		logAIProcurementWarn("AI procurement model parser failed",
-			zap.String("provider", modelCfg.Provider),
-			zap.String("model", modelCfg.Model),
-			zap.Int("status", resp.StatusCode),
-			zap.Duration("latency", time.Since(startedAt)),
-			zap.Error(err),
-		)
-		return entity.ParsedInstruction{}, true, err
-	}
-	if len(completion.Choices) == 0 {
-		err := fmt.Errorf("model parser returned no choices")
+	content, err := extractModelParserContent(requestURL, body)
+	if err != nil {
 		logAIProcurementWarn("AI procurement model parser failed",
 			zap.String("provider", modelCfg.Provider),
 			zap.String("model", modelCfg.Model),
@@ -172,7 +160,7 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		return entity.ParsedInstruction{}, true, err
 	}
 
-	content := normalizeJSONContent(completion.Choices[0].Message.Content)
+	content = normalizeJSONContent(content)
 	var parsed parsedInstructionPayload
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
 		logAIProcurementWarn("AI procurement model parser failed",
@@ -206,6 +194,79 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		zap.Float64("confidence", result.Confidence),
 	)
 	return result, true, nil
+}
+
+func buildModelParserPayload(modelCfg config.AIProcurementConfig, prompt string) ([]byte, error) {
+	systemPrompt := modelParserSystemPrompt()
+	if isAnthropicMessagesEndpoint(modelCfg.BaseURL) {
+		maxTokens := modelCfg.MaxTokens
+		if maxTokens <= 0 {
+			maxTokens = 1200
+		}
+		return json.Marshal(anthropicMessageRequest{
+			Model:       modelCfg.Model,
+			System:      systemPrompt,
+			Messages:    []chatMessage{{Role: "user", Content: prompt}},
+			MaxTokens:   maxTokens,
+			Temperature: modelCfg.Temperature,
+			TopP:        modelCfg.TopP,
+		})
+	}
+	return json.Marshal(chatCompletionRequest{
+		Model: modelCfg.Model,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: prompt},
+		},
+		Temperature:         modelCfg.Temperature,
+		TopP:                modelCfg.TopP,
+		MaxCompletionTokens: modelCfg.MaxTokens,
+	})
+}
+
+func extractModelParserContent(baseURL string, body []byte) (string, error) {
+	if isAnthropicMessagesEndpoint(baseURL) {
+		var completion anthropicMessageResponse
+		if err := json.Unmarshal(body, &completion); err != nil {
+			return "", err
+		}
+		for _, item := range completion.Content {
+			if item.Type == "text" && strings.TrimSpace(item.Text) != "" {
+				return item.Text, nil
+			}
+		}
+		return "", fmt.Errorf("model parser returned no text content")
+	}
+	var completion chatCompletionResponse
+	if err := json.Unmarshal(body, &completion); err != nil {
+		return "", err
+	}
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("model parser returned no choices")
+	}
+	return completion.Choices[0].Message.Content, nil
+}
+
+func isAnthropicMessagesEndpoint(baseURL string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(normalized, "/anthropic")
+}
+
+func modelParserRequestURL(baseURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(strings.ToLower(trimmed), "/anthropic") {
+		return trimmed + "/v1/messages"
+	}
+	return trimmed
+}
+
+func modelParserSystemPrompt() string {
+	return strings.Join([]string{
+		"你是钢材B2B平台的采购指令解析器。",
+		"只输出JSON，不要输出解释、Markdown或代码块。",
+		"JSON字段必须包含 product_name, category, quantity, unit, usage, financing_required, keywords, confidence。",
+		"category 使用钢材或工业品类短名称；quantity 是数字；confidence 取值0到1。",
+	}, "\n")
 }
 
 func normalizeJSONContent(content string) string {

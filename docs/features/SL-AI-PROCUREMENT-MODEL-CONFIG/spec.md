@@ -7,7 +7,7 @@ AI 采购后端已具备规则解析、商品匹配、订单草稿、融资方�
 ## 目标
 
 - 为 `SteelLink-backend` 增加 AI 采购模型解析配置。
-- 支持 MiniMax/OpenAI-compatible Chat Completions 风格的结构化采购指令解析。
+- 支持 MiniMax/OpenAI-compatible Chat Completions 与 MiniMax Anthropic Messages 风格的结构化采购指令解析。
 - 在未启用模型解析、未配置 API Key 或模型调用失败时，自动回退到现有规则解析。
 - API Key 只通过环境变量读取，不写入配置文件或数据库。
 
@@ -25,6 +25,8 @@ AI 采购后端已具备规则解析、商品匹配、订单草稿、融资方�
 
 ## 推荐 MiniMax 配置
 
+### OpenAI-compatible
+
 - `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`
 - `AI_PROCUREMENT_PROVIDER=minimax`
 - `AI_PROCUREMENT_BASE_URL=https://api.minimax.io/v1/chat/completions`
@@ -35,3 +37,14 @@ AI 采购后端已具备规则解析、商品匹配、订单草稿、融资方�
 - `AI_PROCUREMENT_TOP_P=0.9`
 - `AI_PROCUREMENT_MAX_TOKENS=1200`
 - `AI_PROCUREMENT_TIMEOUT_SEC=20`
+
+### Anthropic Messages-compatible
+
+- `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`
+- `AI_PROCUREMENT_PROVIDER=minimax`
+- `AI_PROCUREMENT_BASE_URL=https://api.minimaxi.com/anthropic/v1/messages`
+- `AI_PROCUREMENT_API_KEY_ENV=MINIMAX_API_KEY`
+- `MINIMAX_API_KEY=<真实密钥>`
+- `AI_PROCUREMENT_MODEL=MiniMax-M2.7`
+- `AI_PROCUREMENT_TEMPERATURE=0.1`
+- `AI_PROCUREMENT_MAX_TOKENS=1024`
