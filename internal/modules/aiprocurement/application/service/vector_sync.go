@@ -56,6 +56,9 @@ func reservedVectorSync(target string) *dto.VectorSyncResponse {
 func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.VectorSyncRequest) (*dto.VectorSyncResponse, error) {
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	cfg := config.GetAIProcurement().VectorSearch
+	if !cfg.Enabled {
+		return nil, ecode.ErrBadRequest.WithMessage("vector search is disabled in runtime config")
+	}
 	if cfg.Provider != "pgvector" {
 		return nil, ecode.ErrBadRequest.WithMessagef("vector provider must be pgvector, got %q", cfg.Provider)
 	}
