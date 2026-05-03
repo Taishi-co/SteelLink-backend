@@ -19,6 +19,7 @@ import (
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
+	"go.uber.org/zap"
 )
 
 type ProcurementService struct {
@@ -44,7 +45,22 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 	}
 	parsed, ok, err := parseInstructionWithModel(ctx, prompt)
 	if err != nil || !ok {
+		if err != nil {
+			logAIProcurementWarn("AI procurement parse fallback to rule parser",
+				zap.String("reason", "model_parser_error"),
+				zap.Error(err),
+			)
+		} else {
+			logAIProcurementInfo("AI procurement parse fallback to rule parser",
+				zap.String("reason", "model_parser_unavailable"),
+			)
+		}
 		parsed = parseInstructionByRule(prompt)
+		logAIProcurementInfo("AI procurement rule parser succeeded",
+			zap.String("product_name", parsed.ProductName),
+			zap.String("category", parsed.Category),
+			zap.Float64("confidence", parsed.Confidence),
+		)
 	}
 	return &dto.ParseResponse{
 		Parsed:          parsed,
@@ -69,6 +85,7 @@ func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.Co
 }
 
 func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
+	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {

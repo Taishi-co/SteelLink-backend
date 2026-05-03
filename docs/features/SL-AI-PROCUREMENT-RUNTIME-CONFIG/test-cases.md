@@ -2,10 +2,10 @@
 
 ## 配置同步
 
-- 未开启 runtime sync 时，AI采购继续使用本地 env/config。
-- 开启 runtime sync 且 Admin 返回 `model.parsingEnabled=true` 时，模型解析开关生效。
-- 开启 runtime sync 且 Admin 返回 `matching.vectorEnabled=true` 时，向量召回开关生效。
-- Admin 接口不可用、返回非 2xx 或 token 错误时，AI采购接口不失败，继续使用本地配置。
+- Redis 中 `ai_procurement_config` 的 `model.parsingEnabled=true` 时，模型解析开关生效。
+- Redis 中 `ai_procurement_config` 的 `matching.vectorEnabled=true` 时，向量召回开关生效。
+- Redis miss、Redis 不可用或 JSON 无效时，AI采购接口不失败，使用代码内置默认值并继续规则兜底。
+- Redis miss 时即使本地 AI env/config 打开模型解析，业务后端也不调用模型。
 
 ## 安全
 
@@ -19,3 +19,5 @@
 - `POST /api/v1/ai-procurements/parse` 未登录仍按鉴权规则处理。
 - 模型解析失败仍回退规则解析。
 - 向量召回失败仍回退 MySQL 规则匹配。
+- 模型解析开启且配置完整时，日志包含 `AI procurement model parser started` 与 `AI procurement model parser succeeded`。
+- 模型解析关闭、密钥缺失或模型失败时，日志包含跳过或失败原因，并记录 `AI procurement parse fallback to rule parser`。
