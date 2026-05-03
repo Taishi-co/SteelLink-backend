@@ -11,6 +11,7 @@
 - 启用向量且 pgvector 命中上架商品时，AI 采购优先返回向量召回商品。
 - pgvector 不可用时，AI 采购解析仍回退 MySQL 规则匹配。
 - pgvector 命中商品不存在、已下架或品类不匹配时，AI 采购仍回退 MySQL 规则匹配。
+- `ai_product_embeddings` 只要求最小索引字段：`product_id`、`product_no`、`product_name`、`category`、`enterprise_id`、`embedding`。
 - 商品集合后续可按品类、状态、区域、库存做 scalar filter。
 - 供应商集合后续可按认证状态和服务区域过滤。
 - 融资产品集合后续可按金额范围和账期过滤。
