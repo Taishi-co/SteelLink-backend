@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 )
 
@@ -158,14 +157,8 @@ type VectorSearchConfig struct {
 
 type RuntimeConfig struct {
 	Enabled     bool   `mapstructure:"enabled"`
-	Endpoint    string `mapstructure:"endpoint"`
-	TokenEnv    string `mapstructure:"token_env"`
+	RedisKey    string `mapstructure:"redis_key"`
 	CacheTTLSec int    `mapstructure:"cache_ttl_sec"`
-}
-
-type aiProcurementAdminResponse struct {
-	Code int                      `json:"code"`
-	Data aiProcurementAdminConfig `json:"data"`
 }
 
 type aiProcurementAdminConfig struct {
@@ -304,8 +297,8 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 }
 
 func applyRuntimeConfigDefaults(c *RuntimeConfig) {
-	if c.TokenEnv == "" {
-		c.TokenEnv = "AI_PROCUREMENT_CONFIG_SYNC_TOKEN"
+	if c.RedisKey == "" {
+		c.RedisKey = "ai_procurement_config"
 	}
 	if c.CacheTTLSec <= 0 {
 		c.CacheTTLSec = 30
@@ -623,11 +616,8 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_ENABLED"); v != "" {
 		c.AIProcurement.RuntimeConfig.Enabled = parseBool(v)
 	}
-	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_ENDPOINT"); v != "" {
-		c.AIProcurement.RuntimeConfig.Endpoint = strings.TrimRight(v, "/")
-	}
-	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_TOKEN_ENV"); v != "" {
-		c.AIProcurement.RuntimeConfig.TokenEnv = v
+	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_REDIS_KEY"); v != "" {
+		c.AIProcurement.RuntimeConfig.RedisKey = v
 	}
 	if v := os.Getenv("AI_PROCUREMENT_RUNTIME_CONFIG_CACHE_TTL_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -650,12 +640,12 @@ func Get() *Config {
 }
 
 func RefreshAIProcurementRuntimeConfig(ctx context.Context) {
-	if GlobalConfig == nil || !GlobalConfig.AIProcurement.RuntimeConfig.Enabled {
+	if GlobalConfig == nil {
 		return
 	}
 	runtimeCfg := GlobalConfig.AIProcurement.RuntimeConfig
-	if runtimeCfg.Endpoint == "" {
-		return
+	if runtimeCfg.RedisKey == "" {
+		runtimeCfg.RedisKey = "ai_procurement_config"
 	}
 	ttl := time.Duration(runtimeCfg.CacheTTLSec) * time.Second
 	if ttl <= 0 {
@@ -670,36 +660,30 @@ func RefreshAIProcurementRuntimeConfig(ctx context.Context) {
 	aiProcurementRuntimeCache.lastAttemptAt = time.Now()
 	aiProcurementRuntimeCache.mu.Unlock()
 
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, runtimeCfg.Endpoint, nil)
-	if err != nil {
-		return
-	}
-	if runtimeCfg.TokenEnv != "" {
-		if token := os.Getenv(runtimeCfg.TokenEnv); token != "" {
-			req.Header.Set("X-Internal-Token", token)
-		}
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return
-	}
-	var payload aiProcurementAdminResponse
-	if err := json.Unmarshal(body, &payload); err != nil || payload.Code != 0 {
-		return
-	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     GlobalConfig.Redis.Addr(),
+		Password: GlobalConfig.Redis.Password,
+		DB:       GlobalConfig.Redis.DB,
+		PoolSize: GlobalConfig.Redis.PoolSize,
+	})
+	defer client.Close()
+
+	raw, err := client.Get(requestCtx, runtimeCfg.RedisKey).Result()
 	aiProcurementConfigMu.Lock()
 	defer aiProcurementConfigMu.Unlock()
-	applyAdminAIProcurementConfig(&GlobalConfig.AIProcurement, payload.Data)
+	if err != nil {
+		applyHardcodedAIProcurementFallback(&GlobalConfig.AIProcurement)
+		return
+	}
+	var payload aiProcurementAdminConfig
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		applyHardcodedAIProcurementFallback(&GlobalConfig.AIProcurement)
+		return
+	}
+	applyAdminAIProcurementConfig(&GlobalConfig.AIProcurement, payload)
 }
 
 func GetAIProcurement() AIProcurementConfig {
@@ -711,7 +695,53 @@ func GetAIProcurement() AIProcurementConfig {
 	return GlobalConfig.AIProcurement
 }
 
+func applyHardcodedAIProcurementFallback(target *AIProcurementConfig) {
+	runtimeCfg := target.RuntimeConfig
+	*target = hardcodedAIProcurementFallback()
+	target.RuntimeConfig = runtimeCfg
+}
+
+func hardcodedAIProcurementFallback() AIProcurementConfig {
+	return AIProcurementConfig{
+		ModelParsingEnabled: false,
+		Provider:            "rule_based",
+		BaseURL:             "https://api.minimax.io/v1/chat/completions",
+		APIKeyEnv:           "MINIMAX_API_KEY",
+		Model:               "MiniMax-M2.7",
+		Temperature:         0.2,
+		TopP:                0.9,
+		MaxTokens:           1200,
+		TimeoutSec:          20,
+		ConfidenceThreshold: 0.78,
+		VectorSearch: VectorSearchConfig{
+			Enabled:                  false,
+			Provider:                 "pgvector",
+			Database:                 "steellink_vectors",
+			PasswordEnv:              "PGVECTOR_PASSWORD",
+			ConnectionEnv:            "PGVECTOR_DSN",
+			ProductCollection:        "ai_product_embeddings",
+			SupplierCollection:       "ai_supplier_embeddings",
+			FinanceProductCollection: "ai_finance_product_embeddings",
+			EmbeddingProvider:        "minimax",
+			EmbeddingBaseURL:         "https://api.minimax.chat/v1/embeddings",
+			EmbeddingAPIKeyEnv:       "MINIMAX_API_KEY",
+			EmbeddingModel:           "embo-01",
+			Dimension:                1536,
+			TopK:                     10,
+			MinScore:                 0.65,
+			HybridKeywordWeight:      0.35,
+			HybridVectorWeight:       0.65,
+		},
+		RuntimeConfig: RuntimeConfig{
+			Enabled:     true,
+			RedisKey:    "ai_procurement_config",
+			CacheTTLSec: 30,
+		},
+	}
+}
+
 func applyAdminAIProcurementConfig(target *AIProcurementConfig, source aiProcurementAdminConfig) {
+	applyHardcodedAIProcurementFallback(target)
 	target.ModelParsingEnabled = source.Enabled && source.Model.ParsingEnabled
 	if source.Model.Provider != "" {
 		target.Provider = source.Model.Provider

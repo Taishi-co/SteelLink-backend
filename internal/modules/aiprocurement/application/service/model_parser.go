@@ -12,6 +12,7 @@ import (
 
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
+	"go.uber.org/zap"
 )
 
 type chatMessage struct {
@@ -49,14 +50,29 @@ type parsedInstructionPayload struct {
 func parseInstructionWithModel(ctx context.Context, prompt string) (entity.ParsedInstruction, bool, error) {
 	modelCfg := config.GetAIProcurement()
 	if !modelCfg.ModelParsingEnabled {
+		logAIProcurementInfo("AI procurement model parser skipped",
+			zap.String("reason", "model_parsing_disabled"),
+		)
 		return entity.ParsedInstruction{}, false, nil
 	}
 
 	apiKey := modelCfg.APIKey()
 	if apiKey == "" {
+		logAIProcurementWarn("AI procurement model parser skipped",
+			zap.String("reason", "api_key_empty"),
+			zap.String("provider", modelCfg.Provider),
+			zap.String("api_key_env", modelCfg.APIKeyEnv),
+			zap.String("model", modelCfg.Model),
+		)
 		return entity.ParsedInstruction{}, false, nil
 	}
 	if modelCfg.BaseURL == "" || modelCfg.Model == "" {
+		logAIProcurementWarn("AI procurement model parser skipped",
+			zap.String("reason", "model_config_incomplete"),
+			zap.String("provider", modelCfg.Provider),
+			zap.String("base_url", modelCfg.BaseURL),
+			zap.String("model", modelCfg.Model),
+		)
 		return entity.ParsedInstruction{}, false, nil
 	}
 
@@ -64,6 +80,14 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 	if timeout <= 0 {
 		timeout = 20 * time.Second
 	}
+	startedAt := time.Now()
+	logAIProcurementInfo("AI procurement model parser started",
+		zap.String("provider", modelCfg.Provider),
+		zap.String("base_url", modelCfg.BaseURL),
+		zap.String("model", modelCfg.Model),
+		zap.Int("timeout_sec", int(timeout.Seconds())),
+		zap.Int("prompt_len", len([]rune(prompt))),
+	)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -99,6 +123,12 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		logAIProcurementWarn("AI procurement model parser failed",
+			zap.String("provider", modelCfg.Provider),
+			zap.String("model", modelCfg.Model),
+			zap.Duration("latency", time.Since(startedAt)),
+			zap.Error(err),
+		)
 		return entity.ParsedInstruction{}, true, err
 	}
 	defer resp.Body.Close()
@@ -108,20 +138,50 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		return entity.ParsedInstruction{}, true, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return entity.ParsedInstruction{}, true, fmt.Errorf("model parser returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		err := fmt.Errorf("model parser returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		logAIProcurementWarn("AI procurement model parser failed",
+			zap.String("provider", modelCfg.Provider),
+			zap.String("model", modelCfg.Model),
+			zap.Int("status", resp.StatusCode),
+			zap.Duration("latency", time.Since(startedAt)),
+			zap.Error(err),
+		)
+		return entity.ParsedInstruction{}, true, err
 	}
 
 	var completion chatCompletionResponse
 	if err := json.Unmarshal(body, &completion); err != nil {
+		logAIProcurementWarn("AI procurement model parser failed",
+			zap.String("provider", modelCfg.Provider),
+			zap.String("model", modelCfg.Model),
+			zap.Int("status", resp.StatusCode),
+			zap.Duration("latency", time.Since(startedAt)),
+			zap.Error(err),
+		)
 		return entity.ParsedInstruction{}, true, err
 	}
 	if len(completion.Choices) == 0 {
-		return entity.ParsedInstruction{}, true, fmt.Errorf("model parser returned no choices")
+		err := fmt.Errorf("model parser returned no choices")
+		logAIProcurementWarn("AI procurement model parser failed",
+			zap.String("provider", modelCfg.Provider),
+			zap.String("model", modelCfg.Model),
+			zap.Int("status", resp.StatusCode),
+			zap.Duration("latency", time.Since(startedAt)),
+			zap.Error(err),
+		)
+		return entity.ParsedInstruction{}, true, err
 	}
 
 	content := normalizeJSONContent(completion.Choices[0].Message.Content)
 	var parsed parsedInstructionPayload
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		logAIProcurementWarn("AI procurement model parser failed",
+			zap.String("provider", modelCfg.Provider),
+			zap.String("model", modelCfg.Model),
+			zap.Int("status", resp.StatusCode),
+			zap.Duration("latency", time.Since(startedAt)),
+			zap.Error(err),
+		)
 		return entity.ParsedInstruction{}, true, err
 	}
 
@@ -136,6 +196,15 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 		Confidence:        parsed.Confidence,
 	}
 	normalizeParsedInstruction(&result, prompt)
+	logAIProcurementInfo("AI procurement model parser succeeded",
+		zap.String("provider", modelCfg.Provider),
+		zap.String("model", modelCfg.Model),
+		zap.Int("status", resp.StatusCode),
+		zap.Duration("latency", time.Since(startedAt)),
+		zap.String("product_name", result.ProductName),
+		zap.String("category", result.Category),
+		zap.Float64("confidence", result.Confidence),
+	)
 	return result, true, nil
 }
 

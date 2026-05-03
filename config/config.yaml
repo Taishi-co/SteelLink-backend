@@ -90,7 +90,6 @@ ai_procurement:
     hybrid_keyword_weight: 0.35
     hybrid_vector_weight: 0.65
   runtime_config:
-    enabled: false
-    endpoint: ""
-    token_env: AI_PROCUREMENT_CONFIG_SYNC_TOKEN
+    enabled: true
+    redis_key: ai_procurement_config
     cache_ttl_sec: 30
