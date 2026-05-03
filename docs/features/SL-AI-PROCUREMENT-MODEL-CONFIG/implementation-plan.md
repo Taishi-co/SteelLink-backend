@@ -11,7 +11,7 @@
 ## 实施步骤
 
 1. 增加 AI 采购模型解析配置结构、默认值和环境变量覆盖。
-2. 增加 OpenAI-compatible Chat Completions 调用器。
+2. 增加 OpenAI-compatible Chat Completions 与 Anthropic Messages 调用器。
 3. 将采购指令解析流程改为“模型优先，规则兜底”。
 4. 补充 `.env.example` 和 feature 文档。
 5. 执行 `gofmt`、`go test ./...`、`CGO_ENABLED=0 go build -o <tmp-output> ./cmd/api`。

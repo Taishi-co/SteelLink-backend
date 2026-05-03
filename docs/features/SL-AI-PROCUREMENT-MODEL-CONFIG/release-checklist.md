@@ -13,6 +13,7 @@
 - [ ] `CGO_ENABLED=0 go build -o <tmp-output> ./cmd/api` 已通过
 - [ ] 已确认生产环境通过 `MINIMAX_API_KEY` 注入真实密钥
 - [ ] 已确认 `AI_PROCUREMENT_MODEL_PARSING_ENABLED` 默认关闭，支持灰度启用
+- [ ] 已确认 Anthropic Messages endpoint 使用 `/anthropic/v1/messages`
 - [ ] 已确认模型失败回退规则解析
 
 ## 回滚信息
