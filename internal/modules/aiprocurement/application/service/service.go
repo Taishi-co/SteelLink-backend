@@ -109,35 +109,18 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再生成订单")
 	}
-	orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(selectedProducts))
 	for idx := range selectedProducts {
 		selectedProducts[idx].Selected = true
 		if selectedProducts[idx].Quantity <= 0 {
 			return nil, ecode.ErrBadRequest.WithMessage("拼单商品数量必须大于0")
 		}
 		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
-		orderItems = append(orderItems, orderDTO.CreateOrderItemRequest{
-			ProductID: selectedProducts[idx].ProductID,
-			Quantity:  selectedProducts[idx].Quantity,
-		})
 	}
-	orderInfo, err := s.orderSvc.Create(ctx, &orderDTO.CreateOrderRequest{
-		Items:               orderItems,
-		Source:              "ai_procurement",
-		RestoreCartOnCancel: true,
-		ContactName:         req.OrderForm.ContactName,
-		ContactPhone:        req.OrderForm.ContactPhone,
-		WarehouseName:       req.OrderForm.WarehouseName,
-		DeliveryAddress:     req.OrderForm.DeliveryAddress,
-		DeliveryMethod:      req.OrderForm.DeliveryMethod,
-		PaymentMethod:       req.OrderForm.PaymentMethod,
-		DeliveryNote:        req.OrderForm.DeliveryNote,
-		Remark:              req.OrderForm.Remark,
-	}, userID, enterpriseID)
+	orderInfos, err := s.createOrdersBySeller(ctx, selectedProducts, req.OrderForm, userID, enterpriseID)
 	if err != nil {
 		return nil, err
 	}
-	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, req.OrderForm, orderInfo)
+	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, req.OrderForm, orderInfos)
 	financePlans := entity.FinancePlans{}
 	nextStage := entity.StageReviewSubmission
 	status := entity.ProcurementStatusOrderGenerated
@@ -299,7 +282,7 @@ func (s *ProcurementService) SubmitReviewWithOptions(ctx context.Context, id, us
 	if len(item.MatchedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("没有可提交审核的商品匹配结果")
 	}
-	if item.OrderDraft.OrderID == 0 {
+	if item.OrderDraft.OrderID == 0 && len(item.OrderDraft.Orders) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请先生成真实订单后再提交审核")
 	}
 	now := time.Now()
@@ -557,6 +540,50 @@ func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
 	return total
 }
 
+func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected entity.MatchedProducts, form dto.OrderForm, userID, enterpriseID uint64) ([]*orderDTO.OrderInfo, error) {
+	grouped := make(map[uint64]entity.MatchedProducts)
+	order := make([]uint64, 0)
+	for _, item := range selected {
+		sellerID := item.EnterpriseID
+		if sellerID == 0 {
+			sellerID = item.ProductID
+		}
+		if _, exists := grouped[sellerID]; !exists {
+			order = append(order, sellerID)
+		}
+		grouped[sellerID] = append(grouped[sellerID], item)
+	}
+	orders := make([]*orderDTO.OrderInfo, 0, len(grouped))
+	for _, sellerID := range order {
+		group := grouped[sellerID]
+		orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(group))
+		for _, item := range group {
+			orderItems = append(orderItems, orderDTO.CreateOrderItemRequest{
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+			})
+		}
+		orderInfo, err := s.orderSvc.Create(ctx, &orderDTO.CreateOrderRequest{
+			Items:               orderItems,
+			Source:              "ai_procurement",
+			RestoreCartOnCancel: true,
+			ContactName:         form.ContactName,
+			ContactPhone:        form.ContactPhone,
+			WarehouseName:       form.WarehouseName,
+			DeliveryAddress:     form.DeliveryAddress,
+			DeliveryMethod:      form.DeliveryMethod,
+			PaymentMethod:       form.PaymentMethod,
+			DeliveryNote:        form.DeliveryNote,
+			Remark:              form.Remark,
+		}, userID, enterpriseID)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, orderInfo)
+	}
+	return orders, nil
+}
+
 func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {
 	amount := parsed.Quantity * 320
 	if len(matches) > 0 && matches[0].TotalAmount > 0 {
@@ -572,7 +599,7 @@ func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProd
 	}
 }
 
-func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.MatchedProducts, form dto.OrderForm, orderInfo *orderDTO.OrderInfo) entity.OrderDraft {
+func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.MatchedProducts, form dto.OrderForm, orderInfos []*orderDTO.OrderInfo) entity.OrderDraft {
 	quantity := totalSelectedQuantity(selected)
 	amount := 0.0
 	productID := uint64(0)
@@ -590,12 +617,34 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 	}
 	orderID := uint64(0)
 	orderNo := ""
+	orderSummaries := make(entity.OrderSummaries, 0, len(orderInfos))
 	orderDetail := map[string]any{}
-	if orderInfo != nil {
-		orderID = orderInfo.ID
-		orderNo = orderInfo.OrderNo
-		amount = orderInfo.TotalAmount
-		orderDetail = structToMap(orderInfo)
+	if len(orderInfos) > 0 {
+		orderID = orderInfos[0].ID
+		orderNo = orderInfos[0].OrderNo
+		amount = 0
+		orderDetails := make([]map[string]any, 0, len(orderInfos))
+		for _, orderInfo := range orderInfos {
+			if orderInfo == nil {
+				continue
+			}
+			amount += orderInfo.TotalAmount
+			orderSummaries = append(orderSummaries, entity.OrderSummary{
+				OrderID:       orderInfo.ID,
+				OrderNo:       orderInfo.OrderNo,
+				SellerID:      orderInfo.SellerID,
+				SellerName:    orderInfo.SellerName,
+				Quantity:      orderInfo.TotalQuantity,
+				TotalAmount:   orderInfo.TotalAmount,
+				ProductCount:  len(orderInfo.Items),
+				PaymentMethod: form.PaymentMethod,
+			})
+			orderDetails = append(orderDetails, structToMap(orderInfo))
+		}
+		if len(orderSummaries) > 1 {
+			orderNo = "MULTI"
+		}
+		orderDetail["orders"] = orderDetails
 	}
 	deliveryNote := strings.TrimSpace(form.DeliveryNote)
 	if deliveryNote == "" {
@@ -604,6 +653,7 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 	return entity.OrderDraft{
 		OrderID:         orderID,
 		OrderNo:         orderNo,
+		Orders:          orderSummaries,
 		ProductID:       productID,
 		ProductName:     productName,
 		Quantity:        quantity,

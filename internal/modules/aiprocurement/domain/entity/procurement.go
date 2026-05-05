@@ -87,6 +87,7 @@ func (m *MatchedProducts) Scan(value interface{}) error {
 type OrderDraft struct {
 	OrderID         uint64         `json:"order_id"`
 	OrderNo         string         `json:"order_no"`
+	Orders          OrderSummaries `json:"orders,omitempty"`
 	ProductID       uint64         `json:"product_id"`
 	ProductName     string         `json:"product_name"`
 	Quantity        float64        `json:"quantity"`
@@ -108,6 +109,28 @@ func (o OrderDraft) Value() (driver.Value, error) {
 }
 
 func (o *OrderDraft) Scan(value interface{}) error {
+	return scanJSON(value, o)
+}
+
+type OrderSummary struct {
+	OrderID       uint64  `json:"order_id"`
+	OrderNo       string  `json:"order_no"`
+	SellerID      uint64  `json:"seller_id"`
+	SellerName    string  `json:"seller_name"`
+	Quantity      float64 `json:"quantity"`
+	TotalAmount   float64 `json:"total_amount"`
+	ProductCount  int     `json:"product_count"`
+	PaymentMethod string  `json:"payment_method,omitempty"`
+	DeliveryNote  string  `json:"delivery_note,omitempty"`
+}
+
+type OrderSummaries []OrderSummary
+
+func (o OrderSummaries) Value() (driver.Value, error) {
+	return json.Marshal(o)
+}
+
+func (o *OrderSummaries) Scan(value interface{}) error {
 	return scanJSON(value, o)
 }
 
