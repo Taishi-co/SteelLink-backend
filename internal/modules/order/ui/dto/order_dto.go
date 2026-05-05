@@ -3,6 +3,23 @@ package dto
 import "time"
 
 type CreateOrderRequest struct {
+	ProductID           uint64                   `json:"product_id"`
+	Quantity            float64                  `json:"quantity"`
+	Items               []CreateOrderItemRequest `json:"items"`
+	CartItemIDs         []uint64                 `json:"cart_item_ids"`
+	Source              string                   `json:"source"`
+	RestoreCartOnCancel bool                     `json:"restore_cart_on_cancel"`
+	ContactName         string                   `json:"contact_name"`
+	ContactPhone        string                   `json:"contact_phone"`
+	WarehouseName       string                   `json:"warehouse_name"`
+	DeliveryAddress     string                   `json:"delivery_address"`
+	DeliveryMethod      string                   `json:"delivery_method"`
+	PaymentMethod       string                   `json:"payment_method"`
+	DeliveryNote        string                   `json:"delivery_note"`
+	Remark              string                   `json:"remark"`
+}
+
+type CreateOrderItemRequest struct {
 	ProductID uint64  `json:"product_id" binding:"required"`
 	Quantity  float64 `json:"quantity" binding:"required,gt=0"`
 }
