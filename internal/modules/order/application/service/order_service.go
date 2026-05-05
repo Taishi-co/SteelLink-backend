@@ -238,7 +238,7 @@ func (s *OrderService) GetByID(ctx context.Context, id, enterpriseID uint64) (*d
 		}
 		return nil, ecode.ErrDatabase
 	}
-	if enterpriseID == 0 || (order.BuyerID != enterpriseID && order.SellerID != enterpriseID) {
+	if enterpriseID == 0 || (order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID)) {
 		return nil, ecode.ErrForbidden.WithMessage("无权查看该订单")
 	}
 
@@ -366,7 +366,7 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, id, sellerEnterpriseID,
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
-	if order.SellerID != sellerEnterpriseID {
+	if !isOrderSeller(order, sellerEnterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单")
 	}
 	if order.Status != orderEntity.OrderStatusPendingConfirm {
@@ -391,7 +391,7 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
-	if order.BuyerID != enterpriseID && order.SellerID != enterpriseID {
+	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权签署该订单合同")
 	}
 	if order.Status != orderEntity.OrderStatusPendingContract {
@@ -433,7 +433,7 @@ func (s *OrderService) AttachContract(ctx context.Context, id, enterpriseID, ope
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
-	if order.BuyerID != enterpriseID && order.SellerID != enterpriseID {
+	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权绑定该订单合同")
 	}
 	if order.Status != orderEntity.OrderStatusPendingContract {
@@ -565,7 +565,7 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 		}
 		return nil, ecode.ErrDatabase
 	}
-	if order.SellerID != enterpriseID {
+	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收款")
 	}
 	currentStatus := order.Status
@@ -639,7 +639,7 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	if err := checkOrderFrozenOrException(order); err != nil {
 		return nil, err
 	}
-	if order.SellerID != enterpriseID {
+	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认出库")
 	}
 	if order.Status != orderEntity.OrderStatusPendingDelivery {
@@ -698,6 +698,13 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 		return nil, ecode.ErrDatabase.WithMessage("确认收货失败")
 	}
 	return toOrderInfo(order), nil
+}
+
+func isOrderSeller(order *orderEntity.Order, enterpriseID uint64) bool {
+	if order == nil || enterpriseID == 0 {
+		return false
+	}
+	return order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID
 }
 
 func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
@@ -777,12 +784,16 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 			GPSLongitude: order.ReceiptInfo.GPSLongitude,
 		}
 	}
+	sellerID := order.SellerID
+	if sellerID == 0 {
+		sellerID = order.SellerEnterpriseID
+	}
 	return &dto.OrderInfo{
 		ID:             order.ID,
 		OrderNo:        order.OrderNo,
 		BuyerID:        order.BuyerID,
 		BuyerName:      order.BuyerName,
-		SellerID:       order.SellerID,
+		SellerID:       sellerID,
 		SellerName:     order.SellerName,
 		Items:          items,
 		TotalQuantity:  order.TotalQuantity,

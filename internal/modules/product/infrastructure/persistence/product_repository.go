@@ -112,6 +112,8 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 		orderBy = "available_qty DESC, id DESC"
 	case "newest":
 		orderBy = "created_at DESC, id DESC"
+	case "updated_desc":
+		orderBy = "updated_at DESC, id DESC"
 	}
 
 	if err := db.Order(orderBy).Offset(offset).Limit(query.PageSize).Find(&products).Error; err != nil {

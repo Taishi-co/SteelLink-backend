@@ -38,7 +38,7 @@ func (r *orderRepository) FindByID(ctx context.Context, id uint64) (*entity.Orde
 func (r *orderRepository) ListByEnterprise(ctx context.Context, enterpriseID uint64) ([]*entity.Order, error) {
 	var orders []*entity.Order
 	if err := r.db.WithContext(ctx).
-		Where("buyer_id = ? OR seller_id = ?", enterpriseID, enterpriseID).
+		Where("buyer_id = ? OR seller_id = ? OR seller_enterprise_id = ?", enterpriseID, enterpriseID, enterpriseID).
 		Order("id desc").
 		Find(&orders).Error; err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (r *orderRepository) ListByBuyer(ctx context.Context, buyerID uint64) ([]*e
 func (r *orderRepository) ListBySeller(ctx context.Context, sellerID uint64) ([]*entity.Order, error) {
 	var orders []*entity.Order
 	if err := r.db.WithContext(ctx).
-		Where("seller_id = ?", sellerID).
+		Where("seller_id = ? OR seller_enterprise_id = ?", sellerID, sellerID).
 		Order("id desc").
 		Find(&orders).Error; err != nil {
 		return nil, err
