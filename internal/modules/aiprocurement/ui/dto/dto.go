@@ -24,14 +24,15 @@ type MatchProductsRequest struct {
 }
 
 type GenerateOrderRequest struct {
-	Prompt          string                   `json:"prompt"`
-	Parsed          entity.ParsedInstruction `json:"parsed" binding:"required"`
-	SelectedProduct entity.MatchedProduct    `json:"selected_product" binding:"required"`
-	OrderForm       OrderForm                `json:"order_form" binding:"required"`
+	Prompt           string                   `json:"prompt"`
+	Parsed           entity.ParsedInstruction `json:"parsed" binding:"required"`
+	SelectedProduct  entity.MatchedProduct    `json:"selected_product"`
+	SelectedProducts entity.MatchedProducts   `json:"selected_products"`
+	OrderForm        OrderForm                `json:"order_form" binding:"required"`
 }
 
 type OrderForm struct {
-	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
+	Quantity        float64 `json:"quantity"`
 	ContactName     string  `json:"contact_name" binding:"required"`
 	ContactPhone    string  `json:"contact_phone" binding:"required"`
 	WarehouseName   string  `json:"warehouse_name" binding:"required"`

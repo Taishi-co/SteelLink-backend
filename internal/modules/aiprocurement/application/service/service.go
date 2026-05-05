@@ -105,25 +105,39 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能生成AI采购订单")
 	}
 	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
-	selected := req.SelectedProduct
-	if selected.ProductID == 0 {
+	selectedProducts := normalizeSelectedProducts(req)
+	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再生成订单")
 	}
-	quantity := req.OrderForm.Quantity
-	if quantity <= 0 {
-		quantity = parsed.Quantity
+	orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(selectedProducts))
+	for idx := range selectedProducts {
+		selectedProducts[idx].Selected = true
+		if selectedProducts[idx].Quantity <= 0 {
+			return nil, ecode.ErrBadRequest.WithMessage("拼单商品数量必须大于0")
+		}
+		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
+		orderItems = append(orderItems, orderDTO.CreateOrderItemRequest{
+			ProductID: selectedProducts[idx].ProductID,
+			Quantity:  selectedProducts[idx].Quantity,
+		})
 	}
 	orderInfo, err := s.orderSvc.Create(ctx, &orderDTO.CreateOrderRequest{
-		ProductID: selected.ProductID,
-		Quantity:  quantity,
+		Items:               orderItems,
+		Source:              "ai_procurement",
+		RestoreCartOnCancel: true,
+		ContactName:         req.OrderForm.ContactName,
+		ContactPhone:        req.OrderForm.ContactPhone,
+		WarehouseName:       req.OrderForm.WarehouseName,
+		DeliveryAddress:     req.OrderForm.DeliveryAddress,
+		DeliveryMethod:      req.OrderForm.DeliveryMethod,
+		PaymentMethod:       req.OrderForm.PaymentMethod,
+		DeliveryNote:        req.OrderForm.DeliveryNote,
+		Remark:              req.OrderForm.Remark,
 	}, userID, enterpriseID)
 	if err != nil {
 		return nil, err
 	}
-	selected.Selected = true
-	selected.Quantity = quantity
-	selected.TotalAmount = quantity * selected.UnitPrice
-	orderDraft := buildOrderDraftFromForm(parsed, selected, req.OrderForm, orderInfo)
+	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, req.OrderForm, orderInfo)
 	financePlans := entity.FinancePlans{}
 	nextStage := entity.StageReviewSubmission
 	status := entity.ProcurementStatusOrderGenerated
@@ -135,17 +149,17 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		Prompt:            strings.TrimSpace(req.Prompt),
 		ProductName:       parsed.ProductName,
 		Category:          parsed.Category,
-		Quantity:          quantity,
+		Quantity:          totalSelectedQuantity(selectedProducts),
 		Unit:              parsed.Unit,
 		Usage:             parsed.Usage,
 		FinancingRequired: parsed.FinancingRequired,
 		CurrentStage:      nextStage,
 		Status:            status,
 		ParsedInstruction: parsed,
-		MatchedProducts:   entity.MatchedProducts{selected},
+		MatchedProducts:   selectedProducts,
 		OrderDraft:        orderDraft,
 		FinancePlans:      financePlans,
-		AuditItems:        buildAuditItems(parsed, entity.MatchedProducts{selected}, financePlans),
+		AuditItems:        buildAuditItems(parsed, selectedProducts, financePlans),
 		HistorySaved:      false,
 		EnterpriseID:      enterpriseID,
 		CreatedBy:         userID,
@@ -514,6 +528,35 @@ func vectorMatcherSkipReason(cfg config.VectorSearchConfig) string {
 	return "vector_matcher_unavailable"
 }
 
+func normalizeSelectedProducts(req *dto.GenerateOrderRequest) entity.MatchedProducts {
+	if len(req.SelectedProducts) > 0 {
+		selected := make(entity.MatchedProducts, 0, len(req.SelectedProducts))
+		for _, item := range req.SelectedProducts {
+			if item.ProductID == 0 {
+				continue
+			}
+			selected = append(selected, item)
+		}
+		return selected
+	}
+	if req.SelectedProduct.ProductID == 0 {
+		return entity.MatchedProducts{}
+	}
+	selected := req.SelectedProduct
+	if selected.Quantity <= 0 {
+		selected.Quantity = req.OrderForm.Quantity
+	}
+	return entity.MatchedProducts{selected}
+}
+
+func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
+	total := 0.0
+	for _, item := range selected {
+		total += item.Quantity
+	}
+	return total
+}
+
 func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {
 	amount := parsed.Quantity * 320
 	if len(matches) > 0 && matches[0].TotalAmount > 0 {
@@ -529,12 +572,22 @@ func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProd
 	}
 }
 
-func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.MatchedProduct, form dto.OrderForm, orderInfo *orderDTO.OrderInfo) entity.OrderDraft {
-	quantity := form.Quantity
-	if quantity <= 0 {
-		quantity = parsed.Quantity
+func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.MatchedProducts, form dto.OrderForm, orderInfo *orderDTO.OrderInfo) entity.OrderDraft {
+	quantity := totalSelectedQuantity(selected)
+	amount := 0.0
+	productID := uint64(0)
+	productName := parsed.ProductName
+	if len(selected) > 0 {
+		productID = selected[0].ProductID
+		if len(selected) == 1 {
+			productName = selected[0].ProductName
+		} else {
+			productName = parsed.ProductName + "拼单"
+		}
+		for _, item := range selected {
+			amount += item.Quantity * item.UnitPrice
+		}
 	}
-	amount := quantity * selected.UnitPrice
 	orderID := uint64(0)
 	orderNo := ""
 	orderDetail := map[string]any{}
@@ -551,8 +604,8 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 	return entity.OrderDraft{
 		OrderID:         orderID,
 		OrderNo:         orderNo,
-		ProductID:       selected.ProductID,
-		ProductName:     selected.ProductName,
+		ProductID:       productID,
+		ProductName:     productName,
 		Quantity:        quantity,
 		Unit:            parsed.Unit,
 		EstimatedAmt:    amount,

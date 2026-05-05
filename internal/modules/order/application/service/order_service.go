@@ -2,15 +2,20 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
+	cartEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/domain/entity"
+	cartRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/domain/repository"
+	cartPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/persistence"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/repository"
 	orderPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/order/ui/dto"
+	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
@@ -32,6 +37,7 @@ const (
 
 type OrderService struct {
 	orderRepo      orderRepository.OrderRepository
+	cartRepo       cartRepository.CartRepository
 	productRepo    productRepository.ProductRepository
 	enterpriseRepo userRepository.EnterpriseRepository
 	contract       contract.Provider
@@ -40,6 +46,7 @@ type OrderService struct {
 func NewOrderService() *OrderService {
 	return &OrderService{
 		orderRepo:      orderPersistence.NewOrderRepository(),
+		cartRepo:       cartPersistence.NewCartRepository(),
 		productRepo:    productPersistence.NewProductRepository(),
 		enterpriseRepo: userPersistence.NewEnterpriseRepository(),
 		contract:       contract.NewProvider(),
@@ -50,16 +57,12 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 	if buyerEnterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能下单")
 	}
-
-	product, err := s.productRepo.FindByID(ctx, req.ProductID)
+	items, cartItemIDs, err := s.resolveCreateItems(ctx, req, userID)
 	if err != nil {
-		return nil, ecode.ErrDatabase
+		return nil, err
 	}
-	if product == nil {
-		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
-	}
-	if !product.CanOrder(req.Quantity) {
-		return nil, ecode.ErrBadRequest.WithMessage("商品不可下单或库存不足")
+	if len(items) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请选择下单商品")
 	}
 
 	buyerEnterprise, err := s.enterpriseRepo.FindByID(ctx, buyerEnterpriseID)
@@ -70,7 +73,31 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		return nil, ecode.ErrBadRequest.WithMessage("买家企业不存在或未通过审核")
 	}
 
-	sellerEnterprise, err := s.enterpriseRepo.FindByID(ctx, product.EnterpriseID)
+	products := make([]productOrderItem, 0, len(items))
+	var sellerEnterpriseID uint64
+	var currency string
+	for _, item := range items {
+		product, err := s.productRepo.FindByID(ctx, item.ProductID)
+		if err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		if product == nil {
+			return nil, ecode.ErrNotFound.WithMessage("商品不存在")
+		}
+		if !product.CanOrder(item.Quantity) {
+			return nil, ecode.ErrBadRequest.WithMessage("商品不可下单或库存不足")
+		}
+		if sellerEnterpriseID == 0 {
+			sellerEnterpriseID = product.EnterpriseID
+			currency = product.Currency
+		}
+		if product.EnterpriseID != sellerEnterpriseID {
+			return nil, ecode.ErrBadRequest.WithMessage("同一订单暂不支持跨卖家拼单，请选择同一卖家的商品")
+		}
+		products = append(products, productOrderItem{Product: product, Quantity: item.Quantity})
+	}
+
+	sellerEnterprise, err := s.enterpriseRepo.FindByID(ctx, sellerEnterpriseID)
 	if err != nil {
 		return nil, ecode.ErrDatabase
 	}
@@ -78,10 +105,33 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		return nil, ecode.ErrBadRequest.WithMessage("卖家企业不存在")
 	}
 
-	itemTotal := req.Quantity * product.UnitPrice
-	itemTaxAmount := 0.0
-	if !product.TaxIncluded {
-		itemTaxAmount = itemTotal * (product.TaxRate / 100)
+	orderItems := make(orderEntity.OrderItems, 0, len(products))
+	totalQuantity := 0.0
+	totalAmount := 0.0
+	taxTotalAmount := 0.0
+	for _, productItem := range products {
+		product := productItem.Product
+		itemTotal := productItem.Quantity * product.UnitPrice
+		itemTaxAmount := 0.0
+		if !product.TaxIncluded {
+			itemTaxAmount = itemTotal * (product.TaxRate / 100)
+		}
+		orderItems = append(orderItems, orderEntity.OrderItem{
+			ProductID:   product.ID,
+			ProductNo:   product.ProductNo,
+			ProductName: product.Name,
+			SteelMill:   product.SteelMill,
+			Category:    product.SubCategory,
+			BundleNo:    product.BundleNo,
+			Quantity:    productItem.Quantity,
+			UnitPrice:   product.UnitPrice,
+			TotalAmount: itemTotal,
+			TaxRate:     product.TaxRate,
+			TaxAmount:   itemTaxAmount,
+		})
+		totalQuantity += productItem.Quantity
+		totalAmount += itemTotal
+		taxTotalAmount += itemTotal + itemTaxAmount
 	}
 
 	order := &orderEntity.Order{
@@ -90,38 +140,46 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		SellerID:           sellerEnterprise.ID,
 		SellerEnterpriseID: sellerEnterprise.ID,
 		SellerName:         sellerEnterprise.Name,
-		Items: orderEntity.OrderItems{
-			{
-				ProductID:   product.ID,
-				ProductNo:   product.ProductNo,
-				ProductName: product.Name,
-				SteelMill:   product.SteelMill,
-				Category:    product.SubCategory,
-				BundleNo:    product.BundleNo,
-				Quantity:    req.Quantity,
-				UnitPrice:   product.UnitPrice,
-				TotalAmount: itemTotal,
-				TaxRate:     product.TaxRate,
-				TaxAmount:   itemTaxAmount,
-			},
+		Items:              orderItems,
+		TotalQuantity:      totalQuantity,
+		TotalAmount:        totalAmount,
+		TaxTotalAmount:     taxTotalAmount,
+		Currency:           currency,
+		Status:             orderEntity.OrderStatusPendingConfirm,
+		Remark: orderEntity.Remark{
+			"source":                 strings.TrimSpace(req.Source),
+			"restore_cart_on_cancel": req.RestoreCartOnCancel || len(cartItemIDs) > 0,
+			"contact_name":           strings.TrimSpace(req.ContactName),
+			"contact_phone":          strings.TrimSpace(req.ContactPhone),
+			"warehouse_name":         strings.TrimSpace(req.WarehouseName),
+			"delivery_address":       strings.TrimSpace(req.DeliveryAddress),
+			"delivery_method":        strings.TrimSpace(req.DeliveryMethod),
+			"payment_method":         strings.TrimSpace(req.PaymentMethod),
+			"delivery_note":          strings.TrimSpace(req.DeliveryNote),
+			"remark":                 strings.TrimSpace(req.Remark),
 		},
-		Currency:  product.Currency,
-		Status:    orderEntity.OrderStatusPendingConfirm,
 		CreatedBy: userID,
 		UpdatedBy: userID,
 	}
 
 	db := database.GetDB()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if !product.LockStock(req.Quantity) {
-			return ecode.ErrBadRequest.WithMessage("库存不足")
-		}
-		product.UpdatedBy = userID
-		if err := tx.Save(product).Error; err != nil {
-			return err
+		for _, productItem := range products {
+			if !productItem.Product.LockStock(productItem.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("库存不足")
+			}
+			productItem.Product.UpdatedBy = userID
+			if err := tx.Save(productItem.Product).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Create(order).Error; err != nil {
 			return err
+		}
+		for _, cartItemID := range cartItemIDs {
+			if err := tx.Exec("DELETE FROM cart_items WHERE id = ? AND user_id = ?", cartItemID, userID).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
@@ -132,6 +190,38 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 	}
 
 	return toOrderInfo(order), nil
+}
+
+type productOrderItem struct {
+	Product  *productEntity.Product
+	Quantity float64
+}
+
+func (s *OrderService) resolveCreateItems(ctx context.Context, req *dto.CreateOrderRequest, userID uint64) ([]dto.CreateOrderItemRequest, []uint64, error) {
+	if len(req.CartItemIDs) > 0 {
+		items := make([]dto.CreateOrderItemRequest, 0, len(req.CartItemIDs))
+		for _, cartItemID := range req.CartItemIDs {
+			cartItem, err := s.cartRepo.FindByID(ctx, cartItemID)
+			if err != nil {
+				return nil, nil, ecode.ErrDatabase
+			}
+			if cartItem == nil {
+				return nil, nil, ecode.ErrNotFound.WithMessage("购物车商品不存在")
+			}
+			if cartItem.UserID != userID {
+				return nil, nil, ecode.ErrForbidden.WithMessage("无权结算该购物车商品")
+			}
+			items = append(items, dto.CreateOrderItemRequest{ProductID: cartItem.ProductID, Quantity: cartItem.Quantity})
+		}
+		return items, req.CartItemIDs, nil
+	}
+	if len(req.Items) > 0 {
+		return req.Items, nil, nil
+	}
+	if req.ProductID > 0 && req.Quantity > 0 {
+		return []dto.CreateOrderItemRequest{{ProductID: req.ProductID, Quantity: req.Quantity}}, nil, nil
+	}
+	return nil, nil, nil
 }
 
 func (s *OrderService) GetByID(ctx context.Context, id, enterpriseID uint64) (*dto.OrderInfo, error) {
@@ -197,6 +287,7 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	}
 
 	db := database.GetDB()
+	restoreCart := shouldRestoreCartOnCancel(order)
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range order.Items {
 			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
@@ -212,6 +303,11 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 			product.UpdatedBy = operatorID
 			if saveErr := tx.Save(product).Error; saveErr != nil {
 				return saveErr
+			}
+			if restoreCart {
+				if saveErr := restoreOrderItemToCart(tx, ctx, order.CreatedBy, enterpriseID, item.ProductID, item.Quantity); saveErr != nil {
+					return saveErr
+				}
 			}
 		}
 
@@ -229,6 +325,37 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	}
 
 	return toOrderInfo(order), nil
+}
+
+func shouldRestoreCartOnCancel(order *orderEntity.Order) bool {
+	if order == nil || order.Remark == nil {
+		return false
+	}
+	value, ok := order.Remark["restore_cart_on_cancel"]
+	if !ok {
+		return false
+	}
+	enabled, ok := value.(bool)
+	return ok && enabled
+}
+
+func restoreOrderItemToCart(tx *gorm.DB, ctx context.Context, userID, enterpriseID, productID uint64, quantity float64) error {
+	var item cartEntity.CartItem
+	err := tx.WithContext(ctx).Where("user_id = ? AND product_id = ?", userID, productID).First(&item).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return tx.WithContext(ctx).Create(&cartEntity.CartItem{
+			UserID:       userID,
+			EnterpriseID: enterpriseID,
+			ProductID:    productID,
+			Quantity:     quantity,
+		}).Error
+	}
+	item.Quantity += quantity
+	item.EnterpriseID = enterpriseID
+	return tx.WithContext(ctx).Save(&item).Error
 }
 
 func (s *OrderService) ConfirmOrder(ctx context.Context, id, sellerEnterpriseID, operatorID uint64) (*dto.OrderInfo, error) {

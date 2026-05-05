@@ -15,6 +15,8 @@ import (
 	_ "github.com/Taishi-co/SteelLink-backend/docs" // swagger docs
 	aiProcurementPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
 	aiProcurementRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/router"
+	cartPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/persistence"
+	cartRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/router"
 	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
 	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
@@ -115,6 +117,9 @@ func main() {
 		if err := aiProcurementPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate AI procurement tables", zap.Error(err))
 		}
+		if err := cartPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate cart tables", zap.Error(err))
+		}
 		if err := marketpersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to auto migrate market tables", zap.Error(err))
 		}
@@ -172,6 +177,9 @@ func main() {
 	logger.Info("Registering order routes...")
 	orderRouter.RegisterRoutes(v1)
 	logger.Info("Order routes registered")
+	logger.Info("Registering cart routes...")
+	cartRouter.RegisterRoutes(v1)
+	logger.Info("Cart routes registered")
 	logger.Info("Registering market routes...")
 	marketRouter.RegisterRoutes(v1)
 	logger.Info("Market routes registered")
