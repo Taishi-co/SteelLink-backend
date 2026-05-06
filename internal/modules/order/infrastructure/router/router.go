@@ -10,7 +10,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	orderHandler := handler.NewOrderHandler()
 
 	orders := r.Group("/orders")
-	orders.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
+	orders.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales"))
 	{
 		orders.GET("", orderHandler.List)
 		orders.POST("", orderHandler.Create)
