@@ -1,0 +1,30 @@
+package router
+
+import (
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/ui/handler"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/gin-gonic/gin"
+)
+
+func RegisterRoutes(r *gin.RouterGroup) {
+	h := handler.NewHandler()
+
+	r.GET("/warehouse-services", middleware.OptionalAuth(), h.ListWarehouses)
+	r.GET("/warehouse-services/:id", middleware.OptionalAuth(), h.GetWarehouse)
+	r.GET("/logistics-services", middleware.OptionalAuth(), h.ListLogistics)
+	r.GET("/logistics-services/:id", middleware.OptionalAuth(), h.GetLogistics)
+
+	warehouse := r.Group("/warehouse-services")
+	warehouse.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("warehouse"))
+	{
+		warehouse.POST("", h.CreateWarehouse)
+		warehouse.GET("/mine", h.ListMyWarehouses)
+	}
+
+	logistics := r.Group("/logistics-services")
+	logistics.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("logistics"))
+	{
+		logistics.POST("", h.CreateLogistics)
+		logistics.GET("/mine", h.ListMyLogistics)
+	}
+}

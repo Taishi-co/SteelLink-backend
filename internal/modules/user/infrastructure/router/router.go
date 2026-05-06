@@ -10,6 +10,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	authHandler := handler.NewAuthHandler()
 	userHandler := handler.NewUserHandler()
 	enterpriseHandler := handler.NewEnterpriseHandler()
+	enterprisePermissionHandler := handler.NewEnterprisePermissionHandler()
 
 	auth := r.Group("/auth")
 	{
@@ -58,13 +59,25 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	{
 		enterprises.POST("", enterpriseHandler.Create)
 		enterprises.GET("", enterpriseHandler.List)
-		enterprises.GET("/:id", enterpriseHandler.GetByID)
-		enterprises.POST("/:id/verify", enterpriseHandler.Verify)
+		enterprises.GET("/me/services", enterprisePermissionHandler.GetMyServices)
+		enterprises.POST("/me/services/applications", enterprisePermissionHandler.Apply)
 
 		entAdmin := enterprises.Group("")
 		entAdmin.Use(middleware.RequireUserType("operator", "super_admin"))
 		{
+			entAdmin.PUT("/:id/services/:service/status", enterprisePermissionHandler.UpdatePermissionStatus)
 			entAdmin.PUT("/:id/audit", enterpriseHandler.Audit)
 		}
+
+		enterprises.GET("/:id", enterpriseHandler.GetByID)
+		enterprises.POST("/:id/verify", enterpriseHandler.Verify)
+	}
+
+	serviceApplications := r.Group("/enterprise-service-applications")
+	serviceApplications.Use(middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"))
+	{
+		serviceApplications.GET("", enterprisePermissionHandler.ListApplications)
+		serviceApplications.GET("/:application_id", enterprisePermissionHandler.GetApplication)
+		serviceApplications.PUT("/:application_id/audit", enterprisePermissionHandler.Audit)
 	}
 }

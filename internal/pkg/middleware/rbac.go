@@ -1,10 +1,12 @@
 package middleware
 
 import (
-	"github.com/gin-gonic/gin"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 func RequireUserType(userTypes ...string) gin.HandlerFunc {
@@ -47,6 +49,46 @@ func RequireEnterpriseRole(roles ...string) gin.HandlerFunc {
 		}
 		response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：企业角色不匹配"))
 		c.Abort()
+	}
+}
+
+func RequireEnterpriseService(services ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := GetClaims(c)
+		if claims == nil {
+			response.Unauthorized(c, "未登录")
+			c.Abort()
+			return
+		}
+		if claims.UserType != string(entity.TypeEnterprise) || claims.EnterpriseID == 0 {
+			response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：未开通企业服务"))
+			c.Abort()
+			return
+		}
+
+		db := database.GetDB()
+		if db == nil {
+			response.Error(c, ecode.ErrDatabase.WithMessage("数据库未初始化"))
+			c.Abort()
+			return
+		}
+
+		var count int64
+		if err := db.WithContext(c.Request.Context()).
+			Model(&entity.EnterpriseServicePermission{}).
+			Where("enterprise_id = ? AND service IN ? AND status = ?", claims.EnterpriseID, services, entity.ServicePermissionApproved).
+			Count(&count).Error; err != nil {
+			response.Error(c, ecode.ErrDatabase.WithMessage("查询企业服务权限失败"))
+			c.Abort()
+			return
+		}
+		if count == 0 {
+			response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：企业未开通对应平台服务"))
+			c.Abort()
+			return
+		}
+
+		c.Next()
 	}
 }
 

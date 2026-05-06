@@ -10,7 +10,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	cartHandler := handler.NewCartHandler()
 
 	cart := r.Group("/cart")
-	cart.Use(middleware.AuthRequired(), middleware.RequireUserType("enterprise"))
+	cart.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement"))
 	{
 		cart.GET("/items", cartHandler.List)
 		cart.POST("/items", cartHandler.Add)
