@@ -108,6 +108,60 @@ func (h *Handler) ListMyWarehouses(c *gin.Context) {
 	response.Success(c, list)
 }
 
+func (h *Handler) UpdateWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req dto.WarehouseServiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var item entity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "仓储资源不存在或无权修改")
+		return
+	}
+	item.WarehouseName = req.WarehouseName
+	item.Province = req.Province
+	item.City = req.City
+	item.District = req.District
+	item.Address = req.Address
+	item.Capacity = req.Capacity
+	item.AvailableCapacity = req.AvailableCapacity
+	item.ServiceTypes = entity.StringList(req.ServiceTypes)
+	item.PriceRule = req.PriceRule
+	item.Images = entity.StringList(req.Images)
+	item.Certificates = entity.StringList(req.Certificates)
+	item.Description = req.Description
+	item.Status = entity.OfferStatusPending
+	item.AuditRemark = ""
+	item.ApprovedAt = nil
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新仓储资源失败"))
+		return
+	}
+	response.Success(c, warehouseToInfo(&item))
+}
+
+func (h *Handler) DeleteWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var item entity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "仓储资源不存在或无权下线")
+		return
+	}
+	item.Status = entity.OfferStatusOffline
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("下线仓储资源失败"))
+		return
+	}
+	response.Success(c, warehouseToInfo(&item))
+}
+
 func (h *Handler) CreateLogistics(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil || claims.EnterpriseID == 0 {
@@ -191,6 +245,58 @@ func (h *Handler) ListMyLogistics(c *gin.Context) {
 		list = append(list, logisticsToInfo(&row))
 	}
 	response.Success(c, list)
+}
+
+func (h *Handler) UpdateLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req dto.LogisticsServiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var item entity.LogisticsService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "物流资源不存在或无权修改")
+		return
+	}
+	item.Name = req.Name
+	item.RouteStart = req.RouteStart
+	item.RouteEnd = req.RouteEnd
+	item.ServiceScope = req.ServiceScope
+	item.VehicleType = req.VehicleType
+	item.LoadCapacity = req.LoadCapacity
+	item.PriceRule = req.PriceRule
+	item.Images = entity.StringList(req.Images)
+	item.Certificates = entity.StringList(req.Certificates)
+	item.Description = req.Description
+	item.Status = entity.OfferStatusPending
+	item.AuditRemark = ""
+	item.ApprovedAt = nil
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新物流资源失败"))
+		return
+	}
+	response.Success(c, logisticsToInfo(&item))
+}
+
+func (h *Handler) DeleteLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var item entity.LogisticsService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "物流资源不存在或无权下线")
+		return
+	}
+	item.Status = entity.OfferStatusOffline
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("下线物流资源失败"))
+		return
+	}
+	response.Success(c, logisticsToInfo(&item))
 }
 
 func (h *Handler) GetWarehouse(c *gin.Context) {

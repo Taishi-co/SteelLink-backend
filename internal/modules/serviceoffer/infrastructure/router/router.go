@@ -19,6 +19,8 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	{
 		warehouse.POST("", h.CreateWarehouse)
 		warehouse.GET("/mine", h.ListMyWarehouses)
+		warehouse.PUT("/:id", h.UpdateWarehouse)
+		warehouse.DELETE("/:id", h.DeleteWarehouse)
 	}
 
 	logistics := r.Group("/logistics-services")
@@ -26,5 +28,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	{
 		logistics.POST("", h.CreateLogistics)
 		logistics.GET("/mine", h.ListMyLogistics)
+		logistics.PUT("/:id", h.UpdateLogistics)
+		logistics.DELETE("/:id", h.DeleteLogistics)
 	}
 }
