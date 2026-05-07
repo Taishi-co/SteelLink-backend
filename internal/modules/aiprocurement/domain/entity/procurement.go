@@ -25,11 +25,12 @@ const (
 type WorkflowStage string
 
 const (
-	StageInstructionParsing WorkflowStage = "instruction_parsing"
-	StageProductMatching    WorkflowStage = "product_matching"
-	StageOrderGeneration    WorkflowStage = "order_generation"
-	StageFinancingMatching  WorkflowStage = "financing_matching"
-	StageReviewSubmission   WorkflowStage = "review_submission"
+	StageInstructionParsing         WorkflowStage = "instruction_parsing"
+	StageProductMatching            WorkflowStage = "product_matching"
+	StageLogisticsWarehouseMatching WorkflowStage = "logistics_warehouse_matching"
+	StageOrderGeneration            WorkflowStage = "order_generation"
+	StageFinancingMatching          WorkflowStage = "financing_matching"
+	StageReviewSubmission           WorkflowStage = "review_submission"
 )
 
 type ParsedInstruction struct {
@@ -236,6 +237,7 @@ func WorkflowStages() []WorkflowStage {
 	return []WorkflowStage{
 		StageInstructionParsing,
 		StageProductMatching,
+		StageLogisticsWarehouseMatching,
 		StageOrderGeneration,
 		StageFinancingMatching,
 		StageReviewSubmission,

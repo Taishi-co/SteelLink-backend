@@ -101,6 +101,26 @@ func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchPr
 	}, nil
 }
 
+func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *dto.MatchLogisticsWarehouseRequest) (*dto.MatchLogisticsWarehouseResponse, error) {
+	parsed := normalizeParsedInput(req.Parsed, "")
+	selectedProducts := normalizeMatchedProducts(req.SelectedProducts)
+	if len(selectedProducts) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再匹配物流仓储")
+	}
+	for idx := range selectedProducts {
+		selectedProducts[idx].Selected = true
+		if selectedProducts[idx].Quantity <= 0 {
+			return nil, ecode.ErrBadRequest.WithMessage("拼单商品数量必须大于0")
+		}
+		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
+	}
+	matches := s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
+	return &dto.MatchLogisticsWarehouseResponse{
+		MatchedProducts: matches,
+		Stages:          buildStages(entity.StageLogisticsWarehouseMatching, false, parsed.FinancingRequired),
+	}, nil
+}
+
 func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.GenerateOrderRequest, userID, enterpriseID uint64) (*dto.GenerateOrderResponse, error) {
 	if userID == 0 {
 		return nil, ecode.ErrUnauthorized.WithMessage("未登录")
@@ -364,12 +384,10 @@ func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.Pa
 	if matcher := newProductVectorMatcher(s.productRepo); matcher != nil {
 		matches, err := matcher.Match(ctx, parsed)
 		if err == nil && len(matches) > 0 {
-			matches = s.enrichMatchesWithLogistics(ctx, parsed, matches)
 			logAIProcurementInfo("AI procurement vector matching succeeded",
 				zap.Int("matched_count", len(matches)),
 				zap.String("product_name", parsed.ProductName),
 				zap.String("category", parsed.Category),
-				zap.String("destination_address", parsed.DeliveryAddress),
 			)
 			return matches, nil
 		}
@@ -396,7 +414,7 @@ func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.Pa
 	if err != nil {
 		return nil, err
 	}
-	return s.enrichMatchesWithLogistics(ctx, parsed, matches), nil
+	return matches, nil
 }
 
 func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
@@ -713,14 +731,7 @@ func vectorMatcherSkipReason(cfg config.VectorSearchConfig) string {
 
 func normalizeSelectedProducts(req *dto.GenerateOrderRequest) entity.MatchedProducts {
 	if len(req.SelectedProducts) > 0 {
-		selected := make(entity.MatchedProducts, 0, len(req.SelectedProducts))
-		for _, item := range req.SelectedProducts {
-			if item.ProductID == 0 {
-				continue
-			}
-			selected = append(selected, item)
-		}
-		return selected
+		return normalizeMatchedProducts(req.SelectedProducts)
 	}
 	if req.SelectedProduct.ProductID == 0 {
 		return entity.MatchedProducts{}
@@ -730,6 +741,17 @@ func normalizeSelectedProducts(req *dto.GenerateOrderRequest) entity.MatchedProd
 		selected.Quantity = req.OrderForm.Quantity
 	}
 	return entity.MatchedProducts{selected}
+}
+
+func normalizeMatchedProducts(items entity.MatchedProducts) entity.MatchedProducts {
+	selected := make(entity.MatchedProducts, 0, len(items))
+	for _, item := range items {
+		if item.ProductID == 0 {
+			continue
+		}
+		selected = append(selected, item)
+	}
+	return selected
 }
 
 func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
@@ -1048,24 +1070,27 @@ func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
 
 func buildStages(current entity.WorkflowStage, submitted bool, includeFinance bool) []dto.StageInfo {
 	names := map[entity.WorkflowStage]string{
-		entity.StageInstructionParsing: "指令解析",
-		entity.StageProductMatching:    "商品匹配",
-		entity.StageOrderGeneration:    "订单生成",
-		entity.StageFinancingMatching:  "融资匹配",
-		entity.StageReviewSubmission:   "审核提交",
+		entity.StageInstructionParsing:         "指令解析",
+		entity.StageProductMatching:            "商品匹配",
+		entity.StageLogisticsWarehouseMatching: "物流仓储匹配",
+		entity.StageOrderGeneration:            "订单生成",
+		entity.StageFinancingMatching:          "融资匹配",
+		entity.StageReviewSubmission:           "审核提交",
 	}
 	descriptions := map[entity.WorkflowStage]string{
-		entity.StageInstructionParsing: "识别采购品类、数量、用途和融资意图",
-		entity.StageProductMatching:    "按商品、库存、价格和供应商能力匹配",
-		entity.StageOrderGeneration:    "生成订单草稿和交易要素",
-		entity.StageFinancingMatching:  "匹配订单融资和备选金融产品",
-		entity.StageReviewSubmission:   "提交平台审核并进入后续履约",
+		entity.StageInstructionParsing:         "识别采购品类、数量、用途和融资意图",
+		entity.StageProductMatching:            "按商品、库存、价格和供应商能力匹配",
+		entity.StageLogisticsWarehouseMatching: "按起运仓库、收货地址和物流服务估算运费",
+		entity.StageOrderGeneration:            "生成订单草稿和交易要素",
+		entity.StageFinancingMatching:          "匹配订单融资和备选金融产品",
+		entity.StageReviewSubmission:           "提交平台审核并进入后续履约",
 	}
 	workflowStages := entity.WorkflowStages()
 	if !includeFinance {
 		workflowStages = []entity.WorkflowStage{
 			entity.StageInstructionParsing,
 			entity.StageProductMatching,
+			entity.StageLogisticsWarehouseMatching,
 			entity.StageOrderGeneration,
 			entity.StageReviewSubmission,
 		}
