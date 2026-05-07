@@ -49,6 +49,7 @@ type WarehouseInventoryMovement struct {
 	MovementNo            string                  `gorm:"type:varchar(64);uniqueIndex;not null;comment:出入库记录号" json:"movement_no"`
 	WarehouseServiceID    uint64                  `gorm:"index;not null;comment:仓储资源ID" json:"warehouse_service_id"`
 	WarehouseEnterpriseID uint64                  `gorm:"index;not null;comment:仓储企业ID" json:"warehouse_enterprise_id"`
+	RequestEnterpriseID   uint64                  `gorm:"index;comment:委托企业ID" json:"request_enterprise_id"`
 	ProductID             uint64                  `gorm:"index;comment:商品ID" json:"product_id"`
 	ProductName           string                  `gorm:"type:varchar(200);comment:商品名称" json:"product_name"`
 	BundleNo              string                  `gorm:"type:varchar(100);index;comment:捆包号" json:"bundle_no"`

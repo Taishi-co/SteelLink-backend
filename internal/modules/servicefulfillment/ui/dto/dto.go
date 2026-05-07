@@ -20,6 +20,21 @@ type CreateWarehouseMovementRequest struct {
 	Remark             string  `json:"remark"`
 }
 
+type CreateWarehouseStorageRequest struct {
+	WarehouseServiceID uint64  `json:"warehouse_service_id" binding:"required"`
+	ProductID          uint64  `json:"product_id"`
+	ProductName        string  `json:"product_name" binding:"required"`
+	BundleNo           string  `json:"bundle_no"`
+	OrderID            uint64  `json:"order_id"`
+	OrderNo            string  `json:"order_no"`
+	Quantity           float64 `json:"quantity" binding:"required,gt=0"`
+	ScheduledAt        string  `json:"scheduled_at"`
+	ContactName        string  `json:"contact_name"`
+	ContactPhone       string  `json:"contact_phone"`
+	StorageRequirement string  `json:"storage_requirement"`
+	Remark             string  `json:"remark"`
+}
+
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 	Remark string `json:"remark"`
@@ -106,6 +121,7 @@ type WarehouseMovementInfo struct {
 	MovementNo            string     `json:"movement_no"`
 	WarehouseServiceID    uint64     `json:"warehouse_service_id"`
 	WarehouseEnterpriseID uint64     `json:"warehouse_enterprise_id"`
+	RequestEnterpriseID   uint64     `json:"request_enterprise_id"`
 	ProductID             uint64     `json:"product_id"`
 	ProductName           string     `json:"product_name"`
 	BundleNo              string     `json:"bundle_no"`

@@ -106,6 +106,7 @@ func (h *Handler) CreateWarehouseMovement(c *gin.Context) {
 		MovementNo:            "WMS" + time.Now().Format("20060102150405") + randomDigits(4),
 		WarehouseServiceID:    warehouse.ID,
 		WarehouseEnterpriseID: warehouse.EnterpriseID,
+		RequestEnterpriseID:   claims.EnterpriseID,
 		ProductID:             req.ProductID,
 		ProductName:           req.ProductName,
 		BundleNo:              req.BundleNo,
@@ -126,7 +127,86 @@ func (h *Handler) CreateWarehouseMovement(c *gin.Context) {
 	response.Success(c, movementToInfo(&item))
 }
 
+func (h *Handler) CreateWarehouseStorageRequest(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.CreateWarehouseStorageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var warehouse serviceOfferEntity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND status = ?", req.WarehouseServiceID, serviceOfferEntity.OfferStatusApproved).First(&warehouse).Error; err != nil {
+		response.NotFound(c, "仓储资源不存在或未审核通过")
+		return
+	}
+	remarkParts := []string{}
+	if req.ContactName != "" || req.ContactPhone != "" {
+		remarkParts = append(remarkParts, "联系人:"+strings.TrimSpace(req.ContactName+" "+req.ContactPhone))
+	}
+	if strings.TrimSpace(req.StorageRequirement) != "" {
+		remarkParts = append(remarkParts, "仓储要求:"+strings.TrimSpace(req.StorageRequirement))
+	}
+	if strings.TrimSpace(req.Remark) != "" {
+		remarkParts = append(remarkParts, strings.TrimSpace(req.Remark))
+	}
+	item := entity.WarehouseInventoryMovement{
+		MovementNo:            "WMS" + time.Now().Format("20060102150405") + randomDigits(4),
+		WarehouseServiceID:    warehouse.ID,
+		WarehouseEnterpriseID: warehouse.EnterpriseID,
+		RequestEnterpriseID:   claims.EnterpriseID,
+		ProductID:             req.ProductID,
+		ProductName:           req.ProductName,
+		BundleNo:              req.BundleNo,
+		OrderID:               req.OrderID,
+		OrderNo:               req.OrderNo,
+		MovementType:          entity.WarehouseMovementInbound,
+		Quantity:              req.Quantity,
+		Status:                entity.WarehouseMovementPending,
+		ScheduledAt:           req.ScheduledAt,
+		Remark:                strings.Join(remarkParts, "；"),
+		CreatedBy:             claims.UserID,
+		UpdatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("创建仓储托管需求失败"))
+		return
+	}
+	response.Success(c, movementToInfo(&item))
+}
+
+func (h *Handler) ListWarehouseStorageRequests(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseInventoryMovement{}).Where("request_enterprise_id = ?", claims.EnterpriseID)
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	var total int64
+	query.Count(&total)
+	var rows []entity.WarehouseInventoryMovement
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase)
+		return
+	}
+	list := make([]dto.WarehouseMovementInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, movementToInfo(&row))
+	}
+	response.Success(c, dto.PageResponse[dto.WarehouseMovementInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+}
+
 func (h *Handler) ListWarehouseMovements(c *gin.Context) {
+	claims := middleware.GetClaims(c)
 	var req dto.ListRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -147,6 +227,12 @@ func (h *Handler) ListWarehouseMovements(c *gin.Context) {
 	}
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
+	}
+	switch req.Role {
+	case "requester":
+		query = query.Where("request_enterprise_id = ?", claims.EnterpriseID)
+	case "warehouse":
+		query = query.Where("warehouse_enterprise_id = ?", claims.EnterpriseID)
 	}
 	var total int64
 	query.Count(&total)
@@ -500,7 +586,7 @@ func (h *Handler) GetOrderFulfillment(c *gin.Context) {
 func movementToInfo(item *entity.WarehouseInventoryMovement) dto.WarehouseMovementInfo {
 	return dto.WarehouseMovementInfo{
 		ID: item.ID, MovementNo: item.MovementNo, WarehouseServiceID: item.WarehouseServiceID,
-		WarehouseEnterpriseID: item.WarehouseEnterpriseID, ProductID: item.ProductID, ProductName: item.ProductName,
+		WarehouseEnterpriseID: item.WarehouseEnterpriseID, RequestEnterpriseID: item.RequestEnterpriseID, ProductID: item.ProductID, ProductName: item.ProductName,
 		BundleNo: item.BundleNo, OrderID: item.OrderID, OrderNo: item.OrderNo, MovementType: string(item.MovementType),
 		Quantity: item.Quantity, Status: string(item.Status), ScheduledAt: item.ScheduledAt, CompletedAt: item.CompletedAt,
 		Remark: item.Remark, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
