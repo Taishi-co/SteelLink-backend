@@ -134,13 +134,16 @@ func TestModelParserRequestURLCompletesAnthropicBasePath(t *testing.T) {
 
 func toParsedInstruction(payload parsedInstructionPayload) entity.ParsedInstruction {
 	return entity.ParsedInstruction{
-		ProductName:       payload.ProductName,
-		Category:          payload.Category,
-		Quantity:          float64(payload.Quantity),
-		Unit:              payload.Unit,
-		Usage:             payload.Usage,
-		FinancingRequired: bool(payload.FinancingRequired),
-		Keywords:          payload.Keywords,
-		Confidence:        payload.Confidence,
+		ProductName:           payload.ProductName,
+		Category:              payload.Category,
+		Quantity:              float64(payload.Quantity),
+		Unit:                  payload.Unit,
+		Usage:                 payload.Usage,
+		FinancingRequired:     bool(payload.FinancingRequired),
+		Keywords:              payload.Keywords,
+		Confidence:            payload.Confidence,
+		DeliveryAddress:       payload.DeliveryAddress,
+		DeliveryAddressSource: payload.DeliveryAddressSource,
+		DeliveryWarehouseName: payload.DeliveryWarehouseName,
 	}
 }

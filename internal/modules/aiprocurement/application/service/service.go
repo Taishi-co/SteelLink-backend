@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,8 @@ import (
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
+	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"go.uber.org/zap"
 )
@@ -116,6 +120,7 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		}
 		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
 	}
+	selectedProducts = s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
 	orderInfos, err := s.createOrdersBySeller(ctx, selectedProducts, req.OrderForm, userID, enterpriseID)
 	if err != nil {
 		return nil, err
@@ -337,6 +342,9 @@ func normalizeParsedInput(parsed entity.ParsedInstruction, prompt string) entity
 	parsed.Category = strings.TrimSpace(parsed.Category)
 	parsed.Unit = strings.TrimSpace(parsed.Unit)
 	parsed.Usage = strings.TrimSpace(parsed.Usage)
+	parsed.DeliveryAddress = strings.TrimSpace(parsed.DeliveryAddress)
+	parsed.DeliveryAddressSource = strings.TrimSpace(parsed.DeliveryAddressSource)
+	parsed.DeliveryWarehouseName = strings.TrimSpace(parsed.DeliveryWarehouseName)
 	normalizeParsedInstruction(&parsed, prompt)
 	return parsed
 }
@@ -356,10 +364,12 @@ func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.Pa
 	if matcher := newProductVectorMatcher(s.productRepo); matcher != nil {
 		matches, err := matcher.Match(ctx, parsed)
 		if err == nil && len(matches) > 0 {
+			matches = s.enrichMatchesWithLogistics(ctx, parsed, matches)
 			logAIProcurementInfo("AI procurement vector matching succeeded",
 				zap.Int("matched_count", len(matches)),
 				zap.String("product_name", parsed.ProductName),
 				zap.String("category", parsed.Category),
+				zap.String("destination_address", parsed.DeliveryAddress),
 			)
 			return matches, nil
 		}
@@ -382,7 +392,11 @@ func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.Pa
 			zap.String("vector_provider", cfg.Provider),
 		)
 	}
-	return s.matchProductsByRule(ctx, parsed)
+	matches, err := s.matchProductsByRule(ctx, parsed)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichMatchesWithLogistics(ctx, parsed, matches), nil
 }
 
 func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
@@ -501,6 +515,192 @@ func (s *ProcurementService) matchProductsByRule(ctx context.Context, parsed ent
 	return matches, nil
 }
 
+func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.MatchedProducts {
+	if len(matches) == 0 {
+		return matches
+	}
+	destination := strings.TrimSpace(parsed.DeliveryAddress)
+	carriers := loadApprovedLogisticsServices(ctx)
+	for idx := range matches {
+		matches[idx].TotalAmount = matches[idx].Quantity * matches[idx].UnitPrice
+		matches[idx].DestinationAddress = destination
+		matches[idx].OriginWarehouseName = stringFromMap(matches[idx].Warehouse, "warehouse_name")
+		matches[idx].OriginAddress = buildWarehouseAddress(matches[idx].Warehouse)
+		if destination == "" {
+			matches[idx].LandedTotal = matches[idx].TotalAmount
+			matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
+			continue
+		}
+		estimate := chooseBestLogisticsEstimate(matches[idx], carriers, destination)
+		matches[idx].LogisticsServiceID = estimate.ServiceID
+		matches[idx].LogisticsServiceName = estimate.ServiceName
+		matches[idx].LogisticsRoute = estimate.Route
+		matches[idx].FreightEstimate = estimate.Amount
+		matches[idx].LandedTotal = matches[idx].TotalAmount + estimate.Amount
+		matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
+		if estimate.ServiceName != "" {
+			matches[idx].MatchReason = strings.TrimSpace(matches[idx].MatchReason + "；已按收货地址估算平台物流到手价")
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		left := matches[i].LandedTotal
+		right := matches[j].LandedTotal
+		if left == 0 {
+			left = matches[i].TotalAmount
+		}
+		if right == 0 {
+			right = matches[j].TotalAmount
+		}
+		if math.Abs(left-right) > 0.0001 {
+			return left < right
+		}
+		return matches[i].Score > matches[j].Score
+	})
+	if destination != "" {
+		logAIProcurementInfo("AI procurement logistics landed-cost ranking completed",
+			zap.Int("matched_count", len(matches)),
+			zap.Int("carrier_count", len(carriers)),
+			zap.String("destination_address", destination),
+		)
+	}
+	return matches
+}
+
+type logisticsEstimate struct {
+	ServiceID   uint64
+	ServiceName string
+	Route       string
+	Amount      float64
+}
+
+func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.LogisticsService {
+	db := database.GetDB()
+	if db == nil {
+		return nil
+	}
+	var rows []serviceOfferEntity.LogisticsService
+	if err := db.WithContext(ctx).Where("status = ?", serviceOfferEntity.OfferStatusApproved).Find(&rows).Error; err != nil {
+		logAIProcurementWarn("AI procurement logistics services load failed", zap.Error(err))
+		return nil
+	}
+	return rows
+}
+
+func chooseBestLogisticsEstimate(match entity.MatchedProduct, carriers []serviceOfferEntity.LogisticsService, destination string) logisticsEstimate {
+	origin := strings.TrimSpace(match.OriginAddress)
+	quantity := match.Quantity
+	if quantity <= 0 {
+		quantity = 1
+	}
+	best := logisticsEstimate{Amount: quantity * 80}
+	bestScore := -1
+	for _, carrier := range carriers {
+		rate := extractPriceRate(carrier.PriceRule)
+		if rate <= 0 {
+			rate = 80
+		}
+		amount := rate * quantity
+		routeScore := logisticsRouteScore(origin, destination, carrier)
+		if best.ServiceID == 0 || amount < best.Amount || (math.Abs(amount-best.Amount) < 0.0001 && routeScore > bestScore) {
+			best = logisticsEstimate{
+				ServiceID:   carrier.ID,
+				ServiceName: carrier.Name,
+				Route:       strings.Trim(strings.TrimSpace(carrier.RouteStart)+" → "+strings.TrimSpace(carrier.RouteEnd), " →"),
+				Amount:      amount,
+			}
+			bestScore = routeScore
+		}
+	}
+	return best
+}
+
+func logisticsRouteScore(origin, destination string, carrier serviceOfferEntity.LogisticsService) int {
+	score := 0
+	routeStart := strings.TrimSpace(carrier.RouteStart)
+	routeEnd := strings.TrimSpace(carrier.RouteEnd)
+	scope := strings.TrimSpace(carrier.ServiceScope)
+	if routeStart != "" && strings.Contains(origin, routeStart) {
+		score += 2
+	}
+	if routeEnd != "" && strings.Contains(destination, routeEnd) {
+		score += 2
+	}
+	if scope != "" && (strings.Contains(scope, destination) || strings.Contains(scope, routeEnd)) {
+		score++
+	}
+	return score
+}
+
+func extractPriceRate(rule string) float64 {
+	re := regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)`)
+	matches := re.FindStringSubmatch(rule)
+	if len(matches) < 2 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func buildWarehouseAddress(warehouse map[string]any) string {
+	parts := []string{
+		stringFromMap(warehouse, "province"),
+		stringFromMap(warehouse, "city"),
+		stringFromMap(warehouse, "district"),
+		stringFromMap(warehouse, "address"),
+	}
+	return strings.TrimSpace(strings.Join(nonEmptyStrings(parts), ""))
+}
+
+func stringFromMap(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	if value, ok := values[key]; ok && value != nil {
+		return strings.TrimSpace(strings.Trim(strings.ReplaceAll(strings.TrimSpace(toString(value)), "<nil>", ""), "\""))
+	}
+	return ""
+}
+
+func toString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	default:
+		return strings.TrimSpace(strings.Trim(strings.ReplaceAll(strings.TrimSpace(fmtAny(value)), "<nil>", ""), "\""))
+	}
+}
+
+func fmtAny(value any) string {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(bytes)
+}
+
+func nonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func safeDiv(left, right float64) float64 {
+	if right <= 0 {
+		return 0
+	}
+	return left / right
+}
+
 func vectorMatcherSkipReason(cfg config.VectorSearchConfig) string {
 	if !cfg.Enabled {
 		return "vector_search_disabled"
@@ -612,7 +812,11 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 			productName = parsed.ProductName + "拼单"
 		}
 		for _, item := range selected {
-			amount += item.Quantity * item.UnitPrice
+			if item.LandedTotal > 0 {
+				amount += item.LandedTotal
+			} else {
+				amount += item.Quantity * item.UnitPrice
+			}
 		}
 	}
 	orderID := uint64(0)
@@ -622,13 +826,13 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 	if len(orderInfos) > 0 {
 		orderID = orderInfos[0].ID
 		orderNo = orderInfos[0].OrderNo
-		amount = 0
+		productAmount := 0.0
 		orderDetails := make([]map[string]any, 0, len(orderInfos))
 		for _, orderInfo := range orderInfos {
 			if orderInfo == nil {
 				continue
 			}
-			amount += orderInfo.TotalAmount
+			productAmount += orderInfo.TotalAmount
 			orderSummaries = append(orderSummaries, entity.OrderSummary{
 				OrderID:       orderInfo.ID,
 				OrderNo:       orderInfo.OrderNo,
@@ -641,11 +845,15 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 			})
 			orderDetails = append(orderDetails, structToMap(orderInfo))
 		}
+		amount = productAmount + sumFreightEstimate(selected)
 		if len(orderSummaries) > 1 {
 			orderNo = "MULTI"
 		}
 		orderDetail["orders"] = orderDetails
 	}
+	orderDetail["selected_products"] = selected
+	orderDetail["product_amount"] = sumProductAmount(selected)
+	orderDetail["freight_estimate"] = sumFreightEstimate(selected)
 	deliveryNote := strings.TrimSpace(form.DeliveryNote)
 	if deliveryNote == "" {
 		deliveryNote = form.DeliveryMethod + "；" + form.DeliveryAddress
@@ -669,6 +877,22 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 		Remark:          strings.TrimSpace(form.Remark),
 		OrderDetail:     orderDetail,
 	}
+}
+
+func sumProductAmount(selected entity.MatchedProducts) float64 {
+	total := 0.0
+	for _, item := range selected {
+		total += item.Quantity * item.UnitPrice
+	}
+	return total
+}
+
+func sumFreightEstimate(selected entity.MatchedProducts) float64 {
+	total := 0.0
+	for _, item := range selected {
+		total += item.FreightEstimate
+	}
+	return total
 }
 
 func buildFinancePlans(parsed entity.ParsedInstruction, amount float64) entity.FinancePlans {
