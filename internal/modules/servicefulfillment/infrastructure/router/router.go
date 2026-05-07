@@ -1,0 +1,51 @@
+package router
+
+import (
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/ui/handler"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/gin-gonic/gin"
+)
+
+func RegisterRoutes(r *gin.RouterGroup) {
+	h := handler.NewHandler()
+
+	product := r.Group("/products")
+	product.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("sales"))
+	{
+		product.PUT("/:id/warehouse-binding", h.BindProductWarehouse)
+	}
+
+	r.GET("/warehouses/:id/products", middleware.AuthRequired(), h.ListWarehouseProducts)
+
+	movements := r.Group("/warehouse-movements")
+	movements.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("warehouse"))
+	{
+		movements.GET("", h.ListWarehouseMovements)
+		movements.POST("", h.CreateWarehouseMovement)
+		movements.PUT("/:id/status", h.UpdateWarehouseMovementStatus)
+	}
+
+	logistics := r.Group("/logistics")
+	logistics.Use(middleware.AuthRequired())
+	{
+		logistics.POST("/estimate", h.EstimateLogistics)
+		logistics.GET("/orders", h.ListLogisticsOrders)
+		logistics.POST("/orders", middleware.RequireEnterpriseService("procurement", "logistics"), h.CreateLogisticsOrder)
+		logistics.POST("/orders/:id/accept", middleware.RequireEnterpriseService("logistics"), h.AcceptLogisticsOrder)
+		logistics.PUT("/orders/:id/status", middleware.RequireEnterpriseService("logistics"), h.UpdateLogisticsOrderStatus)
+		logistics.POST("/orders/:id/tracking-events", middleware.RequireEnterpriseService("logistics"), h.AddTrackingEvent)
+	}
+
+	orders := r.Group("/orders")
+	orders.Use(middleware.AuthRequired())
+	{
+		orders.GET("/:id/service-fulfillment", h.GetOrderFulfillment)
+	}
+
+	guarantees := r.Group("/fulfillment-guarantees")
+	guarantees.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales", "warehouse", "logistics"))
+	{
+		guarantees.POST("", h.CreateGuarantee)
+		guarantees.PUT("/:id/status", h.UpdateGuaranteeStatus)
+	}
+}

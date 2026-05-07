@@ -127,7 +127,7 @@ func (h *Handler) UpdateWarehouse(c *gin.Context) {
 	}
 	var item entity.WarehouseService
 	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
-		response.NotFound(c, "仓储资源不存在")
+		response.NotFound(c, "仓储资源不存在或无权修改")
 		return
 	}
 	item.WarehouseName = req.WarehouseName
@@ -152,6 +152,23 @@ func (h *Handler) UpdateWarehouse(c *gin.Context) {
 	item.UpdatedBy = claims.UserID
 	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新仓储资源失败"))
+		return
+	}
+	response.Success(c, warehouseToInfo(&item))
+}
+
+func (h *Handler) DeleteWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var item entity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "仓储资源不存在或无权下线")
+		return
+	}
+	item.Status = entity.OfferStatusOffline
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("下线仓储资源失败"))
 		return
 	}
 	response.Success(c, warehouseToInfo(&item))
@@ -260,7 +277,7 @@ func (h *Handler) UpdateLogistics(c *gin.Context) {
 	}
 	var item entity.LogisticsService
 	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
-		response.NotFound(c, "物流资源不存在")
+		response.NotFound(c, "物流资源不存在或无权修改")
 		return
 	}
 	item.Name = req.Name
@@ -283,6 +300,23 @@ func (h *Handler) UpdateLogistics(c *gin.Context) {
 	item.UpdatedBy = claims.UserID
 	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新物流资源失败"))
+		return
+	}
+	response.Success(c, logisticsToInfo(&item))
+}
+
+func (h *Handler) DeleteLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var item entity.LogisticsService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "物流资源不存在或无权下线")
+		return
+	}
+	item.Status = entity.OfferStatusOffline
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("下线物流资源失败"))
 		return
 	}
 	response.Success(c, logisticsToInfo(&item))

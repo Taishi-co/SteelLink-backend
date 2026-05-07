@@ -24,6 +24,8 @@ import (
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/router"
+	serviceFulfillmentPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/infrastructure/persistence"
+	serviceFulfillmentRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/infrastructure/router"
 	serviceOfferPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/infrastructure/persistence"
 	serviceOfferRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/infrastructure/router"
 	supplyDemandPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/supplydemand/infrastructure/persistence"
@@ -124,6 +126,9 @@ func main() {
 		if err := serviceOfferPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate service offer tables", zap.Error(err))
 		}
+		if err := serviceFulfillmentPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate service fulfillment tables", zap.Error(err))
+		}
 		if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
 			logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
 		}
@@ -195,6 +200,10 @@ func main() {
 	logger.Info("Registering service offer routes...")
 	serviceOfferRouter.RegisterRoutes(v1)
 	logger.Info("Service offer routes registered")
+
+	logger.Info("Registering service fulfillment routes...")
+	serviceFulfillmentRouter.RegisterRoutes(v1)
+	logger.Info("Service fulfillment routes registered")
 
 	logger.Info("Registering AI procurement routes...")
 	aiProcurementRouter.RegisterRoutes(v1)
