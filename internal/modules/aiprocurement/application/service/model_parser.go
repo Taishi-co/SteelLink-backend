@@ -55,14 +55,17 @@ type anthropicMessageResponse struct {
 }
 
 type parsedInstructionPayload struct {
-	ProductName       string   `json:"product_name"`
-	Category          string   `json:"category"`
-	Quantity          quantity `json:"quantity"`
-	Unit              string   `json:"unit"`
-	Usage             string   `json:"usage"`
-	FinancingRequired boolText `json:"financing_required"`
-	Keywords          []string `json:"keywords"`
-	Confidence        float64  `json:"confidence"`
+	ProductName           string   `json:"product_name"`
+	Category              string   `json:"category"`
+	Quantity              quantity `json:"quantity"`
+	Unit                  string   `json:"unit"`
+	Usage                 string   `json:"usage"`
+	FinancingRequired     boolText `json:"financing_required"`
+	Keywords              []string `json:"keywords"`
+	Confidence            float64  `json:"confidence"`
+	DeliveryAddress       string   `json:"delivery_address"`
+	DeliveryAddressSource string   `json:"delivery_address_source"`
+	DeliveryWarehouseName string   `json:"delivery_warehouse_name"`
 }
 
 func parseInstructionWithModel(ctx context.Context, prompt string) (entity.ParsedInstruction, bool, error) {
@@ -176,14 +179,17 @@ func parseInstructionWithModel(ctx context.Context, prompt string) (entity.Parse
 	}
 
 	result := entity.ParsedInstruction{
-		ProductName:       strings.TrimSpace(parsed.ProductName),
-		Category:          strings.TrimSpace(parsed.Category),
-		Quantity:          float64(parsed.Quantity),
-		Unit:              strings.TrimSpace(parsed.Unit),
-		Usage:             strings.TrimSpace(parsed.Usage),
-		FinancingRequired: bool(parsed.FinancingRequired),
-		Keywords:          compactStrings(parsed.Keywords),
-		Confidence:        parsed.Confidence,
+		ProductName:           strings.TrimSpace(parsed.ProductName),
+		Category:              strings.TrimSpace(parsed.Category),
+		Quantity:              float64(parsed.Quantity),
+		Unit:                  strings.TrimSpace(parsed.Unit),
+		Usage:                 strings.TrimSpace(parsed.Usage),
+		FinancingRequired:     bool(parsed.FinancingRequired),
+		Keywords:              compactStrings(parsed.Keywords),
+		Confidence:            parsed.Confidence,
+		DeliveryAddress:       strings.TrimSpace(parsed.DeliveryAddress),
+		DeliveryAddressSource: strings.TrimSpace(parsed.DeliveryAddressSource),
+		DeliveryWarehouseName: strings.TrimSpace(parsed.DeliveryWarehouseName),
 	}
 	normalizeParsedInstruction(&result, prompt)
 	logAIProcurementInfo("AI procurement model parser succeeded",
@@ -315,10 +321,11 @@ func modelParserSystemPrompt() string {
 	return strings.Join([]string{
 		"你是钢材B2B平台的采购指令解析器。",
 		"只输出JSON，不要输出解释、Markdown或代码块。",
-		"JSON字段必须包含 product_name, category, quantity, unit, usage, financing_required, keywords, confidence。",
-		"字段类型必须严格为 JSON 原生类型：quantity 是数字，financing_required 是布尔值，keywords 是字符串数组，confidence 是0到1的数字。",
+		"JSON字段必须包含 product_name, category, quantity, unit, usage, financing_required, keywords, confidence, delivery_address, delivery_address_source, delivery_warehouse_name。",
+		"字段类型必须严格为 JSON 原生类型：quantity 是数字，financing_required 是布尔值，keywords 是字符串数组，confidence 是0到1的数字；无法识别的地址字段填空字符串。",
 		"product_name 填采购对象本体，不要填泛化占位词；category 填用户明确说的品类或最具体钢材品类短名称。",
 		"如果用户说“品类为X/品类是X”，X 必须进入 category；product_name 保留品类短语前的采购对象。例如“我想买100吨的钢，品类为热轧板卷”输出 product_name=钢, category=热轧板卷。",
+		"如果用户说明收货地址、交付到某仓库或发到某地，将地址写入 delivery_address；平台仓库收货时 delivery_address_source 填 buyer_warehouse，否则填 manual。",
 	}, "\n")
 }
 

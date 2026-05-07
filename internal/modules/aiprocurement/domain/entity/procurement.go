@@ -33,14 +33,18 @@ const (
 )
 
 type ParsedInstruction struct {
-	ProductName       string   `json:"product_name"`
-	Category          string   `json:"category"`
-	Quantity          float64  `json:"quantity"`
-	Unit              string   `json:"unit"`
-	Usage             string   `json:"usage"`
-	FinancingRequired bool     `json:"financing_required"`
-	Keywords          []string `json:"keywords"`
-	Confidence        float64  `json:"confidence"`
+	ProductName           string   `json:"product_name"`
+	Category              string   `json:"category"`
+	Quantity              float64  `json:"quantity"`
+	Unit                  string   `json:"unit"`
+	Usage                 string   `json:"usage"`
+	FinancingRequired     bool     `json:"financing_required"`
+	Keywords              []string `json:"keywords"`
+	Confidence            float64  `json:"confidence"`
+	DeliveryAddress       string   `json:"delivery_address,omitempty"`
+	DeliveryAddressSource string   `json:"delivery_address_source,omitempty"`
+	DeliveryWarehouseID   uint64   `json:"delivery_warehouse_id,omitempty"`
+	DeliveryWarehouseName string   `json:"delivery_warehouse_name,omitempty"`
 }
 
 func (p ParsedInstruction) Value() (driver.Value, error) {
@@ -52,26 +56,35 @@ func (p *ParsedInstruction) Scan(value interface{}) error {
 }
 
 type MatchedProduct struct {
-	ProductID     uint64         `json:"product_id"`
-	ProductNo     string         `json:"product_no"`
-	ProductName   string         `json:"product_name"`
-	Category      string         `json:"category"`
-	SteelMill     string         `json:"steel_mill"`
-	Quantity      float64        `json:"quantity"`
-	AvailableQty  float64        `json:"available_qty"`
-	UnitPrice     float64        `json:"unit_price"`
-	TotalAmount   float64        `json:"total_amount"`
-	Score         int            `json:"score"`
-	MatchReason   string         `json:"match_reason"`
-	EnterpriseID  uint64         `json:"enterprise_id"`
-	Spec          map[string]any `json:"spec,omitempty"`
-	Warehouse     map[string]any `json:"warehouse,omitempty"`
-	BundleNo      string         `json:"bundle_no,omitempty"`
-	DeliveryDays  int            `json:"delivery_days,omitempty"`
-	QuoteValidity int            `json:"quote_validity,omitempty"`
-	QualityCert   string         `json:"quality_cert,omitempty"`
-	Description   string         `json:"description,omitempty"`
-	Selected      bool           `json:"selected,omitempty"`
+	ProductID            uint64         `json:"product_id"`
+	ProductNo            string         `json:"product_no"`
+	ProductName          string         `json:"product_name"`
+	Category             string         `json:"category"`
+	SteelMill            string         `json:"steel_mill"`
+	Quantity             float64        `json:"quantity"`
+	AvailableQty         float64        `json:"available_qty"`
+	UnitPrice            float64        `json:"unit_price"`
+	TotalAmount          float64        `json:"total_amount"`
+	Score                int            `json:"score"`
+	MatchReason          string         `json:"match_reason"`
+	EnterpriseID         uint64         `json:"enterprise_id"`
+	Spec                 map[string]any `json:"spec,omitempty"`
+	Warehouse            map[string]any `json:"warehouse,omitempty"`
+	BundleNo             string         `json:"bundle_no,omitempty"`
+	DeliveryDays         int            `json:"delivery_days,omitempty"`
+	QuoteValidity        int            `json:"quote_validity,omitempty"`
+	QualityCert          string         `json:"quality_cert,omitempty"`
+	Description          string         `json:"description,omitempty"`
+	OriginWarehouseName  string         `json:"origin_warehouse_name,omitempty"`
+	OriginAddress        string         `json:"origin_address,omitempty"`
+	DestinationAddress   string         `json:"destination_address,omitempty"`
+	LogisticsServiceID   uint64         `json:"logistics_service_id,omitempty"`
+	LogisticsServiceName string         `json:"logistics_service_name,omitempty"`
+	LogisticsRoute       string         `json:"logistics_route,omitempty"`
+	FreightEstimate      float64        `json:"freight_estimate,omitempty"`
+	LandedTotal          float64        `json:"landed_total,omitempty"`
+	UnitLandedPrice      float64        `json:"unit_landed_price,omitempty"`
+	Selected             bool           `json:"selected,omitempty"`
 }
 
 type MatchedProducts []MatchedProduct
