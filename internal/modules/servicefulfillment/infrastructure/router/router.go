@@ -16,6 +16,8 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	r.GET("/warehouses/:id/products", middleware.AuthRequired(), h.ListWarehouseProducts)
+	r.GET("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "warehouse"), h.ListWarehouseStorageRequests)
+	r.POST("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "warehouse"), h.CreateWarehouseStorageRequest)
 
 	movements := r.Group("/warehouse-movements")
 	movements.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("warehouse"))
