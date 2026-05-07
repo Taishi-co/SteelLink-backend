@@ -27,6 +27,18 @@ const (
 	OrderStatusCancelled       OrderStatus = 9  // 已取消
 	OrderStatusFrozen          OrderStatus = 10 // 已冻结
 	OrderStatusException       OrderStatus = 11 // 异常
+
+	OrderStatusPendingWarehouseConfirm  OrderStatus = 12 // 待仓库确认
+	OrderStatusPendingSellerConfirm     OrderStatus = 13 // 待卖方确认
+	OrderStatusPendingBuyerConfirm      OrderStatus = 14 // 待买方最终确认
+	OrderStatusLogisticsBidding         OrderStatus = 15 // 物流竞价中
+	OrderStatusPendingLogisticsConfirm  OrderStatus = 16 // 待确认物流
+	OrderStatusShipping                 OrderStatus = 17 // 运输中
+	OrderStatusReceived                 OrderStatus = 18 // 已收货
+	OrderStatusReconciled               OrderStatus = 19 // 已对账
+	OrderStatusArchived                 OrderStatus = 20 // 已归档
+	OrderStatusFinancingReview          OrderStatus = 21 // 托盘融资审批中
+	OrderStatusPendingFinancingContract OrderStatus = 22 // 待融资合同
 )
 
 // OrderItem 订单项
@@ -84,15 +96,22 @@ func (items *OrderItems) Scan(value interface{}) error {
 
 // DeliveryInfo 配送信息
 type DeliveryInfo struct {
-	DriverName    string `json:"driver_name"`    // 司机姓名
-	DriverIdCard  string `json:"driver_id_card"` // 司机身份证
-	DriverPhone   string `json:"driver_phone"`   // 司机电话
-	PlateNumber   string `json:"plate_number"`   // 车牌号
-	PickupCode    string `json:"pickup_code"`    // 提货码
-	WarehouseID   uint64 `json:"warehouse_id"`   // 仓库ID
-	WarehouseName string `json:"warehouse_name"` // 仓库名称
-	Address       string `json:"address"`        // 收货地址
-	EstimatedTime string `json:"estimated_time"` // 预计送达时间
+	DriverName            string `json:"driver_name"`             // 司机姓名
+	DriverIdCard          string `json:"driver_id_card"`          // 司机身份证
+	DriverPhone           string `json:"driver_phone"`            // 司机电话
+	PlateNumber           string `json:"plate_number"`            // 车牌号
+	PickupCode            string `json:"pickup_code"`             // 提货码
+	WarehouseID           uint64 `json:"warehouse_id"`            // 仓库ID
+	WarehouseServiceID    uint64 `json:"warehouse_service_id"`    // 仓储资源ID
+	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"` // 仓储方企业ID
+	WarehouseName         string `json:"warehouse_name"`          // 仓库名称
+	WarehouseCode         string `json:"warehouse_code"`          // 仓库代码
+	WarehouseProvince     string `json:"warehouse_province"`      // 仓库省份
+	WarehouseCity         string `json:"warehouse_city"`          // 仓库城市
+	WarehouseDistrict     string `json:"warehouse_district"`      // 仓库区县
+	WarehouseAddress      string `json:"warehouse_address"`       // 仓库地址
+	Address               string `json:"address"`                 // 收货地址
+	EstimatedTime         string `json:"estimated_time"`          // 预计送达时间
 }
 
 // Value 实现driver.Valuer接口
@@ -181,6 +200,27 @@ type VoucherEvidence struct {
 	GPSLongitude *float64  `json:"gps_longitude"` // 凭证GPS经度
 }
 
+type OrderEventPayload map[string]interface{}
+
+func (p OrderEventPayload) Value() (driver.Value, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return json.Marshal(p)
+}
+
+func (p *OrderEventPayload) Scan(value interface{}) error {
+	if value == nil {
+		*p = nil
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, p)
+}
+
 // Value 实现driver.Valuer接口
 func (v VoucherEvidence) Value() (driver.Value, error) {
 	return json.Marshal(v)
@@ -257,6 +297,177 @@ type Order struct {
 // TableName 指定表名
 func (Order) TableName() string {
 	return "orders"
+}
+
+type OrderEvent struct {
+	ID                uint64            `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID           uint64            `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo           string            `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	EventType         string            `gorm:"type:varchar(64);not null;index;comment:事件类型" json:"event_type"`
+	ActorUserID       uint64            `gorm:"index;comment:操作者用户ID" json:"actor_user_id"`
+	ActorEnterpriseID uint64            `gorm:"index;comment:操作者企业ID" json:"actor_enterprise_id"`
+	ActorService      string            `gorm:"type:varchar(32);comment:操作者服务身份" json:"actor_service"`
+	FromStatus        OrderStatus       `gorm:"type:tinyint;comment:变更前状态" json:"from_status"`
+	ToStatus          OrderStatus       `gorm:"type:tinyint;comment:变更后状态" json:"to_status"`
+	Payload           OrderEventPayload `gorm:"type:json;comment:事件载荷" json:"payload"`
+	CreatedAt         time.Time         `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+}
+
+func (OrderEvent) TableName() string {
+	return "order_events"
+}
+
+type LogisticsBiddingStatus string
+
+const (
+	LogisticsBiddingStatusOpen     LogisticsBiddingStatus = "open"
+	LogisticsBiddingStatusSelected LogisticsBiddingStatus = "selected"
+	LogisticsBiddingStatusClosed   LogisticsBiddingStatus = "closed"
+)
+
+type LogisticsBidding struct {
+	ID                     uint64                 `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID                uint64                 `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo                string                 `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	SellerEnterpriseID     uint64                 `gorm:"index;comment:卖方企业ID" json:"seller_enterprise_id"`
+	WarehouseEnterpriseID  uint64                 `gorm:"index;comment:仓储方企业ID" json:"warehouse_enterprise_id"`
+	PickupAddress          string                 `gorm:"type:varchar(500);comment:提货地址" json:"pickup_address"`
+	DestinationAddress     string                 `gorm:"type:varchar(500);comment:目的地地址" json:"destination_address"`
+	Requirement            string                 `gorm:"type:varchar(1000);comment:承运要求" json:"requirement"`
+	Status                 LogisticsBiddingStatus `gorm:"type:varchar(32);index;comment:状态" json:"status"`
+	SelectedQuoteID        uint64                 `gorm:"index;comment:选中报价ID" json:"selected_quote_id"`
+	BuyerConfirmedQuoteID  uint64                 `gorm:"comment:买方确认报价ID" json:"buyer_confirmed_quote_id"`
+	SellerConfirmedQuoteID uint64                 `gorm:"comment:卖方确认报价ID" json:"seller_confirmed_quote_id"`
+	CreatedBy              uint64                 `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt              time.Time              `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt              time.Time              `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+}
+
+func (LogisticsBidding) TableName() string {
+	return "logistics_biddings"
+}
+
+type LogisticsBidQuote struct {
+	ID                    uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	BiddingID             uint64    `gorm:"index;not null;comment:竞价ID" json:"bidding_id"`
+	OrderID               uint64    `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	LogisticsEnterpriseID uint64    `gorm:"index;comment:物流企业ID" json:"logistics_enterprise_id"`
+	LogisticsName         string    `gorm:"type:varchar(200);comment:物流企业名称" json:"logistics_name"`
+	VehicleInfo           string    `gorm:"type:varchar(500);comment:车辆信息" json:"vehicle_info"`
+	DriverInfo            string    `gorm:"type:varchar(500);comment:司机信息" json:"driver_info"`
+	Amount                float64   `gorm:"type:decimal(12,2);comment:报价金额" json:"amount"`
+	EstimatedPickupAt     string    `gorm:"type:varchar(64);comment:预计提货时间" json:"estimated_pickup_at"`
+	EstimatedDeliveryAt   string    `gorm:"type:varchar(64);comment:预计送达时间" json:"estimated_delivery_at"`
+	Remark                string    `gorm:"type:varchar(1000);comment:备注" json:"remark"`
+	CreatedBy             uint64    `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt             time.Time `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+}
+
+func (LogisticsBidQuote) TableName() string {
+	return "logistics_bid_quotes"
+}
+
+type ShipmentStatus string
+
+const (
+	ShipmentStatusPendingPickup ShipmentStatus = "pending_pickup"
+	ShipmentStatusPickedUp      ShipmentStatus = "picked_up"
+	ShipmentStatusDelivered     ShipmentStatus = "delivered"
+	ShipmentStatusSigned        ShipmentStatus = "signed"
+)
+
+type ShipmentTask struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID               uint64         `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo               string         `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	LogisticsEnterpriseID uint64         `gorm:"index;comment:物流企业ID" json:"logistics_enterprise_id"`
+	LogisticsQuoteID      uint64         `gorm:"index;comment:物流报价ID" json:"logistics_quote_id"`
+	Status                ShipmentStatus `gorm:"type:varchar(32);index;comment:运输状态" json:"status"`
+	PickupVoucher         string         `gorm:"type:varchar(500);comment:提货凭证" json:"pickup_voucher"`
+	DeliveryVoucher       string         `gorm:"type:varchar(500);comment:送达凭证" json:"delivery_voucher"`
+	SignatureVoucher      string         `gorm:"type:varchar(500);comment:签收回单" json:"signature_voucher"`
+	PickedUpAt            *time.Time     `gorm:"comment:提货时间" json:"picked_up_at"`
+	DeliveredAt           *time.Time     `gorm:"comment:送达时间" json:"delivered_at"`
+	SignedAt              *time.Time     `gorm:"comment:签收回传时间" json:"signed_at"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+}
+
+func (ShipmentTask) TableName() string {
+	return "shipment_tasks"
+}
+
+type FinancingRequestStatus string
+
+const (
+	FinancingRequestStatusSubmitted          FinancingRequestStatus = "submitted"
+	FinancingRequestStatusRiskApproved       FinancingRequestStatus = "risk_approved"
+	FinancingRequestStatusRiskRejected       FinancingRequestStatus = "risk_rejected"
+	FinancingRequestStatusBuyerConfirmed     FinancingRequestStatus = "buyer_confirmed"
+	FinancingRequestStatusContractGenerated  FinancingRequestStatus = "contract_generated"
+	FinancingRequestStatusBuyerSignedFeePaid FinancingRequestStatus = "buyer_signed_fee_paid"
+	FinancingRequestStatusDisbursed          FinancingRequestStatus = "disbursed"
+	FinancingRequestStatusPledged            FinancingRequestStatus = "pledged"
+	FinancingRequestStatusReleased           FinancingRequestStatus = "released"
+)
+
+type OrderFinancingRequest struct {
+	ID                  uint64                 `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID             uint64                 `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo             string                 `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	BuyerEnterpriseID   uint64                 `gorm:"index;comment:买方企业ID" json:"buyer_enterprise_id"`
+	SellerEnterpriseID  uint64                 `gorm:"index;comment:卖方企业ID" json:"seller_enterprise_id"`
+	FinanceServiceID    uint64                 `gorm:"index;comment:金融服务产品ID" json:"finance_service_id"`
+	FundingEnterpriseID uint64                 `gorm:"index;comment:资金方企业ID" json:"funding_enterprise_id"`
+	RequestedAmount     float64                `gorm:"type:decimal(14,2);comment:申请融资金额" json:"requested_amount"`
+	ApprovedAmount      float64                `gorm:"type:decimal(14,2);comment:授信金额" json:"approved_amount"`
+	TermDays            int                    `gorm:"comment:账期天数" json:"term_days"`
+	AnnualRate          float64                `gorm:"type:decimal(8,4);comment:年化费率" json:"annual_rate"`
+	ServiceFee          float64                `gorm:"type:decimal(12,2);comment:手续费" json:"service_fee"`
+	Status              FinancingRequestStatus `gorm:"type:varchar(40);index;comment:融资状态" json:"status"`
+	RiskResult          string                 `gorm:"type:varchar(32);comment:风控结果" json:"risk_result"`
+	RiskRemark          string                 `gorm:"type:varchar(1000);comment:风控备注" json:"risk_remark"`
+	BuyerConfirmedAt    *time.Time             `gorm:"comment:买方确认金额和定价时间" json:"buyer_confirmed_at"`
+	DebtContractNo      string                 `gorm:"type:varchar(64);comment:债务合同编号" json:"debt_contract_no"`
+	DebtContractURL     string                 `gorm:"type:varchar(500);comment:债务合同文件" json:"debt_contract_url"`
+	DebtContractHash    string                 `gorm:"type:varchar(128);comment:债务合同哈希" json:"debt_contract_hash"`
+	BuyerSignedAt       *time.Time             `gorm:"comment:买方签署时间" json:"buyer_signed_at"`
+	FeeVoucherURL       string                 `gorm:"type:varchar(500);comment:手续费支付凭证" json:"fee_voucher_url"`
+	FeePaidAt           *time.Time             `gorm:"comment:手续费支付时间" json:"fee_paid_at"`
+	DisbursementVoucher string                 `gorm:"type:varchar(500);comment:放款凭证" json:"disbursement_voucher"`
+	DisbursedAt         *time.Time             `gorm:"comment:放款时间" json:"disbursed_at"`
+	PledgeVoucherURL    string                 `gorm:"type:varchar(500);comment:货权质押凭证" json:"pledge_voucher_url"`
+	PledgeRemark        string                 `gorm:"type:varchar(1000);comment:质押备注" json:"pledge_remark"`
+	PledgedAt           *time.Time             `gorm:"comment:质押记录时间" json:"pledged_at"`
+	ReleaseCondition    string                 `gorm:"type:varchar(1000);comment:货权释放条件" json:"release_condition"`
+	ReleaseReason       string                 `gorm:"type:varchar(1000);comment:货权释放原因" json:"release_reason"`
+	ReleasedAt          *time.Time             `gorm:"comment:释放时间" json:"released_at"`
+	CreatedBy           uint64                 `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt           time.Time              `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedBy           uint64                 `gorm:"comment:修改者" json:"updated_by"`
+	UpdatedAt           time.Time              `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+}
+
+func (OrderFinancingRequest) TableName() string {
+	return "order_financing_requests"
+}
+
+type PledgeReleaseEvent struct {
+	ID                 uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	FinancingRequestID uint64    `gorm:"index;not null;comment:融资申请ID" json:"financing_request_id"`
+	OrderID            uint64    `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo            string    `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	EventType          string    `gorm:"type:varchar(64);index;comment:事件类型" json:"event_type"`
+	Condition          string    `gorm:"type:varchar(1000);comment:释放条件" json:"condition"`
+	Reason             string    `gorm:"type:varchar(1000);comment:释放原因" json:"reason"`
+	VoucherURL         string    `gorm:"type:varchar(500);comment:凭证" json:"voucher_url"`
+	ActorUserID        uint64    `gorm:"index;comment:操作者用户ID" json:"actor_user_id"`
+	ActorEnterpriseID  uint64    `gorm:"index;comment:操作者企业ID" json:"actor_enterprise_id"`
+	CreatedAt          time.Time `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+}
+
+func (PledgeReleaseEvent) TableName() string {
+	return "pledge_release_events"
 }
 
 // CanCancel 检查是否可以取消

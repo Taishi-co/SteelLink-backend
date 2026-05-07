@@ -70,8 +70,7 @@ func (s *EnterprisePermissionService) Apply(ctx context.Context, userID uint64, 
 	}
 
 	service := entity.PlatformService(req.Service)
-	supplyRole := entity.ExpectedSupplyRole(service)
-	if supplyRole == "" {
+	if !entity.ValidPlatformService(req.Service) {
 		return nil, ecode.ErrBadRequest.WithMessage("平台服务无效")
 	}
 
@@ -84,11 +83,23 @@ func (s *EnterprisePermissionService) Apply(ctx context.Context, userID uint64, 
 			return err
 		}
 
+		permissionTable := entity.CapabilityPermissionTable(service)
+		var existing entity.EnterpriseServicePermission
+		if err := tx.Table(permissionTable).Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&existing).Error; err == nil {
+			if existing.Status == entity.ServicePermissionApproved {
+				return ecode.ErrBadRequest.WithMessage("该服务已开通，无需重复申请")
+			}
+			if existing.Status == entity.ServicePermissionPending {
+				return ecode.ErrBadRequest.WithMessage("该服务已有审核中的申请")
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
 		application = entity.EnterpriseServiceApplication{
 			EnterpriseID:   enterprise.ID,
 			EnterpriseCode: enterprise.EnterpriseCode,
 			Service:        service,
-			SupplyRole:     supplyRole,
 			Status:         entity.ApplicationPending,
 			SubmittedBy:    userID,
 		}
@@ -112,23 +123,20 @@ func (s *EnterprisePermissionService) Apply(ctx context.Context, userID uint64, 
 			EnterpriseID:   enterprise.ID,
 			EnterpriseCode: enterprise.EnterpriseCode,
 			Service:        service,
-			SupplyRole:     supplyRole,
 			Status:         entity.ServicePermissionPending,
 			AuditReason:    "",
 			CreatedBy:      userID,
 			UpdatedBy:      userID,
 		}
-		var existing entity.EnterpriseServicePermission
-		if err := tx.Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&existing).Error; err == nil {
-			existing.SupplyRole = supplyRole
+		if err := tx.Table(permissionTable).Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&existing).Error; err == nil {
 			existing.Status = entity.ServicePermissionPending
 			existing.AuditReason = ""
 			existing.UpdatedBy = userID
-			return tx.Save(&existing).Error
+			return tx.Table(permissionTable).Save(&existing).Error
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		return tx.Create(&nowPermission).Error
+		return tx.Table(permissionTable).Create(&nowPermission).Error
 	})
 	if err != nil {
 		if coded, ok := err.(*ecode.Error); ok {
@@ -230,8 +238,9 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 			return ecode.ErrDatabase
 		}
 
+		permissionTable := entity.CapabilityPermissionTable(application.Service)
 		var permission entity.EnterpriseServicePermission
-		if err := tx.Where("enterprise_id = ? AND service = ?", application.EnterpriseID, application.Service).First(&permission).Error; err != nil {
+		if err := tx.Table(permissionTable).Where("enterprise_id = ? AND service = ?", application.EnterpriseID, application.Service).First(&permission).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return ecode.ErrDatabase
 			}
@@ -239,7 +248,6 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 				EnterpriseID:   application.EnterpriseID,
 				EnterpriseCode: application.EnterpriseCode,
 				Service:        application.Service,
-				SupplyRole:     application.SupplyRole,
 				CreatedBy:      operatorID,
 			}
 		}
@@ -250,10 +258,10 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 			permission.ApprovedAt = &now
 		}
 		if permission.ID == 0 {
-			if err := tx.Create(&permission).Error; err != nil {
+			if err := tx.Table(permissionTable).Create(&permission).Error; err != nil {
 				return ecode.ErrDatabase
 			}
-		} else if err := tx.Save(&permission).Error; err != nil {
+		} else if err := tx.Table(permissionTable).Save(&permission).Error; err != nil {
 			return ecode.ErrDatabase
 		}
 		return nil
@@ -278,11 +286,11 @@ func (s *EnterprisePermissionService) UpdatePermissionStatus(ctx context.Context
 	}
 
 	service := entity.PlatformService(serviceName)
-	supplyRole := entity.ExpectedSupplyRole(service)
+	permissionTable := entity.CapabilityPermissionTable(service)
 	now := time.Now()
 	var permission entity.EnterpriseServicePermission
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&permission).Error; err != nil {
+		if err := tx.Table(permissionTable).Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&permission).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return ecode.ErrDatabase
 			}
@@ -290,7 +298,6 @@ func (s *EnterprisePermissionService) UpdatePermissionStatus(ctx context.Context
 				EnterpriseID:   enterprise.ID,
 				EnterpriseCode: enterprise.EnterpriseCode,
 				Service:        service,
-				SupplyRole:     supplyRole,
 				CreatedBy:      operatorID,
 			}
 		}
@@ -301,9 +308,9 @@ func (s *EnterprisePermissionService) UpdatePermissionStatus(ctx context.Context
 			permission.ApprovedAt = &now
 		}
 		if permission.ID == 0 {
-			return tx.Create(&permission).Error
+			return tx.Table(permissionTable).Create(&permission).Error
 		}
-		return tx.Save(&permission).Error
+		return tx.Table(permissionTable).Save(&permission).Error
 	})
 	if err != nil {
 		if coded, ok := err.(*ecode.Error); ok {
@@ -338,8 +345,12 @@ func (s *EnterprisePermissionService) currentEnterprise(ctx context.Context, use
 
 func (s *EnterprisePermissionService) listPermissions(ctx context.Context, enterpriseID uint64) ([]*dto.EnterpriseServicePermissionInfo, error) {
 	var permissions []entity.EnterpriseServicePermission
-	if err := s.db.WithContext(ctx).Where("enterprise_id = ?", enterpriseID).Order("service ASC").Find(&permissions).Error; err != nil {
-		return nil, err
+	for _, table := range []string{entity.TradeCapabilityPermissionTable, entity.ProviderServicePermissionTable} {
+		var rows []entity.EnterpriseServicePermission
+		if err := s.db.WithContext(ctx).Table(table).Where("enterprise_id = ?", enterpriseID).Order("service ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		permissions = append(permissions, rows...)
 	}
 	result := make([]*dto.EnterpriseServicePermissionInfo, 0, len(permissions))
 	for _, permission := range permissions {
@@ -368,7 +379,8 @@ func (s *EnterprisePermissionService) applicationToInfo(ctx context.Context, app
 		EnterpriseID:   application.EnterpriseID,
 		EnterpriseCode: application.EnterpriseCode,
 		Service:        string(application.Service),
-		SupplyRole:     string(application.SupplyRole),
+		CapabilityKind: entity.CapabilityKind(application.Service),
+		EnterpriseRole: entity.ServiceToEnterpriseRole(application.Service),
 		Status:         int(application.Status),
 		AuditReason:    application.AuditReason,
 		SubmittedBy:    application.SubmittedBy,
@@ -386,7 +398,8 @@ func permissionToInfo(permission *entity.EnterpriseServicePermission) *dto.Enter
 		EnterpriseID:   permission.EnterpriseID,
 		EnterpriseCode: permission.EnterpriseCode,
 		Service:        string(permission.Service),
-		SupplyRole:     string(permission.SupplyRole),
+		CapabilityKind: entity.CapabilityKind(permission.Service),
+		EnterpriseRole: entity.ServiceToEnterpriseRole(permission.Service),
 		Status:         int(permission.Status),
 		AuditReason:    permission.AuditReason,
 		ApprovedAt:     permission.ApprovedAt,

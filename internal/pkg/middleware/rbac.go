@@ -73,23 +73,39 @@ func RequireEnterpriseService(services ...string) gin.HandlerFunc {
 			return
 		}
 
-		var count int64
-		if err := db.WithContext(c.Request.Context()).
-			Model(&entity.EnterpriseServicePermission{}).
-			Where("enterprise_id = ? AND service IN ? AND status = ?", claims.EnterpriseID, services, entity.ServicePermissionApproved).
-			Count(&count).Error; err != nil {
-			response.Error(c, ecode.ErrDatabase.WithMessage("查询企业服务权限失败"))
-			c.Abort()
-			return
+		var total int64
+		for table, tableServices := range entity.PermissionTablesForServices(services) {
+			var count int64
+			if err := db.WithContext(c.Request.Context()).
+				Table(table).
+				Where("enterprise_id = ? AND service IN ? AND status = ?", claims.EnterpriseID, tableServices, entity.ServicePermissionApproved).
+				Count(&count).Error; err != nil {
+				response.Error(c, ecode.ErrDatabase.WithMessage("查询企业能力权限失败"))
+				c.Abort()
+				return
+			}
+			total += count
 		}
-		if count == 0 {
-			response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：企业未开通对应平台服务"))
+		if total == 0 {
+			response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：企业未开通对应能力"))
 			c.Abort()
 			return
 		}
 
 		c.Next()
 	}
+}
+
+func RequireTradeCapability(capabilities ...string) gin.HandlerFunc {
+	return RequireEnterpriseService(capabilities...)
+}
+
+func RequireProviderService(services ...string) gin.HandlerFunc {
+	return RequireEnterpriseService(services...)
+}
+
+func RequireFulfillmentParticipant() gin.HandlerFunc {
+	return RequireEnterpriseService("procurement", "sales", "warehouse", "logistics", "finance")
 }
 
 func GetEnterpriseCode(c *gin.Context) string {

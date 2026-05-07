@@ -27,7 +27,8 @@ type EnterpriseServicePermissionInfo struct {
 	EnterpriseID   uint64     `json:"enterprise_id"`
 	EnterpriseCode string     `json:"enterprise_code"`
 	Service        string     `json:"service"`
-	SupplyRole     string     `json:"supply_role"`
+	CapabilityKind string     `json:"capability_kind"`
+	EnterpriseRole string     `json:"enterprise_role"`
 	Status         int        `json:"status"`
 	AuditReason    string     `json:"audit_reason"`
 	ApprovedAt     *time.Time `json:"approved_at"`
@@ -47,7 +48,8 @@ type EnterpriseServiceApplicationInfo struct {
 	EnterpriseID   uint64                               `json:"enterprise_id"`
 	EnterpriseCode string                               `json:"enterprise_code"`
 	Service        string                               `json:"service"`
-	SupplyRole     string                               `json:"supply_role"`
+	CapabilityKind string                               `json:"capability_kind"`
+	EnterpriseRole string                               `json:"enterprise_role"`
 	Status         int                                  `json:"status"`
 	AuditReason    string                               `json:"audit_reason"`
 	SubmittedBy    uint64                               `json:"submitted_by"`

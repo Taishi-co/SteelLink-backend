@@ -20,6 +20,7 @@ import (
 	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
 	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
+	orderPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/persistence"
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/router"
@@ -131,8 +132,11 @@ func main() {
 		if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
 			logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
 		}
-		if err := database.GetDB().AutoMigrate(&productEntity.Product{}, &orderEntity.Order{}); err != nil {
+		if err := database.GetDB().AutoMigrate(&productEntity.Product{}); err != nil {
 			logger.Fatal("Failed to migrate business tables", zap.Error(err))
+		}
+		if err := orderPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate order tables", zap.Error(err))
 		}
 	}
 

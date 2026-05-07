@@ -22,11 +22,42 @@ func AutoMigrate() error {
 	); err != nil {
 		return err
 	}
+	if err := db.Table(entity.TradeCapabilityPermissionTable).AutoMigrate(&entity.EnterpriseServicePermission{}); err != nil {
+		return err
+	}
+	if err := db.Table(entity.ProviderServicePermissionTable).AutoMigrate(&entity.EnterpriseServicePermission{}); err != nil {
+		return err
+	}
+
+	if err := dropLegacySupplyRoleColumns(db); err != nil {
+		return err
+	}
 
 	if err := initRoles(db); err != nil {
 		return err
 	}
+	if err := migrateLegacyServicePermissions(db); err != nil {
+		return err
+	}
 	return seedLegacyEnterpriseServicePermissions(db)
+}
+
+func dropLegacySupplyRoleColumns(db *gorm.DB) error {
+	var count int64
+	db.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'enterprise_service_permissions' AND COLUMN_NAME = 'supply_role'").Scan(&count)
+	if count > 0 {
+		if err := db.Exec("ALTER TABLE enterprise_service_permissions DROP COLUMN supply_role").Error; err != nil {
+			return err
+		}
+	}
+
+	db.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'enterprise_service_applications' AND COLUMN_NAME = 'supply_role'").Scan(&count)
+	if count > 0 {
+		if err := db.Exec("ALTER TABLE enterprise_service_applications DROP COLUMN supply_role").Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func initRoles(db *gorm.DB) error {
@@ -97,7 +128,7 @@ func seedLegacyEnterpriseServicePermissions(db *gorm.DB) error {
 		services := legacyServicesForEnterpriseRole(enterprise.EnterpriseRole)
 		for _, service := range services {
 			var count int64
-			if err := db.Model(&entity.EnterpriseServicePermission{}).
+			if err := db.Table(entity.CapabilityPermissionTable(service)).
 				Where("enterprise_id = ? AND service = ?", enterprise.ID, service).
 				Count(&count).Error; err != nil {
 				return err
@@ -110,15 +141,40 @@ func seedLegacyEnterpriseServicePermissions(db *gorm.DB) error {
 				EnterpriseID:   enterprise.ID,
 				EnterpriseCode: enterprise.EnterpriseCode,
 				Service:        service,
-				SupplyRole:     entity.ExpectedSupplyRole(service),
 				Status:         entity.ServicePermissionApproved,
 				ApprovedAt:     &now,
 				CreatedBy:      enterprise.CreatedBy,
 				UpdatedBy:      enterprise.UpdatedBy,
 			}
-			if err := db.Create(&permission).Error; err != nil {
+			if err := db.Table(entity.CapabilityPermissionTable(service)).Create(&permission).Error; err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func migrateLegacyServicePermissions(db *gorm.DB) error {
+	var permissions []entity.EnterpriseServicePermission
+	if err := db.Table(entity.LegacyServicePermissionTable).Where("deleted_at IS NULL").Find(&permissions).Error; err != nil {
+		return err
+	}
+	for _, permission := range permissions {
+		if !entity.ValidPlatformService(string(permission.Service)) {
+			continue
+		}
+		table := entity.CapabilityPermissionTable(permission.Service)
+		var count int64
+		if err := db.Table(table).
+			Where("enterprise_id = ? AND service = ?", permission.EnterpriseID, permission.Service).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := db.Table(table).Create(&permission).Error; err != nil {
+			return err
 		}
 	}
 	return nil

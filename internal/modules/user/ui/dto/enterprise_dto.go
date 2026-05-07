@@ -4,12 +4,13 @@ import "time"
 
 // CreateEnterpriseRequest 创建企业请求
 type CreateEnterpriseRequest struct {
-	Name           string `json:"name" binding:"required,max=200"`
-	CreditCode     string `json:"credit_code" binding:"required,max=50"`
-	EnterpriseRole string `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
-	ContactName    string `json:"contact_name" binding:"required"`
-	ContactPhone   string `json:"contact_phone" binding:"required,len=11"`
-	Address        string `json:"address"`
+	Name           string                       `json:"name" binding:"required,max=200"`
+	CreditCode     string                       `json:"credit_code" binding:"required,max=50"`
+	EnterpriseRole string                       `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
+	ContactName    string                       `json:"contact_name" binding:"required"`
+	ContactPhone   string                       `json:"contact_phone" binding:"required,len=11"`
+	Address        string                       `json:"address"`
+	Documents      []ApplicationDocumentRequest `json:"documents" binding:"required,min=1,dive"`
 }
 
 // EnterpriseInfo 企业信息响应
@@ -47,14 +48,15 @@ type UpdateEnterpriseRequest struct {
 
 // VerifyEnterpriseRequest 企业认证请求
 type VerifyEnterpriseRequest struct {
-	LegalPerson     string `json:"legal_person" binding:"required"`
-	LegalIdCard     string `json:"legal_id_card" binding:"required"`
-	BusinessLicense string `json:"business_license" binding:"required"`
-	BankAccount     string `json:"bank_account" binding:"required"`
-	BankName        string `json:"bank_name" binding:"required"`
-	ContactName     string `json:"contact_name" binding:"required"`
-	ContactPhone    string `json:"contact_phone" binding:"required,len=11"`
-	Address         string `json:"address" binding:"required"`
+	LegalPerson     string                       `json:"legal_person" binding:"required"`
+	LegalIdCard     string                       `json:"legal_id_card" binding:"required"`
+	BusinessLicense string                       `json:"business_license" binding:"required"`
+	BankAccount     string                       `json:"bank_account" binding:"required"`
+	BankName        string                       `json:"bank_name" binding:"required"`
+	ContactName     string                       `json:"contact_name" binding:"required"`
+	ContactPhone    string                       `json:"contact_phone" binding:"required,len=11"`
+	Address         string                       `json:"address" binding:"required"`
+	Documents       []ApplicationDocumentRequest `json:"documents" binding:"omitempty,dive"`
 }
 
 // EnterpriseListRequest 企业列表请求

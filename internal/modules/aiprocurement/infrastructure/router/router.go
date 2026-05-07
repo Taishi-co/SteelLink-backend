@@ -15,7 +15,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	group := r.Group("/ai-procurements")
-	group.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement"))
+	group.Use(middleware.AuthRequired(), middleware.RequireTradeCapability("procurement"))
 	{
 		group.POST("/parse", procurementHandler.Parse)
 		group.POST("/confirm-instruction", procurementHandler.ConfirmInstruction)
