@@ -23,6 +23,11 @@ type MatchProductsRequest struct {
 	Parsed entity.ParsedInstruction `json:"parsed" binding:"required"`
 }
 
+type MatchLogisticsWarehouseRequest struct {
+	Parsed           entity.ParsedInstruction `json:"parsed" binding:"required"`
+	SelectedProducts entity.MatchedProducts   `json:"selected_products" binding:"required"`
+}
+
 type GenerateOrderRequest struct {
 	Prompt           string                   `json:"prompt"`
 	Parsed           entity.ParsedInstruction `json:"parsed" binding:"required"`
@@ -91,6 +96,11 @@ type ParseResponse struct {
 }
 
 type MatchProductsResponse struct {
+	MatchedProducts entity.MatchedProducts `json:"matched_products"`
+	Stages          []StageInfo            `json:"stages"`
+}
+
+type MatchLogisticsWarehouseResponse struct {
 	MatchedProducts entity.MatchedProducts `json:"matched_products"`
 	Stages          []StageInfo            `json:"stages"`
 }
