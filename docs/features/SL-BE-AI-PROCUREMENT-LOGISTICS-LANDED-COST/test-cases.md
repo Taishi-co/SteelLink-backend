@@ -9,16 +9,16 @@
 
 | 编号 | 场景 | 前置条件 | 步骤 | 期望结果 |
 | --- | --- | --- | --- | --- |
-| TC-01 | 带收货地址匹配商品 | 有上架商品、商品绑定仓库、已审核物流商 | 调用 `match-products` 并传入 `parsed.delivery_address` | 返回候选商品包含起运地址、推荐物流商、运费和到手总价 |
+| TC-01 | 商品匹配后匹配物流仓储 | 有上架商品、商品绑定仓库、已审核物流商 | 先调用 `match-products`，再用已选商品调用 `match-logistics-warehouse` | 商品匹配只返回候选商品；物流仓储匹配返回起运地址、推荐物流商、运费和到手总价 |
 | TC-02 | 多商品拼单生成订单快照 | 已选 A/B 两个商品且数量合计等于采购量 | 调用 `generate-order` | 真实订单按卖家拆单，AI采购 `order_draft.order_detail` 包含商品金额和预估运费 |
-| TC-03 | 平台仓库作为收货地址 | 前端传入 `delivery_address_source=buyer_warehouse` | 调用匹配接口 | 匹配排序使用该仓库地址作为目的地 |
+| TC-03 | 平台仓库作为收货地址 | 前端传入 `delivery_address_source=buyer_warehouse` | 调用物流仓储匹配接口 | 匹配排序使用该仓库地址作为目的地 |
 
 ## Exception Path
 
 | 编号 | 场景 | 前置条件 | 步骤 | 期望结果 |
 | --- | --- | --- | --- | --- |
-| TC-EX-01 | 未传收货地址 | 只传原有解析参数 | 调用 `match-products` | 接口兼容旧请求，返回商品但运费为空或为待估算 |
-| TC-EX-02 | 无物流商 | 商品存在但没有已审核物流商 | 调用 `match-products` | 使用代码兜底单价估算运费，不阻断匹配 |
+| TC-EX-01 | 未传收货地址 | 只传原有解析参数 | 调用 `match-logistics-warehouse` | 接口兼容旧请求，返回商品但运费为空或为待估算 |
+| TC-EX-02 | 无物流商 | 商品存在但没有已审核物流商 | 调用 `match-logistics-warehouse` | 使用代码兜底单价估算运费，不阻断匹配 |
 
 ## 权限测试
 

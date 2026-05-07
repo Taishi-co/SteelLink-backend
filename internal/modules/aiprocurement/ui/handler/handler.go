@@ -65,6 +65,20 @@ func (h *ProcurementHandler) MatchProducts(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *ProcurementHandler) MatchLogisticsWarehouse(c *gin.Context) {
+	var req dto.MatchLogisticsWarehouseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.svc.MatchLogisticsWarehouse(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *ProcurementHandler) GenerateOrder(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {

@@ -20,6 +20,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		group.POST("/parse", procurementHandler.Parse)
 		group.POST("/confirm-instruction", procurementHandler.ConfirmInstruction)
 		group.POST("/match-products", procurementHandler.MatchProducts)
+		group.POST("/match-logistics-warehouse", procurementHandler.MatchLogisticsWarehouse)
 		group.POST("/generate-order", procurementHandler.GenerateOrder)
 		group.POST("", procurementHandler.Create)
 		group.GET("/mine", procurementHandler.ListMine)
