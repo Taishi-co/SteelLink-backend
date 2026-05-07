@@ -24,6 +24,43 @@ type CreateOrderItemRequest struct {
 	Quantity  float64 `json:"quantity" binding:"required,gt=0"`
 }
 
+type WarehousePreDataResponse struct {
+	WarehouseID           uint64 `json:"warehouse_id"`
+	WarehouseServiceID    uint64 `json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"`
+	WarehouseName         string `json:"warehouse_name"`
+	WarehouseCode         string `json:"warehouse_code"`
+	WarehouseProvince     string `json:"warehouse_province"`
+	WarehouseCity         string `json:"warehouse_city"`
+	WarehouseDistrict     string `json:"warehouse_district"`
+	WarehouseAddress      string `json:"warehouse_address"`
+	ProductID             uint64 `json:"product_id"`
+	ProductName           string `json:"product_name"`
+	SellerEnterpriseID    uint64 `json:"seller_enterprise_id"`
+	SellerName            string `json:"seller_name"`
+	CanWarehouseConfirm   bool   `json:"can_warehouse_confirm"`
+}
+
+type DraftOrderPreviewRequest struct {
+	Items []CreateOrderItemRequest `json:"items" binding:"required,dive"`
+}
+
+type ProductPoolItem struct {
+	ID                  uint64  `json:"id"`
+	ProductNo           string  `json:"product_no"`
+	Name                string  `json:"name"`
+	Category            string  `json:"category"`
+	SubCategory         string  `json:"sub_category"`
+	SteelMill           string  `json:"steel_mill"`
+	UnitPrice           float64 `json:"unit_price"`
+	AvailableQuantity   float64 `json:"available_quantity"`
+	HasWarehouseBinding bool    `json:"has_warehouse_binding"`
+	WarehouseName       string  `json:"warehouse_name,omitempty"`
+	WarehouseAddress    string  `json:"warehouse_address,omitempty"`
+	SellerEnterpriseID  uint64  `json:"seller_enterprise_id"`
+	SellerName          string  `json:"seller_name"`
+}
+
 type UploadPaymentVoucherRequest struct {
 	VoucherURL    string   `json:"voucher_url" binding:"required"`
 	TransactionNo string   `json:"transaction_no"`

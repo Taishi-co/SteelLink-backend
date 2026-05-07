@@ -19,6 +19,29 @@ func NewOrderHandler() *OrderHandler {
 	return &OrderHandler{orderService: service.NewOrderService()}
 }
 
+func (h *OrderHandler) PreviewWarehousePreData(c *gin.Context) {
+	var req dto.DraftOrderPreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.orderService.PreviewWarehousePreData(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ListProductPool(c *gin.Context) {
+	result, err := h.orderService.ListProductPool(c.Request.Context())
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) Create(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	claims := middleware.GetClaims(c)

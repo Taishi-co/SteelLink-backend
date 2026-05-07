@@ -42,7 +42,8 @@
 - [~] 权限口径文案统一。
   - 后端路由已按交易能力/服务商能力语义化整理。
   - 详见 `docs/domain/permission-scope-audit.md`。
-  - 前端主要入口已改为“交易能力/服务商能力”，后续新增页面需继续保持该口径。
+  - 前端主要入口已改为"交易能力/服务商能力"，admin 服务权限审核页面已更新为"交易能力/服务商能力"口径。
+  - 后续新增页面需继续保持该口径。
 
 ## 阶段 1：5 个平台服务基础资源
 
@@ -66,12 +67,12 @@
 - [x] 买方下单前校验采购服务权限。
   - `cart` 已要求 `procurement`。
   - `POST /orders` 已单独要求 `procurement` 服务权限。
-- [~] 买方订单草稿支持仓库确认前置数据。
+- [x] 买方订单草稿支持仓库确认前置数据。
   - 正式订单已从商品仓库绑定生成仓库确认前置数据。
-  - 独立订单草稿/询价草稿接口未完成。
-- [~] 预留 AI 采购引用商品池和订单草稿接口。
+  - 新增 `POST /orders/preview-warehouse` 接口，买方下单前可预览仓库确认前置数据。
+- [x] 预留 AI 采购引用商品池和订单草稿接口。
   - AI 采购已有独立模块和商品/融资匹配预留能力。
-  - 缺少明确的“可售商品池引用接口”和“订单草稿接口”契约。
+  - 新增 `GET /orders/product-pool` 接口，返回可售商品池供 AI 采购引用。
 
 ### 仓储服务 `warehouse`
 
@@ -134,9 +135,10 @@
 - [x] 后端：卖方对账确认。
 - [x] 后端：订单归档。
 - [~] 前端：订单闭环 MVP 页面和接口接入。
-  - buyer-app 目前只接了创建、取消、签合同、上传支付凭证、录提货信息、确认收货等旧动作。
-  - 需要补仓库确认、买方最终确认、物流确认、融资入口、事件时间线展示等。
-  - seller-app 需要补卖方确认条款、发起物流竞价、对账归档等。
+  - buyer-app 已补全 23 种订单状态映射、10 步流程条、事件时间线展示、买方确认/融资入口/物流确认操作按钮。
+  - buyer-app orderService 已补全 attachContract、directPayment、buyerConfirm、createFinancingRequest、buyerConfirmFinancing、buyerSignDebtAndPayFee、confirmLogisticsQuote、listEvents 接口。
+  - seller-app 已补全 statusMap（12-22）、sellerConfirm、createLogisticsBidding、confirmLogisticsQuote、reconcile、archive、listEvents 接口和操作按钮。
+  - admin 订单管理已补全 statusMap（12-22）、状态筛选、交易履约说明。
   - 仓储方/物流方/资金方工作台需要接各自履约动作。
 - [x] 后端：订单动作按采购、销售、仓储、物流、金融拆分服务权限。
 
@@ -177,7 +179,11 @@ P1：
 - [x] 订单状态机和 `order_events`。
 - [x] 仓库确认和合同签署占位。
 - [~] 前端接入订单状态机所有关键动作。
+  - buyer-app 和 seller-app 已补全新状态（12-22）的操作按钮和 API 接口。
+  - 仓储方/物流方/资金方工作台的履约动作（仓库确认、物流报价、融资审批/放款）尚未接入。
 - [~] 管理端订单详情展示 `order_events`、融资、质押、物流竞价和运输任务。
+  - admin 订单管理已补全 statusMap（12-22）、状态筛选、交易履约说明。
+  - 完整 `order_events` 事件列表、融资申请详情、货权质押记录、物流竞价/报价详情、运输任务跟踪尚未在订单详情 Drawer 中展示。
 
 P2：
 

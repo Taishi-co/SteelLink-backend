@@ -54,6 +54,85 @@ func NewOrderService() *OrderService {
 	}
 }
 
+func (s *OrderService) PreviewWarehousePreData(ctx context.Context, req *dto.DraftOrderPreviewRequest) ([]*dto.WarehousePreDataResponse, error) {
+	results := make([]*dto.WarehousePreDataResponse, 0, len(req.Items))
+	for _, item := range req.Items {
+		product, err := s.productRepo.FindByID(ctx, item.ProductID)
+		if err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		if product == nil {
+			return nil, ecode.ErrNotFound.WithMessage("商品不存在")
+		}
+		deliveryInfo := buildInitialDeliveryInfo(product)
+		sellerEnterprise, _ := s.enterpriseRepo.FindByID(ctx, product.EnterpriseID)
+		sellerName := ""
+		if sellerEnterprise != nil {
+			sellerName = sellerEnterprise.Name
+		}
+		canConfirm := deliveryInfo != nil && deliveryInfo.WarehouseEnterpriseID != 0
+		result := &dto.WarehousePreDataResponse{
+			ProductID:           product.ID,
+			ProductName:         product.Name,
+			SellerEnterpriseID:  product.EnterpriseID,
+			SellerName:          sellerName,
+			CanWarehouseConfirm: canConfirm,
+		}
+		if deliveryInfo != nil {
+			result.WarehouseID = deliveryInfo.WarehouseID
+			result.WarehouseServiceID = deliveryInfo.WarehouseServiceID
+			result.WarehouseEnterpriseID = deliveryInfo.WarehouseEnterpriseID
+			result.WarehouseName = deliveryInfo.WarehouseName
+			result.WarehouseCode = deliveryInfo.WarehouseCode
+			result.WarehouseProvince = deliveryInfo.WarehouseProvince
+			result.WarehouseCity = deliveryInfo.WarehouseCity
+			result.WarehouseDistrict = deliveryInfo.WarehouseDistrict
+			result.WarehouseAddress = deliveryInfo.WarehouseAddress
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (s *OrderService) ListProductPool(ctx context.Context) ([]*dto.ProductPoolItem, error) {
+	onSale := 2
+	products, _, err := s.productRepo.List(ctx, &productRepository.ProductQuery{
+		Status:   &onSale,
+		PageSize: 200,
+	})
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	items := make([]*dto.ProductPoolItem, 0, len(products))
+	for _, product := range products {
+		sellerEnterprise, _ := s.enterpriseRepo.FindByID(ctx, product.EnterpriseID)
+		sellerName := ""
+		if sellerEnterprise != nil {
+			sellerName = sellerEnterprise.Name
+		}
+		hasWarehouse := product.WarehouseInfo != nil && product.WarehouseEnterpriseID != 0
+		item := &dto.ProductPoolItem{
+			ID:                  product.ID,
+			ProductNo:           product.ProductNo,
+			Name:                product.Name,
+			Category:            product.Category,
+			SubCategory:         product.SubCategory,
+			SteelMill:           product.SteelMill,
+			UnitPrice:           product.UnitPrice,
+			AvailableQuantity:   product.AvailableQty,
+			HasWarehouseBinding: hasWarehouse,
+			SellerEnterpriseID:  product.EnterpriseID,
+			SellerName:          sellerName,
+		}
+		if hasWarehouse && product.WarehouseInfo != nil {
+			item.WarehouseName = product.WarehouseInfo.WarehouseName
+			item.WarehouseAddress = product.WarehouseInfo.Address
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, userID, buyerEnterpriseID uint64) (*dto.OrderInfo, error) {
 	if buyerEnterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能下单")
@@ -1703,6 +1782,9 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 	}
 
 	status := order.Status
+	isCancelled := status == orderEntity.OrderStatusCancelled
+	isException := status == orderEntity.OrderStatusException
+
 	items := []dto.TimelineItem{
 		{
 			Key:         "created",
@@ -1713,46 +1795,69 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		},
 	}
 
-	if orderStatusReached(status, orderEntity.OrderStatusPendingContract) {
+	skippedOrPending := func(reached bool) string {
+		if isCancelled || isException {
+			return "skipped"
+		}
+		if reached {
+			return "completed"
+		}
+		return "pending"
+	}
+
+	addItem := func(key, label, desc string, reached bool) {
+		s := skippedOrPending(reached)
+		var t *time.Time
+		if s == "completed" {
+			t = &order.UpdatedAt
+		}
 		items = append(items, dto.TimelineItem{
-			Key:         "order_confirmed",
-			Label:       "卖家确认订单",
-			Status:      "completed",
-			Time:        &order.UpdatedAt,
-			Description: "卖家已确认订单，等待双方签署合同。",
-		})
-	} else if status == orderEntity.OrderStatusPendingConfirm {
-		items = append(items, dto.TimelineItem{
-			Key:         "order_confirmed",
-			Label:       "卖家确认订单",
-			Status:      "current",
-			Description: "等待卖家确认订单。",
-		})
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "order_confirmed",
-			Label:       "卖家确认订单",
-			Status:      "skipped",
-			Description: "订单已关闭，卖家未确认。",
-		})
-	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "order_confirmed",
-			Label:       "卖家确认订单",
-			Status:      "pending",
-			Description: "等待卖家确认订单。",
+			Key:         key,
+			Label:       label,
+			Status:      s,
+			Time:        t,
+			Description: desc,
 		})
 	}
 
-	if orderStatusReached(status, orderEntity.OrderStatusPendingPayment) {
+	warehouseReached := orderStatusReached(status, orderEntity.OrderStatusPendingSellerConfirm)
+	if status == orderEntity.OrderStatusPendingWarehouseConfirm {
 		items = append(items, dto.TimelineItem{
-			Key:         "contract_signed",
-			Label:       "双方签署合同",
-			Status:      "completed",
-			Time:        &order.UpdatedAt,
-			Description: "买卖双方已签署合同，等待买家支付。",
+			Key:         "warehouse_confirm",
+			Label:       "仓储方确认仓库条件",
+			Status:      "current",
+			Description: "等待仓储方核验仓库条件并反馈。",
 		})
-	} else if status == orderEntity.OrderStatusPendingContract {
+	} else {
+		addItem("warehouse_confirm", "仓储方确认仓库条件", "仓储方已确认仓库条件。", warehouseReached)
+	}
+
+	sellerReached := orderStatusReached(status, orderEntity.OrderStatusPendingBuyerConfirm)
+	if status == orderEntity.OrderStatusPendingSellerConfirm {
+		items = append(items, dto.TimelineItem{
+			Key:         "seller_confirm",
+			Label:       "卖方确认条款",
+			Status:      "current",
+			Description: "等待卖方确认价格、数量和交付条款。",
+		})
+	} else {
+		addItem("seller_confirm", "卖方确认条款", "卖方已确认订单条款。", sellerReached)
+	}
+
+	buyerReached := orderStatusReached(status, orderEntity.OrderStatusPendingContract)
+	if status == orderEntity.OrderStatusPendingBuyerConfirm {
+		items = append(items, dto.TimelineItem{
+			Key:         "buyer_confirm",
+			Label:       "买方最终确认",
+			Status:      "current",
+			Description: "等待买方确认订单最终版本。",
+		})
+	} else {
+		addItem("buyer_confirm", "买方最终确认", "买方已确认订单。", buyerReached)
+	}
+
+	contractReached := orderStatusReached(status, orderEntity.OrderStatusPendingPayment)
+	if status == orderEntity.OrderStatusPendingContract {
 		buyerSigned := order.ContractInfo != nil && order.ContractInfo.BuyerSigned
 		sellerSigned := order.ContractInfo != nil && order.ContractInfo.SellerSigned
 		if buyerSigned || sellerSigned {
@@ -1780,170 +1885,144 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 				Description: "等待买卖双方签署合同。",
 			})
 		}
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "contract_signed",
-			Label:       "双方签署合同",
-			Status:      "skipped",
-			Description: "订单已关闭，合同未签署。",
-		})
 	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "contract_signed",
-			Label:       "双方签署合同",
-			Status:      "pending",
-			Description: "卖家确认订单后，双方签署合同。",
-		})
+		addItem("contract_signed", "双方签署合同", "买卖双方已签署合同。", contractReached)
 	}
 
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+	paymentReached := orderStatusReached(status, orderEntity.OrderStatusPaid)
+	if status == orderEntity.OrderStatusPendingPayment {
 		items = append(items, dto.TimelineItem{
-			Key:         "payment_uploaded",
-			Label:       "支付凭证上传",
-			Status:      "completed",
-			Time:        &order.PaymentInfo.PaymentTime,
-			Description: "买家已上传支付凭证，等待卖家确认收款。",
+			Key:         "payment",
+			Label:       "支付/融资选择",
+			Status:      "current",
+			Description: "当前待支付，请上传支付凭证或申请托盘融资。",
 		})
-	} else if status == orderEntity.OrderStatusCancelled {
+	} else if status == orderEntity.OrderStatusFinancingReview {
 		items = append(items, dto.TimelineItem{
-			Key:         "payment_uploaded",
-			Label:       "支付凭证上传",
-			Status:      "skipped",
-			Description: "订单已关闭，未上传支付凭证。",
+			Key:         "payment",
+			Label:       "托盘融资审批中",
+			Status:      "current",
+			Description: "资金方正在进行风控审批，请耐心等待。",
+		})
+	} else if status == orderEntity.OrderStatusPendingFinancingContract {
+		items = append(items, dto.TimelineItem{
+			Key:         "payment",
+			Label:       "待签署融资合同",
+			Status:      "current",
+			Description: "请签署债务合同并支付手续费。",
 		})
 	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment_uploaded",
-			Label:       "支付凭证上传",
-			Status:      "pending",
-			Description: "等待买家在支付截止前上传凭证。",
-		})
+		paymentDesc := "已完成支付。"
+		if !paymentReached && !isCancelled && !isException {
+			paymentDesc = "等待买方支付或申请托盘融资。"
+		}
+		addItem("payment", "支付/融资", paymentDesc, paymentReached)
 	}
 
-	if orderStatusReached(status, orderEntity.OrderStatusPendingDelivery) && status != orderEntity.OrderStatusCancelled {
+	if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract || orderStatusReached(status, orderEntity.OrderStatusPaid) {
+		financingReached := orderStatusReached(status, orderEntity.OrderStatusPaid)
+		if status == orderEntity.OrderStatusFinancingReview {
+			items = append(items, dto.TimelineItem{
+				Key:         "financing_review",
+				Label:       "融资审批",
+				Status:      "current",
+				Description: "资金方风控审批中。",
+			})
+		} else if status == orderEntity.OrderStatusPendingFinancingContract {
+			items = append(items, dto.TimelineItem{
+				Key:         "financing_contract",
+				Label:       "签署融资合同",
+				Status:      "current",
+				Description: "买方需签署债务合同并支付手续费。",
+			})
+		} else {
+			addItem("financing", "托盘融资", "融资已放款。", financingReached)
+		}
+	}
+
+	logisticsReached := orderStatusReached(status, orderEntity.OrderStatusShipping)
+	if status == orderEntity.OrderStatusLogisticsBidding {
 		items = append(items, dto.TimelineItem{
-			Key:         "payment_confirmed",
-			Label:       "卖家确认收款",
+			Key:         "logistics_bidding",
+			Label:       "物流竞价",
+			Status:      "current",
+			Description: "卖方已发起物流竞价，等待物流方报价。",
+		})
+	} else if status == orderEntity.OrderStatusPendingLogisticsConfirm {
+		items = append(items, dto.TimelineItem{
+			Key:         "logistics_confirm",
+			Label:       "确认物流资源",
+			Status:      "current",
+			Description: "等待买卖双方确认物流报价。",
+		})
+	} else {
+		addItem("logistics", "物流竞价与确认", "物流资源已确认，运输任务已下发。", logisticsReached)
+	}
+
+	shippingReached := orderStatusReached(status, orderEntity.OrderStatusDelivered)
+	if status == orderEntity.OrderStatusShipping {
+		items = append(items, dto.TimelineItem{
+			Key:         "shipping",
+			Label:       "运输中",
+			Status:      "current",
+			Description: "物流方已提货，正在运输途中。",
+		})
+	} else if status == orderEntity.OrderStatusDelivered {
+		items = append(items, dto.TimelineItem{
+			Key:         "shipping",
+			Label:       "运输中",
 			Status:      "completed",
 			Time:        &order.UpdatedAt,
-			Description: "卖家已确认收款，订单进入提货准备阶段。",
-		})
-	} else if status == orderEntity.OrderStatusPaid {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment_confirmed",
-			Label:       "卖家确认收款",
-			Status:      "current",
-			Description: "等待卖家核对支付凭证并确认收款。",
-		})
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment_confirmed",
-			Label:       "卖家确认收款",
-			Status:      "skipped",
-			Description: "订单已关闭，无需确认收款。",
+			Description: "物流方已送达，等待买方签收确认。",
 		})
 	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment_confirmed",
-			Label:       "卖家确认收款",
-			Status:      "pending",
-			Description: "买家上传支付凭证后由卖家确认。",
-		})
+		addItem("shipping", "运输交付", "物流方已送达货物。", shippingReached)
 	}
 
-	if order.DeliveryInfo != nil && order.DeliveryInfo.PickupCode != "" {
-		items = append(items, dto.TimelineItem{
-			Key:         "pickup_info",
-			Label:       "提货信息录入",
-			Status:      "completed",
-			Description: "买家已录入承运车辆、司机和送达地址，系统已生成提货码。",
-		})
-	} else if status == orderEntity.OrderStatusPendingDelivery {
-		items = append(items, dto.TimelineItem{
-			Key:         "pickup_info",
-			Label:       "提货信息录入",
-			Status:      "current",
-			Description: "等待买家录入提货车辆与送达地址。",
-		})
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "pickup_info",
-			Label:       "提货信息录入",
-			Status:      "skipped",
-			Description: "订单已关闭，无需录入提货信息。",
-		})
-	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "pickup_info",
-			Label:       "提货信息录入",
-			Status:      "pending",
-			Description: "卖家确认收款后，买家可录入提货信息。",
-		})
-	}
-
-	if orderStatusReached(status, orderEntity.OrderStatusDelivering) && status != orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "outbound",
-			Label:       "卖家确认出库",
-			Status:      "completed",
-			Time:        &order.UpdatedAt,
-			Description: "卖家已核验提货码并确认货物出库。",
-		})
-	} else if status == orderEntity.OrderStatusPendingDelivery && order.DeliveryInfo != nil && order.DeliveryInfo.PickupCode != "" {
-		items = append(items, dto.TimelineItem{
-			Key:         "outbound",
-			Label:       "卖家确认出库",
-			Status:      "current",
-			Description: "等待卖家核验提货码并确认出库。",
-		})
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "outbound",
-			Label:       "卖家确认出库",
-			Status:      "skipped",
-			Description: "订单已关闭，无需出库。",
-		})
-	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "outbound",
-			Label:       "卖家确认出库",
-			Status:      "pending",
-			Description: "提货信息录入后，由卖家确认出库。",
-		})
-	}
-
-	if status == orderEntity.OrderStatusReceived || status == orderEntity.OrderStatusReconciled || status == orderEntity.OrderStatusArchived || status == orderEntity.OrderStatusCompleted {
-		items = append(items, dto.TimelineItem{
-			Key:         "receipt",
-			Label:       "买家确认收货",
-			Status:      "completed",
-			Time:        order.ReceiptAt,
-			Description: "买家已确认收货并上传签收凭证，订单完成归档。",
-		})
-	} else if status == orderEntity.OrderStatusDelivering || status == orderEntity.OrderStatusShipping || status == orderEntity.OrderStatusDelivered {
+	receiptReached := orderStatusReached(status, orderEntity.OrderStatusReceived)
+	if status == orderEntity.OrderStatusDelivered {
 		items = append(items, dto.TimelineItem{
 			Key:         "receipt",
 			Label:       "买家确认收货",
 			Status:      "current",
 			Description: "等待买家确认收货并上传签收凭证。",
 		})
-	} else if status == orderEntity.OrderStatusCancelled {
-		items = append(items, dto.TimelineItem{
-			Key:         "receipt",
-			Label:       "买家确认收货",
-			Status:      "skipped",
-			Description: "订单已关闭，无需签收。",
-		})
 	} else {
-		items = append(items, dto.TimelineItem{
-			Key:         "receipt",
-			Label:       "买家确认收货",
-			Status:      "pending",
-			Description: "货物出库后，由买家确认收货。",
-		})
+		receiptDesc := "买家已确认收货。"
+		if !receiptReached && !isCancelled && !isException {
+			receiptDesc = "等待买家确认收货。"
+		}
+		addItem("receipt", "买家确认收货", receiptDesc, receiptReached)
+		if receiptReached {
+			items[len(items)-1].Time = order.ReceiptAt
+		}
 	}
 
-	if status == orderEntity.OrderStatusCancelled {
+	reconciledReached := orderStatusReached(status, orderEntity.OrderStatusReconciled)
+	if status == orderEntity.OrderStatusReceived {
+		items = append(items, dto.TimelineItem{
+			Key:         "reconciled",
+			Label:       "卖方对账确认",
+			Status:      "current",
+			Description: "等待卖方完成收款对账确认。",
+		})
+	} else {
+		addItem("reconciled", "卖方对账确认", "卖方已完成收款对账确认。", reconciledReached)
+	}
+
+	archivedReached := status == orderEntity.OrderStatusArchived
+	if status == orderEntity.OrderStatusReconciled {
+		items = append(items, dto.TimelineItem{
+			Key:         "archived",
+			Label:       "订单归档",
+			Status:      "current",
+			Description: "对账完成，等待归档。",
+		})
+	} else {
+		addItem("archived", "订单归档", "订单已归档。", archivedReached)
+	}
+
+	if isCancelled {
 		items = append(items, dto.TimelineItem{
 			Key:         "closed",
 			Label:       "订单关闭",
@@ -1952,22 +2031,14 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "订单已关闭，锁定库存已释放。",
 		})
 	}
-	if status == orderEntity.OrderStatusReconciled || status == orderEntity.OrderStatusArchived {
+
+	if isException {
 		items = append(items, dto.TimelineItem{
-			Key:         "reconciled",
-			Label:       "卖方对账确认",
+			Key:         "exception",
+			Label:       "订单异常",
 			Status:      "completed",
 			Time:        &order.UpdatedAt,
-			Description: "卖方已完成收款对账确认。",
-		})
-	}
-	if status == orderEntity.OrderStatusArchived {
-		items = append(items, dto.TimelineItem{
-			Key:         "archived",
-			Label:       "订单归档",
-			Status:      "completed",
-			Time:        &order.UpdatedAt,
-			Description: "订单已归档。",
+			Description: "订单进入异常状态，等待平台运营介入。",
 		})
 	}
 

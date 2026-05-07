@@ -28,8 +28,6 @@ import (
 	serviceOfferRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/infrastructure/router"
 	supplyDemandPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/supplydemand/infrastructure/persistence"
 	supplyDemandRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/supplydemand/infrastructure/router"
-	tradepersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/persistence"
-	tradeRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/trade/infrastructure/router"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	userRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/router"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
@@ -110,9 +108,6 @@ func main() {
 		}
 		if err := repairLegacyEnterpriseUserRoles(database.GetDB()); err != nil {
 			logger.Fatal("Failed to repair legacy enterprise user roles", zap.Error(err))
-		}
-		if err := tradepersistence.AutoMigrate(); err != nil {
-			logger.Fatal("Failed to auto migrate trade tables", zap.Error(err))
 		}
 		if err := supplyDemandPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate supply demand tables", zap.Error(err))
@@ -205,9 +200,7 @@ func main() {
 	aiProcurementRouter.RegisterRoutes(v1)
 	logger.Info("AI procurement routes registered")
 
-	logger.Info("Registering trade routes...")
-	tradeRouter.RegisterRoutes(v1.Group("/trade"))
-	logger.Info("Trade routes registered")
+	logger.Info("Trade routes removed (legacy module deleted)")
 
 	if cfg.Storage.Provider == "" || cfg.Storage.SecretID == "" {
 		localDir := os.Getenv("STORAGE_LOCAL_DIR")
