@@ -17,18 +17,20 @@ type ProductRepository interface {
 
 // ProductQuery 商品查询条件
 type ProductQuery struct {
-	Page          int
-	PageSize      int
-	Category      string
-	SubCategory   string
-	Keyword       string
-	SteelMill     string
-	Status        *int
-	EnterpriseID  uint64
-	MinUnitPrice  float64
-	MaxUnitPrice  float64
-	MinAvailable  float64
-	Province      string
-	City          string
-	SortBy        string
+	Page               int
+	PageSize           int
+	Category           string
+	SubCategory        string
+	Keyword            string
+	SteelMill          string
+	Status             *int
+	EnterpriseID       uint64
+	MinUnitPrice       float64
+	MaxUnitPrice       float64
+	MinAvailable       float64
+	Province           string
+	City               string
+	GoodsType          string
+	WarehouseServiceID uint64
+	SortBy             string
 }

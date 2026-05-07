@@ -89,6 +89,12 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 	if query.City != "" {
 		db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(warehouse_info, '$.city')) = ?", query.City)
 	}
+	if query.GoodsType != "" {
+		db = db.Where("goods_type = ?", query.GoodsType)
+	}
+	if query.WarehouseServiceID > 0 {
+		db = db.Where("warehouse_service_id = ?", query.WarehouseServiceID)
+	}
 
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err

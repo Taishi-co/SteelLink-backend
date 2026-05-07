@@ -14,46 +14,52 @@ type ProductSpec struct {
 }
 
 type WarehouseInfo struct {
-	WarehouseID   uint64 `json:"warehouse_id"`
-	WarehouseName string `json:"warehouse_name"`
-	WarehouseCode string `json:"warehouse_code"`
-	Address       string `json:"address"`
-	Province      string `json:"province"`
-	City          string `json:"city"`
-	District      string `json:"district"`
+	WarehouseID           uint64 `json:"warehouse_id"`
+	WarehouseServiceID    uint64 `json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"`
+	WarehouseName         string `json:"warehouse_name"`
+	WarehouseCode         string `json:"warehouse_code"`
+	Address               string `json:"address"`
+	Province              string `json:"province"`
+	City                  string `json:"city"`
+	District              string `json:"district"`
 }
 
 type CreateProductRequest struct {
-	Name          string        `json:"name" binding:"required,max=200"`
-	Category      string        `json:"category" binding:"required,max=50"`
-	SubCategory   string        `json:"sub_category" binding:"required,max=50"`
-	SteelMill     string        `json:"steel_mill" binding:"required,max=100"`
-	Spec          ProductSpec   `json:"spec" binding:"required"`
-	WarehouseInfo WarehouseInfo `json:"warehouse_info" binding:"required"`
-	BundleNo      string        `json:"bundle_no" binding:"required,max=100"`
-	Quantity      float64       `json:"quantity" binding:"required,gt=0"`
-	UnitPrice     float64       `json:"unit_price" binding:"required,gt=0"`
-	MinOrderQty   float64       `json:"min_order_qty" binding:"required,gt=0"`
-	Images        []string      `json:"images" binding:"required,min=1"`
-	QualityCert   string        `json:"quality_cert"`
-	Description   string        `json:"description"`
-	DeliveryDays  int           `json:"delivery_days"`
-	QuoteValidity int           `json:"quote_validity"`
+	Name               string        `json:"name" binding:"required,max=200"`
+	GoodsType          string        `json:"goods_type" binding:"omitempty,oneof=spot futures"`
+	Category           string        `json:"category" binding:"required,max=50"`
+	SubCategory        string        `json:"sub_category" binding:"required,max=50"`
+	SteelMill          string        `json:"steel_mill" binding:"required,max=100"`
+	Spec               ProductSpec   `json:"spec" binding:"required"`
+	WarehouseServiceID uint64        `json:"warehouse_service_id"`
+	WarehouseInfo      WarehouseInfo `json:"warehouse_info" binding:"required"`
+	BundleNo           string        `json:"bundle_no" binding:"required,max=100"`
+	Quantity           float64       `json:"quantity" binding:"required,gt=0"`
+	UnitPrice          float64       `json:"unit_price" binding:"required,gt=0"`
+	MinOrderQty        float64       `json:"min_order_qty" binding:"required,gt=0"`
+	Images             []string      `json:"images" binding:"required,min=1"`
+	QualityCert        string        `json:"quality_cert"`
+	Description        string        `json:"description"`
+	DeliveryDays       int           `json:"delivery_days"`
+	QuoteValidity      int           `json:"quote_validity"`
 }
 
 type UpdateProductRequest struct {
-	Name          string         `json:"name"`
-	Category      string         `json:"category"`
-	SubCategory   string         `json:"sub_category"`
-	SteelMill     string         `json:"steel_mill"`
-	Spec          *ProductSpec   `json:"spec"`
-	WarehouseInfo *WarehouseInfo `json:"warehouse_info"`
-	Quantity      float64        `json:"quantity"`
-	UnitPrice     float64        `json:"unit_price"`
-	MinOrderQty   float64        `json:"min_order_qty"`
-	Description   string         `json:"description"`
-	DeliveryDays  int            `json:"delivery_days"`
-	QuoteValidity int            `json:"quote_validity"`
+	Name               string         `json:"name"`
+	GoodsType          string         `json:"goods_type"`
+	Category           string         `json:"category"`
+	SubCategory        string         `json:"sub_category"`
+	SteelMill          string         `json:"steel_mill"`
+	Spec               *ProductSpec   `json:"spec"`
+	WarehouseServiceID uint64         `json:"warehouse_service_id"`
+	WarehouseInfo      *WarehouseInfo `json:"warehouse_info"`
+	Quantity           float64        `json:"quantity"`
+	UnitPrice          float64        `json:"unit_price"`
+	MinOrderQty        float64        `json:"min_order_qty"`
+	Description        string         `json:"description"`
+	DeliveryDays       int            `json:"delivery_days"`
+	QuoteValidity      int            `json:"quote_validity"`
 }
 
 type UpdateProductDisplayRequest struct {
@@ -65,51 +71,56 @@ type UpdateProductDisplayRequest struct {
 }
 
 type ProductInfo struct {
-	ID            uint64        `json:"id"`
-	ProductNo     string        `json:"product_no"`
-	Name          string        `json:"name"`
-	Category      string        `json:"category"`
-	SubCategory   string        `json:"sub_category"`
-	SteelMill     string        `json:"steel_mill"`
-	Spec          ProductSpec   `json:"spec"`
-	WarehouseInfo WarehouseInfo `json:"warehouse_info"`
-	BundleNo      string        `json:"bundle_no"`
-	Quantity      float64       `json:"quantity"`
-	AvailableQty  float64       `json:"available_qty"`
-	LockedQty     float64       `json:"locked_qty"`
-	UnitPrice     float64       `json:"unit_price"`
-	MinOrderQty   float64       `json:"min_order_qty"`
-	Currency      string        `json:"currency"`
-	TaxIncluded   bool          `json:"tax_included"`
-	TaxRate       float64       `json:"tax_rate"`
-	Status        int           `json:"status"`
-	EnterpriseID  uint64        `json:"enterprise_id"`
-	AuditRemark   string        `json:"audit_remark"`
-	ApprovedAt    *time.Time    `json:"approved_at,omitempty"`
-	QualityCert   string        `json:"quality_cert"`
-	Images        []string      `json:"images"`
-	Description   string        `json:"description"`
-	DeliveryDays  int           `json:"delivery_days"`
-	QuoteValidity int           `json:"quote_validity"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	ID                    uint64        `json:"id"`
+	ProductNo             string        `json:"product_no"`
+	Name                  string        `json:"name"`
+	GoodsType             string        `json:"goods_type"`
+	Category              string        `json:"category"`
+	SubCategory           string        `json:"sub_category"`
+	SteelMill             string        `json:"steel_mill"`
+	Spec                  ProductSpec   `json:"spec"`
+	WarehouseServiceID    uint64        `json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64        `json:"warehouse_enterprise_id"`
+	WarehouseInfo         WarehouseInfo `json:"warehouse_info"`
+	BundleNo              string        `json:"bundle_no"`
+	Quantity              float64       `json:"quantity"`
+	AvailableQty          float64       `json:"available_qty"`
+	LockedQty             float64       `json:"locked_qty"`
+	UnitPrice             float64       `json:"unit_price"`
+	MinOrderQty           float64       `json:"min_order_qty"`
+	Currency              string        `json:"currency"`
+	TaxIncluded           bool          `json:"tax_included"`
+	TaxRate               float64       `json:"tax_rate"`
+	Status                int           `json:"status"`
+	EnterpriseID          uint64        `json:"enterprise_id"`
+	AuditRemark           string        `json:"audit_remark"`
+	ApprovedAt            *time.Time    `json:"approved_at,omitempty"`
+	QualityCert           string        `json:"quality_cert"`
+	Images                []string      `json:"images"`
+	Description           string        `json:"description"`
+	DeliveryDays          int           `json:"delivery_days"`
+	QuoteValidity         int           `json:"quote_validity"`
+	CreatedAt             time.Time     `json:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at"`
 }
 
 type ProductListRequest struct {
-	Page         int     `form:"page" binding:"omitempty,min=1"`
-	PageSize     int     `form:"page_size" binding:"omitempty,min=1,max=100"`
-	Category     string  `form:"category"`
-	SubCategory  string  `form:"sub_category"`
-	Keyword      string  `form:"keyword"`
-	SteelMill    string  `form:"steel_mill"`
-	Status       *int    `form:"status"`
-	EnterpriseID uint64  `form:"enterprise_id"`
-	MinUnitPrice float64 `form:"min_unit_price"`
-	MaxUnitPrice float64 `form:"max_unit_price"`
-	MinAvailable float64 `form:"min_available"`
-	Province     string  `form:"province"`
-	City         string  `form:"city"`
-	SortBy       string  `form:"sort_by"`
+	Page               int     `form:"page" binding:"omitempty,min=1"`
+	PageSize           int     `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Category           string  `form:"category"`
+	SubCategory        string  `form:"sub_category"`
+	Keyword            string  `form:"keyword"`
+	SteelMill          string  `form:"steel_mill"`
+	Status             *int    `form:"status"`
+	EnterpriseID       uint64  `form:"enterprise_id"`
+	MinUnitPrice       float64 `form:"min_unit_price"`
+	MaxUnitPrice       float64 `form:"max_unit_price"`
+	MinAvailable       float64 `form:"min_available"`
+	Province           string  `form:"province"`
+	City               string  `form:"city"`
+	GoodsType          string  `form:"goods_type"`
+	WarehouseServiceID uint64  `form:"warehouse_service_id"`
+	SortBy             string  `form:"sort_by"`
 }
 
 type ProductListResponse struct {

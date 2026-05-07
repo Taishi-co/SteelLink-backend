@@ -13,10 +13,11 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/products/:id", middleware.OptionalAuth(), productHandler.GetByID)
 
 	products := r.Group("/products")
-	products.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("sales"))
+	products.Use(middleware.AuthRequired(), middleware.RequireTradeCapability("sales"))
 	{
 		products.POST("", productHandler.Create)
 		products.PUT("/:id/display", productHandler.UpdateDisplay)
-		products.PUT("/:id/status", productHandler.UpdateStatus)
 	}
+
+	r.PUT("/products/:id/status", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), productHandler.UpdateStatus)
 }

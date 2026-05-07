@@ -108,8 +108,8 @@ func (h *ProductHandler) List(c *gin.Context) {
 		return
 	}
 
-	// 游客态默认只返回已上架商品，确保商城展示和审核状态联动。
-	if middleware.GetClaims(c) == nil && req.Status == nil {
+	// 前台商城默认只返回已上架商品；卖家/管理场景可通过 enterprise_id 或 status 查询完整状态。
+	if req.EnterpriseID == 0 && req.Status == nil {
 		defaultStatus := 2
 		req.Status = &defaultStatus
 	}
