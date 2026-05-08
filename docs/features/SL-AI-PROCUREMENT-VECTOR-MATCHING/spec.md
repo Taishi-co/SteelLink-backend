@@ -44,18 +44,33 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 
 ### `ai_product_embeddings`
 
-- `entity_id`: 商品 ID
-- `entity_type`: `product`
+- `product_id`: 商品 ID
+- `product_no`: 商品编号
+- `product_name`: 商品名称
 - `enterprise_id`: 供应商企业 ID
-- `status`: 商品状态
-- `category`: 一级品类
-- `sub_category`: 二级品类
-- `province`, `city`: 仓库区域
-- `price`: 单价
-- `available_qty`: 可用库存
-- `text`: 用于 embedding 的商品文本
+- `category`: 优先使用商品子品类，缺省时使用一级品类
+- `source_updated_at`: MySQL `products.updated_at`，用于增量同步水位
+- `synced_at`: 写入 pgvector 的时间
 - `embedding`: 向量
-- `updated_at`: 同步时间
+
+当前商品向量表只保留检索索引所需的最小字段。商品状态、价格、库存、仓库、规格等业务字段继续以 MySQL `products` 为准，召回后再回查 MySQL 做业务过滤和展示，避免两边业务字段长期双写漂移。
+
+### `ai_product_embeddings_sync_state`
+
+- `target`: 同步目标，当前为 `products`
+- `last_source_updated_at`: 最近一次成功同步到 pgvector 的 MySQL 商品更新时间
+- `last_product_id`: 与 `last_source_updated_at` 配套的商品 ID，用于同一更新时间下的稳定断点
+- `updated_at`: 同步状态更新时间
+
+商品同步只按 `(products.updated_at, products.id)` 大于水位的记录增量处理，不在定时任务中重新扫描全表。历史 pgvector 表第一次升级时，如果没有同步状态，后端会以当前表内已有商品或当前 MySQL 商品水位初始化状态，避免定时任务退化为全量重跑。
+
+服务器定时任务由 `scripts/install-ai-vector-sync-cron.sh` 安装。脚本会在服务器构建 `cmd/aiprocurement-vector-sync`，生成 runner，并写入 cron：
+
+```cron
+*/30 * * * * /opt/steellink/bin/run-aiprocurement-vector-sync.sh
+```
+
+runner 从 `/etc/steellink/aiprocurement-vector-sync.env` 读取 `AI_PROCUREMENT_VECTOR_SYNC_ENDPOINT` 和 `AI_PROCUREMENT_VECTOR_SYNC_TOKEN`，并使用 `flock` 防止上一次同步未结束时并发执行。
 
 商品 embedding 文本建议：
 
@@ -135,7 +150,7 @@ AI 采购解析入口在 `ProcurementService.Parse`：
 
 - 增加 pgvector client。
 - 增加向量表初始化脚本。
-- 增加商品/供应商/融资产品 embedding 同步 job。
+- 增加商品 embedding 增量同步 job；供应商/融资产品同步保留预留 no-op。
 
 ### P2: 查询链路接入
 

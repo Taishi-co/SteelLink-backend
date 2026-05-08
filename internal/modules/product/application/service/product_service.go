@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
@@ -14,13 +15,15 @@ import (
 
 // ProductService 商品服务
 type ProductService struct {
-	productRepo repository.ProductRepository
+	productRepo  repository.ProductRepository
+	categoryRepo *persistence.ProductCategoryRepository
 }
 
 // NewProductService 创建商品服务
 func NewProductService() *ProductService {
 	return &ProductService{
-		productRepo: persistence.NewProductRepository(),
+		productRepo:  persistence.NewProductRepository(),
+		categoryRepo: persistence.NewProductCategoryRepository(),
 	}
 }
 
@@ -80,12 +83,85 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 	if product.QuoteValidity == 0 {
 		product.QuoteValidity = 72
 	}
+	if err := s.categoryRepo.EnsureByName(ctx, product.Category, operatorID); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建商品品类失败")
+	}
 
 	if err := s.productRepo.Create(ctx, product); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建商品失败")
 	}
 
 	return toProductInfo(product), nil
+}
+
+func (s *ProductService) ListCategories(ctx context.Context, req *dto.ProductCategoryListRequest) ([]*dto.ProductCategoryInfo, error) {
+	categories, err := s.categoryRepo.List(ctx, !req.IncludeDisabled)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	list := make([]*dto.ProductCategoryInfo, 0, len(categories))
+	for _, category := range categories {
+		list = append(list, toProductCategoryInfo(category))
+	}
+	return list, nil
+}
+
+func (s *ProductService) CreateCategory(ctx context.Context, req *dto.UpsertProductCategoryRequest, operatorID uint64) (*dto.ProductCategoryInfo, error) {
+	category := toProductCategory(req, operatorID)
+	if category.DisplayName == "" {
+		category.DisplayName = category.Name
+	}
+	if category.Status != entity.ProductCategoryDisabled {
+		category.Status = entity.ProductCategoryEnabled
+	}
+	if err := s.categoryRepo.Create(ctx, category); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建商品品类失败")
+	}
+	return toProductCategoryInfo(category), nil
+}
+
+func (s *ProductService) UpdateCategory(ctx context.Context, id uint64, req *dto.UpsertProductCategoryRequest, operatorID uint64) (*dto.ProductCategoryInfo, error) {
+	category, err := s.categoryRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if category == nil {
+		return nil, ecode.ErrNotFound.WithMessage("商品品类不存在")
+	}
+	category.ParentID = req.ParentID
+	category.Name = strings.TrimSpace(req.Name)
+	category.DisplayName = categoryDisplayName(req)
+	if category.DisplayName == "" {
+		category.DisplayName = category.Name
+	}
+	category.Code = strings.TrimSpace(req.Code)
+	category.Icon = strings.TrimSpace(req.Icon)
+	category.ImageURL = categoryImageURL(req)
+	category.Sort = req.Sort
+	if req.Status == entity.ProductCategoryDisabled {
+		category.Status = entity.ProductCategoryDisabled
+	} else {
+		category.Status = entity.ProductCategoryEnabled
+	}
+	category.UpdatedBy = operatorID
+	if err := s.categoryRepo.Update(ctx, category); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新商品品类失败")
+	}
+	return toProductCategoryInfo(category), nil
+}
+
+func (s *ProductService) DeleteCategory(ctx context.Context, id uint64) error {
+	category, err := s.categoryRepo.FindByID(ctx, id)
+	if err != nil {
+		return ecode.ErrDatabase
+	}
+	if category == nil {
+		return ecode.ErrNotFound.WithMessage("商品品类不存在")
+	}
+	if err := s.categoryRepo.Delete(ctx, id); err != nil {
+		return ecode.ErrDatabase.WithMessage("删除商品品类失败")
+	}
+	return nil
 }
 
 // GetByID 获取商品详情
@@ -287,6 +363,64 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		QuoteValidity:         product.QuoteValidity,
 		CreatedAt:             product.CreatedAt,
 		UpdatedAt:             product.UpdatedAt,
+	}
+}
+
+func toProductCategory(req *dto.UpsertProductCategoryRequest, operatorID uint64) *entity.ProductCategory {
+	name := strings.TrimSpace(req.Name)
+	displayName := categoryDisplayName(req)
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		code = name
+	}
+	return &entity.ProductCategory{
+		ParentID:    req.ParentID,
+		Name:        name,
+		DisplayName: displayName,
+		Code:        code,
+		Icon:        strings.TrimSpace(req.Icon),
+		ImageURL:    categoryImageURL(req),
+		Sort:        req.Sort,
+		Status:      req.Status,
+		CreatedBy:   operatorID,
+		UpdatedBy:   operatorID,
+	}
+}
+
+func categoryDisplayName(req *dto.UpsertProductCategoryRequest) string {
+	if value := strings.TrimSpace(req.DisplayName); value != "" {
+		return value
+	}
+	return strings.TrimSpace(req.DisplayNameCamel)
+}
+
+func categoryImageURL(req *dto.UpsertProductCategoryRequest) string {
+	if value := strings.TrimSpace(req.ImageURL); value != "" {
+		return value
+	}
+	return strings.TrimSpace(req.ImageURLCamel)
+}
+
+func toProductCategoryInfo(category *entity.ProductCategory) *dto.ProductCategoryInfo {
+	if category == nil {
+		return nil
+	}
+	displayName := category.DisplayName
+	if displayName == "" {
+		displayName = category.Name
+	}
+	return &dto.ProductCategoryInfo{
+		ID:          category.ID,
+		ParentID:    category.ParentID,
+		Name:        category.Name,
+		DisplayName: displayName,
+		Code:        category.Code,
+		Icon:        category.Icon,
+		ImageURL:    category.ImageURL,
+		Sort:        category.Sort,
+		Status:      category.Status,
+		CreatedAt:   category.CreatedAt,
+		UpdatedAt:   category.UpdatedAt,
 	}
 }
 

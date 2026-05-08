@@ -27,6 +27,7 @@ const (
 	PurposeReceiptVoucher       Purpose = "receipt_voucher"
 	PurposeIdentityCard         Purpose = "identity_card"
 	PurposeEnterpriseLicense    Purpose = "enterprise_license"
+	PurposeEnterpriseServiceDoc Purpose = "enterprise_service_document"
 )
 
 type UploadResult struct {
@@ -146,6 +147,10 @@ func (c *Client) target(purpose Purpose) (bucket, baseURL, prefix string, err er
 		bucket = c.cfg.PrivateBucket
 		baseURL = c.cfg.PrivateBaseURL
 		prefix = "enterprise/licenses"
+	case PurposeEnterpriseServiceDoc:
+		bucket = c.cfg.PrivateBucket
+		baseURL = c.cfg.PrivateBaseURL
+		prefix = "enterprise/service-documents"
 	default:
 		err = fmt.Errorf("invalid upload purpose")
 	}

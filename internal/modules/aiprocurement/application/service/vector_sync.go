@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
@@ -79,8 +80,15 @@ func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.Ve
 	embedder := embedding.NewClient(cfg)
 
 	var synced int
-	var lastID uint64
 	db := database.GetDB()
+	watermark, err := store.GetProductSyncWatermark(ctx)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessagef("read pgvector product sync watermark failed: %v", err)
+	}
+	watermark, err = normalizeProductSyncWatermark(ctx, db, store, watermark)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessagef("initialize product sync watermark failed: %v", err)
+	}
 	for {
 		remaining := req.Limit - synced
 		if req.Limit > 0 && remaining <= 0 {
@@ -90,7 +98,7 @@ func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.Ve
 		if req.Limit > 0 && remaining < currentBatchSize {
 			currentBatchSize = remaining
 		}
-		products, err := listProductsForVectorSync(ctx, db, lastID, currentBatchSize)
+		products, err := listProductsForVectorSync(ctx, db, watermark, currentBatchSize)
 		if err != nil {
 			return nil, ecode.ErrDatabase.WithMessagef("list products failed: %v", err)
 		}
@@ -104,33 +112,85 @@ func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.Ve
 				return nil, ecode.ErrInternal.WithMessagef("embed product %d failed: %v", product.ID, err)
 			}
 			if err := store.UpsertProduct(ctx, vectorstore.ProductEmbedding{
-				ProductID:    product.ID,
-				ProductNo:    product.ProductNo,
-				ProductName:  product.Name,
-				Category:     productCategory(product),
-				EnterpriseID: product.EnterpriseID,
-				Embedding:    vector,
+				ProductID:       product.ID,
+				ProductNo:       product.ProductNo,
+				ProductName:     product.Name,
+				Category:        productCategory(product),
+				EnterpriseID:    product.EnterpriseID,
+				SourceUpdatedAt: product.UpdatedAt,
+				Embedding:       vector,
 			}); err != nil {
 				return nil, ecode.ErrDatabase.WithMessagef("upsert product %d vector failed: %v", product.ID, err)
 			}
 			synced++
-			lastID = product.ID
+			watermark.SourceUpdatedAt = product.UpdatedAt
+			watermark.ProductID = product.ID
+			watermark.Initialized = true
+			if err := store.SaveProductSyncWatermark(ctx, watermark); err != nil {
+				return nil, ecode.ErrDatabase.WithMessagef("save product sync watermark failed: %v", err)
+			}
 		}
 	}
 
 	return &dto.VectorSyncResponse{
-		Target:  "products",
-		Synced:  synced,
-		LastID:  lastID,
-		Message: fmt.Sprintf("product vector sync complete count=%d", synced),
+		Target:              "products",
+		Synced:              synced,
+		LastID:              watermark.ProductID,
+		LastSourceUpdatedAt: watermark.SourceUpdatedAt,
+		Message:             fmt.Sprintf("product vector incremental sync complete count=%d", synced),
 	}, nil
 }
 
-func listProductsForVectorSync(ctx context.Context, db *gorm.DB, lastID uint64, limit int) ([]*productEntity.Product, error) {
+func normalizeProductSyncWatermark(ctx context.Context, db *gorm.DB, store *vectorstore.PGVectorClient, watermark vectorstore.ProductSyncWatermark) (vectorstore.ProductSyncWatermark, error) {
+	if watermark.Initialized {
+		return watermark, nil
+	}
+	if !isLegacyZeroWatermark(watermark.SourceUpdatedAt) && watermark.ProductID > 0 {
+		return watermark, nil
+	}
+	current, err := latestProductWatermark(ctx, db, watermark.ProductID)
+	if err != nil {
+		return watermark, err
+	}
+	if current.SourceUpdatedAt.IsZero() {
+		return watermark, nil
+	}
+	current.Initialized = true
+	if err := store.SaveProductSyncWatermark(ctx, current); err != nil {
+		return watermark, err
+	}
+	return current, nil
+}
+
+func latestProductWatermark(ctx context.Context, db *gorm.DB, maxProductID uint64) (vectorstore.ProductSyncWatermark, error) {
+	var product productEntity.Product
+	query := db.WithContext(ctx).Order("updated_at DESC, id DESC")
+	if maxProductID > 0 {
+		query = query.Where("id <= ?", maxProductID)
+	}
+	err := query.First(&product).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return vectorstore.ProductSyncWatermark{}, nil
+		}
+		return vectorstore.ProductSyncWatermark{}, err
+	}
+	return vectorstore.ProductSyncWatermark{
+		SourceUpdatedAt: product.UpdatedAt,
+		ProductID:       product.ID,
+		Initialized:     true,
+	}, nil
+}
+
+func isLegacyZeroWatermark(value time.Time) bool {
+	return value.IsZero() || value.Year() <= 1970
+}
+
+func listProductsForVectorSync(ctx context.Context, db *gorm.DB, watermark vectorstore.ProductSyncWatermark, limit int) ([]*productEntity.Product, error) {
 	var products []*productEntity.Product
 	err := db.WithContext(ctx).
-		Where("id > ?", lastID).
-		Order("id ASC").
+		Where("(updated_at > ?) OR (updated_at = ? AND id > ?)", watermark.SourceUpdatedAt, watermark.SourceUpdatedAt, watermark.ProductID).
+		Order("updated_at ASC, id ASC").
 		Limit(limit).
 		Find(&products).Error
 	return products, err

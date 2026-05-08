@@ -544,23 +544,48 @@ func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, par
 		matches[idx].DestinationAddress = destination
 		matches[idx].OriginWarehouseName = stringFromMap(matches[idx].Warehouse, "warehouse_name")
 		matches[idx].OriginAddress = buildWarehouseAddress(matches[idx].Warehouse)
-		if destination == "" {
+		if isNegotiatedLogistics(matches[idx]) {
+			matches[idx].LogisticsMatchStatus = "negotiation"
+			if strings.TrimSpace(matches[idx].LogisticsServiceName) == "" {
+				matches[idx].LogisticsServiceName = "协商解决"
+			}
+			if strings.TrimSpace(matches[idx].LogisticsRoute) == "" {
+				matches[idx].LogisticsRoute = "待买卖双方或平台协调"
+			}
+			matches[idx].FreightEstimate = 0
 			matches[idx].LandedTotal = matches[idx].TotalAmount
 			matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
 			continue
 		}
-		estimate := chooseBestLogisticsEstimate(matches[idx], carriers, destination)
-		matches[idx].LogisticsServiceID = estimate.ServiceID
-		matches[idx].LogisticsServiceName = estimate.ServiceName
-		matches[idx].LogisticsRoute = estimate.Route
-		matches[idx].FreightEstimate = estimate.Amount
-		matches[idx].LandedTotal = matches[idx].TotalAmount + estimate.Amount
-		matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
-		if estimate.ServiceName != "" {
-			matches[idx].MatchReason = strings.TrimSpace(matches[idx].MatchReason + "；已按收货地址估算平台物流到手价")
+		if destination == "" {
+			matches[idx].LogisticsMatchStatus = "destination_missing"
+			matches[idx].LandedTotal = matches[idx].TotalAmount
+			matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
+			continue
 		}
+		options := buildLogisticsOptions(matches[idx], carriers, destination)
+		matches[idx].LogisticsOptions = options
+		if len(options) == 0 {
+			matches[idx].LogisticsMatchStatus = "no_match"
+			matches[idx].LogisticsServiceID = 0
+			matches[idx].LogisticsServiceName = ""
+			matches[idx].LogisticsRoute = ""
+			matches[idx].FreightEstimate = 0
+			matches[idx].LandedTotal = matches[idx].TotalAmount
+			matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
+			matches[idx].MatchReason = strings.TrimSpace(matches[idx].MatchReason + "；暂无适合当前发货仓库和收货地点的物流方案")
+			continue
+		}
+		matches[idx].LogisticsMatchStatus = "matched"
+		applyLogisticsOption(&matches[idx], chooseLogisticsOption(matches[idx], options))
+		matches[idx].MatchReason = strings.TrimSpace(matches[idx].MatchReason + "；已按发货仓库和收货地点推荐物流方案")
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
+		leftMatched := matches[i].LogisticsMatchStatus == "matched"
+		rightMatched := matches[j].LogisticsMatchStatus == "matched"
+		if leftMatched != rightMatched {
+			return leftMatched
+		}
 		left := matches[i].LandedTotal
 		right := matches[j].LandedTotal
 		if left == 0 {
@@ -584,11 +609,9 @@ func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, par
 	return matches
 }
 
-type logisticsEstimate struct {
-	ServiceID   uint64
-	ServiceName string
-	Route       string
-	Amount      float64
+func isNegotiatedLogistics(match entity.MatchedProduct) bool {
+	return strings.TrimSpace(match.LogisticsMatchStatus) == "negotiation" ||
+		strings.TrimSpace(match.LogisticsServiceName) == "协商解决"
 }
 
 func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.LogisticsService {
@@ -604,32 +627,85 @@ func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.Log
 	return rows
 }
 
-func chooseBestLogisticsEstimate(match entity.MatchedProduct, carriers []serviceOfferEntity.LogisticsService, destination string) logisticsEstimate {
+func buildLogisticsOptions(match entity.MatchedProduct, carriers []serviceOfferEntity.LogisticsService, destination string) entity.LogisticsOptions {
 	origin := strings.TrimSpace(match.OriginAddress)
 	quantity := match.Quantity
 	if quantity <= 0 {
 		quantity = 1
 	}
-	best := logisticsEstimate{Amount: quantity * 80}
-	bestScore := -1
+	options := make(entity.LogisticsOptions, 0, len(carriers))
 	for _, carrier := range carriers {
+		routeScore := logisticsRouteScore(origin, destination, carrier)
+		if !isLogisticsCarrierSuitable(routeScore, quantity, carrier) {
+			continue
+		}
 		rate := extractPriceRate(carrier.PriceRule)
 		if rate <= 0 {
 			rate = 80
 		}
 		amount := rate * quantity
-		routeScore := logisticsRouteScore(origin, destination, carrier)
-		if best.ServiceID == 0 || amount < best.Amount || (math.Abs(amount-best.Amount) < 0.0001 && routeScore > bestScore) {
-			best = logisticsEstimate{
-				ServiceID:   carrier.ID,
-				ServiceName: carrier.Name,
-				Route:       strings.Trim(strings.TrimSpace(carrier.RouteStart)+" → "+strings.TrimSpace(carrier.RouteEnd), " →"),
-				Amount:      amount,
+		landedTotal := match.TotalAmount + amount
+		options = append(options, entity.LogisticsOption{
+			ServiceID:           carrier.ID,
+			ServiceName:         carrier.Name,
+			Route:               strings.Trim(strings.TrimSpace(carrier.RouteStart)+" → "+strings.TrimSpace(carrier.RouteEnd), " →"),
+			RouteStart:          carrier.RouteStart,
+			RouteEnd:            carrier.RouteEnd,
+			ServiceScope:        carrier.ServiceScope,
+			VehicleType:         carrier.VehicleType,
+			LoadCapacity:        carrier.LoadCapacity,
+			PriceRule:           carrier.PriceRule,
+			FreightEstimate:     amount,
+			UnitFreightEstimate: safeDiv(amount, quantity),
+			LandedTotal:         landedTotal,
+			UnitLandedPrice:     safeDiv(landedTotal, quantity),
+			Score:               routeScore,
+			MatchReason:         logisticsMatchReason(routeScore, origin, destination, carrier),
+		})
+	}
+	sort.SliceStable(options, func(i, j int) bool {
+		if options[i].Score != options[j].Score {
+			return options[i].Score > options[j].Score
+		}
+		if math.Abs(options[i].FreightEstimate-options[j].FreightEstimate) > 0.0001 {
+			return options[i].FreightEstimate < options[j].FreightEstimate
+		}
+		return options[i].ServiceID < options[j].ServiceID
+	})
+	if len(options) > 5 {
+		options = options[:5]
+	}
+	return options
+}
+
+func chooseLogisticsOption(match entity.MatchedProduct, options entity.LogisticsOptions) entity.LogisticsOption {
+	if match.LogisticsServiceID > 0 {
+		for _, option := range options {
+			if option.ServiceID == match.LogisticsServiceID {
+				return option
 			}
-			bestScore = routeScore
 		}
 	}
-	return best
+	return options[0]
+}
+
+func applyLogisticsOption(match *entity.MatchedProduct, option entity.LogisticsOption) {
+	match.LogisticsServiceID = option.ServiceID
+	match.LogisticsServiceName = option.ServiceName
+	match.LogisticsRoute = option.Route
+	match.FreightEstimate = option.FreightEstimate
+	match.LandedTotal = option.LandedTotal
+	match.UnitLandedPrice = option.UnitLandedPrice
+}
+
+func isLogisticsCarrierSuitable(routeScore int, quantity float64, carrier serviceOfferEntity.LogisticsService) bool {
+	if routeScore <= 0 {
+		return false
+	}
+	if carrier.LoadCapacity > 0 && quantity > carrier.LoadCapacity {
+		return false
+	}
+	return true
 }
 
 func logisticsRouteScore(origin, destination string, carrier serviceOfferEntity.LogisticsService) int {
@@ -647,6 +723,26 @@ func logisticsRouteScore(origin, destination string, carrier serviceOfferEntity.
 		score++
 	}
 	return score
+}
+
+func logisticsMatchReason(score int, origin, destination string, carrier serviceOfferEntity.LogisticsService) string {
+	reasons := make([]string, 0, 4)
+	if carrier.RouteStart != "" && strings.Contains(origin, carrier.RouteStart) {
+		reasons = append(reasons, "覆盖卖家发货地")
+	}
+	if carrier.RouteEnd != "" && strings.Contains(destination, carrier.RouteEnd) {
+		reasons = append(reasons, "覆盖买家收货地")
+	}
+	if carrier.ServiceScope != "" {
+		reasons = append(reasons, "服务范围匹配")
+	}
+	if carrier.LoadCapacity > 0 {
+		reasons = append(reasons, "载重满足")
+	}
+	if len(reasons) == 0 && score > 0 {
+		return "线路相近，可进一步确认"
+	}
+	return strings.Join(reasons, "、")
 }
 
 func extractPriceRate(rule string) float64 {
@@ -680,6 +776,18 @@ func stringFromMap(values map[string]any, key string) string {
 		return strings.TrimSpace(strings.Trim(strings.ReplaceAll(strings.TrimSpace(toString(value)), "<nil>", ""), "\""))
 	}
 	return ""
+}
+
+func uintFromMap(values map[string]any, key string) uint64 {
+	value := stringFromMap(values, key)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
 }
 
 func toString(value any) string {
@@ -763,21 +871,22 @@ func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
 }
 
 func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected entity.MatchedProducts, form dto.OrderForm, userID, enterpriseID uint64) ([]*orderDTO.OrderInfo, error) {
-	grouped := make(map[uint64]entity.MatchedProducts)
-	order := make([]uint64, 0)
+	grouped := make(map[string]entity.MatchedProducts)
+	order := make([]string, 0)
 	for _, item := range selected {
 		sellerID := item.EnterpriseID
 		if sellerID == 0 {
 			sellerID = item.ProductID
 		}
-		if _, exists := grouped[sellerID]; !exists {
-			order = append(order, sellerID)
+		groupKey := aiOrderGroupKey(sellerID, item)
+		if _, exists := grouped[groupKey]; !exists {
+			order = append(order, groupKey)
 		}
-		grouped[sellerID] = append(grouped[sellerID], item)
+		grouped[groupKey] = append(grouped[groupKey], item)
 	}
 	orders := make([]*orderDTO.OrderInfo, 0, len(grouped))
-	for _, sellerID := range order {
-		group := grouped[sellerID]
+	for _, groupKey := range order {
+		group := grouped[groupKey]
 		orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(group))
 		for _, item := range group {
 			orderItems = append(orderItems, orderDTO.CreateOrderItemRequest{
@@ -804,6 +913,34 @@ func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected 
 		orders = append(orders, orderInfo)
 	}
 	return orders, nil
+}
+
+func aiOrderGroupKey(sellerID uint64, item entity.MatchedProduct) string {
+	return strconv.FormatUint(sellerID, 10) + "|" + aiWarehouseSignature(item)
+}
+
+func aiWarehouseSignature(item entity.MatchedProduct) string {
+	if serviceID := uintFromMap(item.Warehouse, "warehouse_service_id"); serviceID > 0 {
+		return "service:" + strconv.FormatUint(serviceID, 10)
+	}
+	if warehouseID := uintFromMap(item.Warehouse, "warehouse_id"); warehouseID > 0 {
+		return "warehouse:" + strconv.FormatUint(warehouseID, 10)
+	}
+	parts := []string{
+		stringFromMap(item.Warehouse, "warehouse_name"),
+		stringFromMap(item.Warehouse, "warehouse_code"),
+		stringFromMap(item.Warehouse, "province"),
+		stringFromMap(item.Warehouse, "city"),
+		stringFromMap(item.Warehouse, "district"),
+		stringFromMap(item.Warehouse, "address"),
+	}
+	if nonEmpty := nonEmptyStrings(parts); len(nonEmpty) > 0 {
+		return strings.TrimSpace(strings.Join(parts, "|"))
+	}
+	if item.OriginWarehouseName != "" || item.OriginAddress != "" {
+		return strings.TrimSpace(item.OriginWarehouseName + "|" + item.OriginAddress)
+	}
+	return "unbound:" + strconv.FormatUint(item.ProductID, 10)
 }
 
 func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {
