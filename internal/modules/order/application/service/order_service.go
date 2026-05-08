@@ -543,13 +543,29 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	if order.Status != orderEntity.OrderStatusPendingWarehouseConfirm {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可仓库确认")
 	}
-	if req != nil && !req.Confirmed {
-		return nil, ecode.ErrBadRequest.WithMessage("仓库条件未确认")
-	}
 	fromStatus := order.Status
+	db := database.GetDB()
+	
+	if req != nil && !req.Confirmed {
+		order.Status = orderEntity.OrderStatusPendingConfirm
+		order.UpdatedBy = operatorID
+		if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(order).Error; err != nil {
+				return err
+			}
+			payload := orderEntity.OrderEventPayload{}
+			if req != nil {
+				payload["condition_note"] = strings.TrimSpace(req.ConditionNote)
+			}
+			return createOrderEvent(tx, ctx, order, "warehouse_rejected", operatorID, warehouseEnterpriseID, "warehouse", fromStatus, order.Status, payload)
+		}); err != nil {
+			return nil, ecode.ErrDatabase.WithMessage("仓库条件驳回失败")
+		}
+		return toOrderInfo(order), nil
+	}
+	
 	order.Status = orderEntity.OrderStatusPendingSellerConfirm
 	order.UpdatedBy = operatorID
-	db := database.GetDB()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(order).Error; err != nil {
 			return err
