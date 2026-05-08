@@ -124,6 +124,19 @@ func TestNormalizeParsedInstructionUsesExplicitCategoryHint(t *testing.T) {
 	}
 }
 
+func TestChooseConfiguredCategoryPrefersConfiguredSpecificCategory(t *testing.T) {
+	parsed := parseInstructionByRule("我想采购100吨冷轧")
+	categories := []configuredProductCategory{
+		{Name: "热轧板卷", DisplayName: "热轧板卷"},
+		{Name: "冷轧板卷", DisplayName: "冷轧板卷"},
+	}
+
+	got := chooseConfiguredCategory(parsed, "我想采购100吨冷轧", categories)
+	if got != "冷轧板卷" {
+		t.Fatalf("configured category = %q, want 冷轧板卷", got)
+	}
+}
+
 func TestModelParserRequestURLCompletesAnthropicBasePath(t *testing.T) {
 	got := modelParserRequestURL("https://api.minimaxi.com/anthropic")
 	want := "https://api.minimaxi.com/anthropic/v1/messages"

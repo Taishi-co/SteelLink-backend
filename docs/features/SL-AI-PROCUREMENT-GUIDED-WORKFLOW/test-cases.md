@@ -17,6 +17,7 @@
 | TC-06 | 不需要融资 | 订单已生成且融资需求为 false | 调用 `POST /ai-procurements/:id/match-finance` | 返回空融资方案并进入审核提交阶段 |
 | TC-07 | 提交并保存历史 | 订单已生成 | 调用 `POST /ai-procurements/:id/submit-review` 且 `save_history=true` | 状态更新为审核提交，记录出现在我的AI采购 |
 | TC-08 | 显式品类解析 | 已开启大模型解析 | 输入 `我想买100吨的钢，品类为热轧板卷` 调用 `POST /ai-procurements/parse` | 返回 `product_name=钢`、`category=热轧板卷`、`quantity=100`、`unit=吨` |
+| TC-09 | 品类配置归一化 | 后台商品品类启用 `冷轧板卷`，无启用 `冷轧` | 输入 `我想采购100吨冷轧` 调用 `POST /ai-procurements/parse` | 规则兜底或模型解析后都返回 `category=冷轧板卷`，不再返回旧硬编码 `冷轧` |
 
 ## Exception Path
 

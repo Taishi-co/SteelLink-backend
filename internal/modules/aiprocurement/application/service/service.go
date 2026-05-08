@@ -66,6 +66,7 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 			zap.Float64("confidence", parsed.Confidence),
 		)
 	}
+	s.applyConfiguredCategory(ctx, &parsed, prompt)
 	return &dto.ParseResponse{
 		Parsed:          parsed,
 		MatchedProducts: entity.MatchedProducts{},
@@ -78,6 +79,7 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 
 func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.ConfirmInstructionRequest) (*dto.ParseResponse, error) {
 	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	s.applyConfiguredCategory(ctx, &parsed, req.Prompt)
 	return &dto.ParseResponse{
 		Parsed:          parsed,
 		MatchedProducts: entity.MatchedProducts{},
@@ -91,6 +93,7 @@ func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.Co
 func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
+	s.applyConfiguredCategory(ctx, &parsed, "")
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
@@ -103,6 +106,7 @@ func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchPr
 
 func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *dto.MatchLogisticsWarehouseRequest) (*dto.MatchLogisticsWarehouseResponse, error) {
 	parsed := normalizeParsedInput(req.Parsed, "")
+	s.applyConfiguredCategory(ctx, &parsed, "")
 	selectedProducts := normalizeMatchedProducts(req.SelectedProducts)
 	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再匹配物流仓储")
@@ -129,6 +133,7 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能生成AI采购订单")
 	}
 	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	s.applyConfiguredCategory(ctx, &parsed, req.Prompt)
 	selectedProducts := normalizeSelectedProducts(req)
 	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再生成订单")
@@ -367,6 +372,132 @@ func normalizeParsedInput(parsed entity.ParsedInstruction, prompt string) entity
 	parsed.DeliveryWarehouseName = strings.TrimSpace(parsed.DeliveryWarehouseName)
 	normalizeParsedInstruction(&parsed, prompt)
 	return parsed
+}
+
+type configuredProductCategory struct {
+	Name        string
+	DisplayName string
+}
+
+func (s *ProcurementService) applyConfiguredCategory(ctx context.Context, parsed *entity.ParsedInstruction, prompt string) {
+	if parsed == nil {
+		return
+	}
+	categories, err := loadConfiguredProductCategories(ctx)
+	if err != nil {
+		logAIProcurementWarn("AI procurement category config lookup failed",
+			zap.String("category", parsed.Category),
+			zap.Error(err),
+		)
+		return
+	}
+	category := chooseConfiguredCategory(*parsed, prompt, categories)
+	if category == "" || category == parsed.Category {
+		return
+	}
+	logAIProcurementInfo("AI procurement category normalized by configured categories",
+		zap.String("from", parsed.Category),
+		zap.String("to", category),
+		zap.String("product_name", parsed.ProductName),
+	)
+	parsed.Category = category
+	if category != "" && !containsString(parsed.Keywords, category) {
+		parsed.Keywords = append(parsed.Keywords, category)
+	}
+}
+
+func loadConfiguredProductCategories(ctx context.Context) ([]configuredProductCategory, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, nil
+	}
+	var categories []configuredProductCategory
+	err := db.WithContext(ctx).Raw(`
+		SELECT name, COALESCE(display_name, '') AS display_name
+		FROM product_categories
+		WHERE status = 1 AND deleted_at IS NULL
+		ORDER BY sort ASC, id ASC`).Scan(&categories).Error
+	if err != nil {
+		return nil, err
+	}
+	return categories, nil
+}
+
+func chooseConfiguredCategory(parsed entity.ParsedInstruction, prompt string, categories []configuredProductCategory) string {
+	type match struct {
+		name  string
+		score int
+	}
+	sourceCategory := strings.TrimSpace(parsed.Category)
+	if sourceCategory == "" && strings.TrimSpace(prompt) == "" && strings.TrimSpace(parsed.ProductName) == "" {
+		return ""
+	}
+	for _, category := range categories {
+		for _, value := range configuredCategoryValues(category) {
+			if sourceCategory != "" && value == sourceCategory {
+				return category.Name
+			}
+		}
+	}
+
+	haystack := strings.Join([]string{prompt, parsed.ProductName, sourceCategory}, " ")
+	best := match{}
+	for _, category := range categories {
+		name := strings.TrimSpace(category.Name)
+		if name == "" {
+			continue
+		}
+		for _, value := range configuredCategoryValues(category) {
+			score := configuredCategoryScore(value, sourceCategory, haystack)
+			if score > best.score || (score == best.score && len([]rune(name)) > len([]rune(best.name))) {
+				best = match{name: name, score: score}
+			}
+		}
+	}
+	return best.name
+}
+
+func configuredCategoryValues(category configuredProductCategory) []string {
+	values := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	for _, value := range []string{category.Name, category.DisplayName} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+func configuredCategoryScore(value, sourceCategory, haystack string) int {
+	if value == "" {
+		return 0
+	}
+	valueLen := len([]rune(value))
+	switch {
+	case strings.Contains(haystack, value):
+		return 100 + valueLen
+	case sourceCategory != "" && strings.Contains(value, sourceCategory):
+		return 80 + valueLen
+	case sourceCategory != "" && strings.Contains(sourceCategory, value):
+		return 70 + valueLen
+	default:
+		return 0
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
