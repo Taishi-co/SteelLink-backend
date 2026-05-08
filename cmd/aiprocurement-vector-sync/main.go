@@ -46,7 +46,7 @@ func main() {
 	flag.StringVar(&opts.token, "token", "", "backend vector sync token; prefer token env in production")
 	flag.StringVar(&opts.tokenEnv, "token-env", "AI_PROCUREMENT_VECTOR_SYNC_TOKEN", "environment variable that stores backend vector sync token")
 	flag.StringVar(&opts.target, "target", "products", "sync target: products, suppliers, finance, all")
-	flag.StringVar(&opts.schedule, "schedule", "manual", "schedule: manual, minute, hour, day")
+	flag.StringVar(&opts.schedule, "schedule", "manual", "schedule: manual, minute, hour, day, or a Go duration such as 30m")
 	flag.IntVar(&opts.batchSize, "batch-size", 100, "products per backend batch")
 	flag.IntVar(&opts.limit, "limit", 0, "max products to sync, 0 means no limit")
 	flag.BoolVar(&opts.createSchema, "create-schema", true, "ask backend to create pgvector extension/table/indexes when possible")
@@ -125,7 +125,11 @@ func parseSchedule(value string) (time.Duration, bool, error) {
 	case "day", "daily":
 		return 24 * time.Hour, false, nil
 	default:
-		return 0, false, fmt.Errorf("unsupported schedule %q", value)
+		interval, err := time.ParseDuration(value)
+		if err != nil || interval <= 0 {
+			return 0, false, fmt.Errorf("unsupported schedule %q", value)
+		}
+		return interval, false, nil
 	}
 }
 
