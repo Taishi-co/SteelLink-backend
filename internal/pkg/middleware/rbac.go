@@ -105,7 +105,19 @@ func RequireProviderService(services ...string) gin.HandlerFunc {
 }
 
 func RequireFulfillmentParticipant() gin.HandlerFunc {
-	return RequireEnterpriseService("procurement", "sales", "warehouse", "logistics", "finance")
+	return func(c *gin.Context) {
+		claims := GetClaims(c)
+		if claims == nil {
+			response.Unauthorized(c, "未登录")
+			c.Abort()
+			return
+		}
+		if claims.UserType == string(entity.TypeOperator) || claims.UserType == string(entity.TypeSuperAdmin) {
+			c.Next()
+			return
+		}
+		RequireEnterpriseService("procurement", "sales", "warehouse", "logistics", "finance")(c)
+	}
 }
 
 func GetEnterpriseCode(c *gin.Context) string {
