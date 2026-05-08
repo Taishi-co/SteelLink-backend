@@ -94,6 +94,113 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 	return toProductInfo(product), nil
 }
 
+// Update 更新卖家自有商品。商品关键字段变化后重新进入待审核状态。
+func (s *ProductService) Update(ctx context.Context, id uint64, req *dto.CreateProductRequest, operatorID, enterpriseID uint64) (*dto.ProductInfo, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业用户才能修改商品")
+	}
+
+	product, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if product == nil {
+		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
+	}
+	if product.EnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权修改该商品")
+	}
+	if len(req.Images) == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请至少保留 1 张商品主图")
+	}
+
+	goodsType, err := normalizeGoodsType(req.GoodsType)
+	if err != nil {
+		return nil, err
+	}
+	warehouseInfo, warehouseServiceID, warehouseEnterpriseID, err := resolveProductWarehouse(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	product.Name = req.Name
+	product.GoodsType = goodsType
+	product.Category = req.Category
+	product.SubCategory = req.SubCategory
+	product.SteelMill = req.SteelMill
+	product.Spec = &entity.ProductSpec{
+		Material:   req.Spec.Material,
+		Spec:       req.Spec.Spec,
+		Thickness:  req.Spec.Thickness,
+		Width:      req.Spec.Width,
+		Length:     req.Spec.Length,
+		Surface:    req.Spec.Surface,
+		Edge:       req.Spec.Edge,
+		Processing: req.Spec.Processing,
+	}
+	product.WarehouseServiceID = warehouseServiceID
+	product.WarehouseEnterpriseID = warehouseEnterpriseID
+	product.WarehouseInfo = warehouseInfo
+	product.BundleNo = req.BundleNo
+	product.Quantity = req.Quantity
+	product.AvailableQty = req.Quantity - product.LockedQty
+	if product.AvailableQty < 0 {
+		product.AvailableQty = 0
+	}
+	product.UnitPrice = req.UnitPrice
+	product.MinOrderQty = req.MinOrderQty
+	product.Images = entity.StringList(req.Images)
+	product.QualityCert = req.QualityCert
+	product.Description = req.Description
+	product.DeliveryDays = req.DeliveryDays
+	product.QuoteValidity = req.QuoteValidity
+	if product.DeliveryDays == 0 {
+		product.DeliveryDays = 3
+	}
+	if product.QuoteValidity == 0 {
+		product.QuoteValidity = 72
+	}
+	product.Status = entity.ProductStatusPending
+	product.AuditRemark = ""
+	product.ApprovedAt = nil
+	product.UpdatedBy = operatorID
+
+	if err := s.categoryRepo.EnsureByName(ctx, product.Category, operatorID); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("创建商品品类失败")
+	}
+	if err := s.productRepo.Update(ctx, product); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新商品失败")
+	}
+
+	return toProductInfo(product), nil
+}
+
+// Delete 删除卖家自有商品。存在锁定库存时拒绝删除，避免影响已生成订单。
+func (s *ProductService) Delete(ctx context.Context, id uint64, operatorID, enterpriseID uint64) error {
+	if enterpriseID == 0 {
+		return ecode.ErrBadRequest.WithMessage("企业用户才能删除商品")
+	}
+
+	product, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return ecode.ErrDatabase
+	}
+	if product == nil {
+		return ecode.ErrNotFound.WithMessage("商品不存在")
+	}
+	if product.EnterpriseID != enterpriseID {
+		return ecode.ErrForbidden.WithMessage("无权删除该商品")
+	}
+	if product.LockedQty > 0 {
+		return ecode.ErrBadRequest.WithMessage("商品存在锁定库存，不能删除")
+	}
+	product.UpdatedBy = operatorID
+	if err := s.productRepo.Delete(ctx, product); err != nil {
+		return ecode.ErrDatabase.WithMessage("删除商品失败")
+	}
+	return nil
+}
+
 func (s *ProductService) ListCategories(ctx context.Context, req *dto.ProductCategoryListRequest) ([]*dto.ProductCategoryInfo, error) {
 	categories, err := s.categoryRepo.List(ctx, !req.IncludeDisabled)
 	if err != nil {

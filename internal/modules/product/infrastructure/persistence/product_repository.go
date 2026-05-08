@@ -29,6 +29,10 @@ func (r *productRepository) Update(ctx context.Context, product *entity.Product)
 	return r.db.WithContext(ctx).Save(product).Error
 }
 
+func (r *productRepository) Delete(ctx context.Context, product *entity.Product) error {
+	return r.db.WithContext(ctx).Delete(product).Error
+}
+
 func (r *productRepository) FindByID(ctx context.Context, id uint64) (*entity.Product, error) {
 	var product entity.Product
 	if err := r.db.WithContext(ctx).First(&product, id).Error; err != nil {
