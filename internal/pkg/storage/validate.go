@@ -9,11 +9,11 @@ import (
 func ValidateExtension(purpose Purpose, filename string) error {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch purpose {
-	case PurposeProductImage, PurposeIdentityCard, PurposeEnterpriseLicense:
+	case PurposeProductImage, PurposeIdentityCard:
 		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
 			return fmt.Errorf("%s files only support jpg, jpeg, png, webp", purpose)
 		}
-	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher:
+	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher, PurposeEnterpriseLicense, PurposeEnterpriseServiceDoc:
 		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp", ".pdf") {
 			return fmt.Errorf("%s files only support jpg, jpeg, png, webp, pdf", purpose)
 		}
