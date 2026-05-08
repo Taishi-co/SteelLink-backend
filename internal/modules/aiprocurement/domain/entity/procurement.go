@@ -57,36 +57,58 @@ func (p *ParsedInstruction) Scan(value interface{}) error {
 }
 
 type MatchedProduct struct {
-	ProductID            uint64         `json:"product_id"`
-	ProductNo            string         `json:"product_no"`
-	ProductName          string         `json:"product_name"`
-	Category             string         `json:"category"`
-	SteelMill            string         `json:"steel_mill"`
-	Quantity             float64        `json:"quantity"`
-	AvailableQty         float64        `json:"available_qty"`
-	UnitPrice            float64        `json:"unit_price"`
-	TotalAmount          float64        `json:"total_amount"`
-	Score                int            `json:"score"`
-	MatchReason          string         `json:"match_reason"`
-	EnterpriseID         uint64         `json:"enterprise_id"`
-	Spec                 map[string]any `json:"spec,omitempty"`
-	Warehouse            map[string]any `json:"warehouse,omitempty"`
-	BundleNo             string         `json:"bundle_no,omitempty"`
-	DeliveryDays         int            `json:"delivery_days,omitempty"`
-	QuoteValidity        int            `json:"quote_validity,omitempty"`
-	QualityCert          string         `json:"quality_cert,omitempty"`
-	Description          string         `json:"description,omitempty"`
-	OriginWarehouseName  string         `json:"origin_warehouse_name,omitempty"`
-	OriginAddress        string         `json:"origin_address,omitempty"`
-	DestinationAddress   string         `json:"destination_address,omitempty"`
-	LogisticsServiceID   uint64         `json:"logistics_service_id,omitempty"`
-	LogisticsServiceName string         `json:"logistics_service_name,omitempty"`
-	LogisticsRoute       string         `json:"logistics_route,omitempty"`
-	FreightEstimate      float64        `json:"freight_estimate,omitempty"`
-	LandedTotal          float64        `json:"landed_total,omitempty"`
-	UnitLandedPrice      float64        `json:"unit_landed_price,omitempty"`
-	Selected             bool           `json:"selected,omitempty"`
+	ProductID            uint64           `json:"product_id"`
+	ProductNo            string           `json:"product_no"`
+	ProductName          string           `json:"product_name"`
+	Category             string           `json:"category"`
+	SteelMill            string           `json:"steel_mill"`
+	Quantity             float64          `json:"quantity"`
+	AvailableQty         float64          `json:"available_qty"`
+	UnitPrice            float64          `json:"unit_price"`
+	TotalAmount          float64          `json:"total_amount"`
+	Score                int              `json:"score"`
+	MatchReason          string           `json:"match_reason"`
+	EnterpriseID         uint64           `json:"enterprise_id"`
+	Spec                 map[string]any   `json:"spec,omitempty"`
+	Warehouse            map[string]any   `json:"warehouse,omitempty"`
+	BundleNo             string           `json:"bundle_no,omitempty"`
+	DeliveryDays         int              `json:"delivery_days,omitempty"`
+	QuoteValidity        int              `json:"quote_validity,omitempty"`
+	QualityCert          string           `json:"quality_cert,omitempty"`
+	Description          string           `json:"description,omitempty"`
+	OriginWarehouseName  string           `json:"origin_warehouse_name,omitempty"`
+	OriginAddress        string           `json:"origin_address,omitempty"`
+	DestinationAddress   string           `json:"destination_address,omitempty"`
+	LogisticsServiceID   uint64           `json:"logistics_service_id,omitempty"`
+	LogisticsServiceName string           `json:"logistics_service_name,omitempty"`
+	LogisticsRoute       string           `json:"logistics_route,omitempty"`
+	LogisticsOptions     LogisticsOptions `json:"logistics_options,omitempty"`
+	LogisticsMatchStatus string           `json:"logistics_match_status,omitempty"`
+	FreightEstimate      float64          `json:"freight_estimate,omitempty"`
+	LandedTotal          float64          `json:"landed_total,omitempty"`
+	UnitLandedPrice      float64          `json:"unit_landed_price,omitempty"`
+	Selected             bool             `json:"selected,omitempty"`
 }
+
+type LogisticsOption struct {
+	ServiceID           uint64  `json:"service_id"`
+	ServiceName         string  `json:"service_name"`
+	Route               string  `json:"route"`
+	RouteStart          string  `json:"route_start,omitempty"`
+	RouteEnd            string  `json:"route_end,omitempty"`
+	ServiceScope        string  `json:"service_scope,omitempty"`
+	VehicleType         string  `json:"vehicle_type,omitempty"`
+	LoadCapacity        float64 `json:"load_capacity,omitempty"`
+	PriceRule           string  `json:"price_rule,omitempty"`
+	FreightEstimate     float64 `json:"freight_estimate"`
+	UnitFreightEstimate float64 `json:"unit_freight_estimate"`
+	LandedTotal         float64 `json:"landed_total"`
+	UnitLandedPrice     float64 `json:"unit_landed_price"`
+	Score               int     `json:"score"`
+	MatchReason         string  `json:"match_reason"`
+}
+
+type LogisticsOptions []LogisticsOption
 
 type MatchedProducts []MatchedProduct
 
