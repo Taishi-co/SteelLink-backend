@@ -13,6 +13,8 @@
 | TC-02 | 多商品拼单生成订单快照 | 已选 A/B 两个商品且数量合计等于采购量 | 调用 `generate-order` | 真实订单按卖家拆单，AI采购 `order_draft.order_detail` 包含商品金额和预估运费 |
 | TC-03 | 平台仓库作为收货地址 | 前端传入 `delivery_address_source=buyer_warehouse` | 调用物流仓储匹配接口 | 匹配排序使用该仓库地址作为目的地 |
 | TC-04 | 用户选择非默认物流 | `match-logistics-warehouse` 返回多个可选方案 | 前端把用户选择的 `logistics_service_id` 传给 `generate-order` | 生成订单前重算时保留用户选择的物流方案 |
+| TC-05 | 同卖家跨发货仓拆单 | 同一卖家下 A/B 商品分别绑定不同发货仓 | 调用 `generate-order` | AI采购按卖家+发货仓拆成多张真实订单，不触发跨仓库错误 |
+| TC-06 | 协商物流生成订单 | 物流仓储匹配无候选方案且前端选择协商解决 | 调用 `generate-order` | 后端保留 `logistics_match_status=negotiation` 和协商物流信息，不强制重新匹配物流商 |
 
 ## Exception Path
 
