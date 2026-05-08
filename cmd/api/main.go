@@ -173,6 +173,7 @@ func main() {
 	{
 		// Health check under API
 		v1.GET("/health", handler.Health)
+		v1.GET("/platform/stats", handler.PlatformStats)
 		v1.POST("/uploads", middleware.AuthRequired(), handler.UploadFile)
 	}
 
