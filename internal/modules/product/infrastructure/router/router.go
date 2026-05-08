@@ -9,6 +9,7 @@ import (
 func RegisterRoutes(r *gin.RouterGroup) {
 	productHandler := handler.NewProductHandler()
 
+	r.GET("/product-categories", productHandler.ListCategories)
 	r.GET("/products", middleware.OptionalAuth(), productHandler.List)
 	r.GET("/products/:id", middleware.OptionalAuth(), productHandler.GetByID)
 
@@ -20,4 +21,12 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	r.PUT("/products/:id/status", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), productHandler.UpdateStatus)
+
+	categories := r.Group("/product-categories")
+	categories.Use(middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"))
+	{
+		categories.POST("", productHandler.CreateCategory)
+		categories.PUT("/:id", productHandler.UpdateCategory)
+		categories.DELETE("/:id", productHandler.DeleteCategory)
+	}
 }

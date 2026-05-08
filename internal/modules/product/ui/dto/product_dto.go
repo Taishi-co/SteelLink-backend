@@ -123,6 +123,37 @@ type ProductListRequest struct {
 	SortBy             string  `form:"sort_by"`
 }
 
+type ProductCategoryInfo struct {
+	ID          uint64    `json:"id"`
+	ParentID    uint64    `json:"parent_id"`
+	Name        string    `json:"name"`
+	DisplayName string    `json:"display_name"`
+	Code        string    `json:"code"`
+	Icon        string    `json:"icon"`
+	ImageURL    string    `json:"image_url"`
+	Sort        int       `json:"sort"`
+	Status      int       `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ProductCategoryListRequest struct {
+	IncludeDisabled bool `form:"include_disabled"`
+}
+
+type UpsertProductCategoryRequest struct {
+	ParentID         uint64 `json:"parent_id"`
+	Name             string `json:"name" binding:"required,max=80"`
+	DisplayName      string `json:"display_name" binding:"omitempty,max=80"`
+	DisplayNameCamel string `json:"displayName" binding:"omitempty,max=80"`
+	Code             string `json:"code" binding:"omitempty,max=80"`
+	Icon             string `json:"icon" binding:"omitempty,max=64"`
+	ImageURL         string `json:"image_url" binding:"omitempty,max=512"`
+	ImageURLCamel    string `json:"imageUrl" binding:"omitempty,max=512"`
+	Sort             int    `json:"sort"`
+	Status           int    `json:"status"`
+}
+
 type ProductListResponse struct {
 	List     []*ProductInfo `json:"list"`
 	Total    int64          `json:"total"`

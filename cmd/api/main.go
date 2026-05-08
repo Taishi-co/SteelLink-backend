@@ -23,6 +23,7 @@ import (
 	orderPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/persistence"
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
+	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	productRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/router"
 	serviceFulfillmentPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/infrastructure/persistence"
 	serviceFulfillmentRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/infrastructure/router"
@@ -132,7 +133,7 @@ func main() {
 		if err := normalizeLegacyJSONColumns(database.GetDB()); err != nil {
 			logger.Fatal("Failed to normalize legacy JSON columns", zap.Error(err))
 		}
-		if err := database.GetDB().AutoMigrate(&productEntity.Product{}); err != nil {
+		if err := productPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate business tables", zap.Error(err))
 		}
 		if err := orderPersistence.AutoMigrate(); err != nil {
