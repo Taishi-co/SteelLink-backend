@@ -17,7 +17,9 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	products.Use(middleware.AuthRequired(), middleware.RequireTradeCapability("sales"))
 	{
 		products.POST("", productHandler.Create)
+		products.PUT("/:id", productHandler.Update)
 		products.PUT("/:id/display", productHandler.UpdateDisplay)
+		products.DELETE("/:id", productHandler.Delete)
 	}
 
 	r.PUT("/products/:id/status", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), productHandler.UpdateStatus)

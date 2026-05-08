@@ -47,6 +47,36 @@ func (h *ProductHandler) Create(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// Update 更新卖家自有商品，提交后重新进入平台审核
+func (h *ProductHandler) Update(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的商品ID")
+		return
+	}
+
+	var req dto.CreateProductRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, svcErr := h.productService.Update(c.Request.Context(), id, &req, userID, claims.EnterpriseID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // GetByID 获取商品详情
 func (h *ProductHandler) GetByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -68,6 +98,29 @@ func (h *ProductHandler) GetByID(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// Delete 删除卖家自有商品
+func (h *ProductHandler) Delete(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的商品ID")
+		return
+	}
+
+	if svcErr := h.productService.Delete(c.Request.Context(), id, userID, claims.EnterpriseID); svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, gin.H{"message": "商品删除成功"})
 }
 
 // UpdateDisplay 更新商品展示/审核补充资料
