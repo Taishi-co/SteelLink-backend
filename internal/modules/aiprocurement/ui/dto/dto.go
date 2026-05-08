@@ -72,11 +72,12 @@ type VectorSyncRequest struct {
 }
 
 type VectorSyncResponse struct {
-	Target          string   `json:"target"`
-	Synced          int      `json:"synced"`
-	LastID          uint64   `json:"last_id"`
-	ReservedTargets []string `json:"reserved_targets,omitempty"`
-	Message         string   `json:"message"`
+	Target              string    `json:"target"`
+	Synced              int       `json:"synced"`
+	LastID              uint64    `json:"last_id"`
+	LastSourceUpdatedAt time.Time `json:"last_source_updated_at,omitempty"`
+	ReservedTargets     []string  `json:"reserved_targets,omitempty"`
+	Message             string    `json:"message"`
 }
 
 type StageInfo struct {
