@@ -22,6 +22,7 @@ AI采购需要把仓储和物流能力纳入商品匹配。用户确认采购参
 - 无适合物流方案时返回 `logistics_match_status=no_match`，由前端引导发布物流需求或选择协商解决。
 - 物流仓储匹配按所选物流方案到手总价排序，并保留拼单所需的候选商品数据。
 - 生成订单时重新按已选商品数量估算运费，将商品金额、运费、到手价写入 AI 采购订单快照。
+- 生成真实订单时按卖家和商品发货仓库拆单，避免同一订单跨多个卖家仓库。
 
 ### Out of Scope
 
@@ -49,4 +50,5 @@ AI采购需要把仓储和物流能力纳入商品匹配。用户确认采购参
 1. `match-products` 只返回商品候选，不在商品匹配阶段混入推荐物流和运费展示。
 2. `match-logistics-warehouse` 接收 `parsed.delivery_address` 和 `selected_products` 后返回 `logistics_options` 多个可选物流方案，并默认选择最优方案。
 3. 商品有 `warehouse_info` 时，物流仓储匹配结果能展示卖家发货仓库和起运地址；无适合物流方案时返回 `no_match` 且不阻断前端发布需求/协商处理。
-4. 生成订单时尊重用户选择的 `logistics_service_id`，并把商品金额、预估运费和到手金额写入 AI采购快照。
+4. 生成订单时尊重用户选择的 `logistics_service_id` 或 `logistics_match_status=negotiation`，并把商品金额、预估运费和到手金额写入 AI采购快照。
+5. 同一卖家下多个发货仓库的商品会按发货仓库拆成多张真实订单，不触发订单服务跨仓库限制。
