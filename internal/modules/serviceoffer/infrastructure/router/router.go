@@ -17,7 +17,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/finance-services/:id", middleware.OptionalAuth(), h.GetFinance)
 
 	warehouse := r.Group("/warehouse-services")
-	warehouse.Use(middleware.AuthRequired(), middleware.RequireProviderService("warehouse"))
+	warehouse.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("sales", "warehouse"))
 	{
 		warehouse.POST("", h.CreateWarehouse)
 		warehouse.GET("/mine", h.ListMyWarehouses)
