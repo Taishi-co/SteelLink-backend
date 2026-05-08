@@ -109,6 +109,20 @@ func (h *OrderHandler) List(c *gin.Context) {
 	})
 }
 
+func (h *OrderHandler) ListFundingFinancingRequests(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	result, err := h.orderService.ListFundingFinancingRequests(c.Request.Context(), claims.EnterpriseID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"list": result})
+}
+
 func (h *OrderHandler) Cancel(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {

@@ -24,6 +24,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("", buyerService, orderHandler.Create)
 		orders.POST("/preview-warehouse", buyerService, orderHandler.PreviewWarehousePreData)
 		orders.GET("/product-pool", buyerService, orderHandler.ListProductPool)
+		orders.GET("/financing-requests/mine", financeService, orderHandler.ListFundingFinancingRequests)
 		orders.GET("/:id", fulfillmentParticipant, orderHandler.GetByID)
 		orders.GET("/:id/events", fulfillmentParticipant, orderHandler.ListEvents)
 		orders.POST("/:id/cancel", buyerService, orderHandler.Cancel)

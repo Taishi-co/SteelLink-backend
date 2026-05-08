@@ -434,6 +434,9 @@ type OrderFinancingRequest struct {
 	BuyerSignedAt       *time.Time             `gorm:"comment:买方签署时间" json:"buyer_signed_at"`
 	FeeVoucherURL       string                 `gorm:"type:varchar(500);comment:手续费支付凭证" json:"fee_voucher_url"`
 	FeePaidAt           *time.Time             `gorm:"comment:手续费支付时间" json:"fee_paid_at"`
+	FundingCommission   float64                `gorm:"type:decimal(12,2);comment:资金方平台分佣金额" json:"funding_commission"`
+	CommissionVoucher   string                 `gorm:"type:varchar(500);comment:资金方分佣凭证" json:"commission_voucher"`
+	CommissionPaidAt    *time.Time             `gorm:"comment:资金方分佣支付时间" json:"commission_paid_at"`
 	DisbursementVoucher string                 `gorm:"type:varchar(500);comment:放款凭证" json:"disbursement_voucher"`
 	DisbursedAt         *time.Time             `gorm:"comment:放款时间" json:"disbursed_at"`
 	PledgeVoucherURL    string                 `gorm:"type:varchar(500);comment:货权质押凭证" json:"pledge_voucher_url"`

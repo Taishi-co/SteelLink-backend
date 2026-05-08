@@ -132,8 +132,10 @@ type BuyerDebtSignRequest struct {
 }
 
 type FinancingDisburseRequest struct {
-	DisbursementVoucher string `json:"disbursement_voucher" binding:"required"`
-	Remark              string `json:"remark"`
+	DisbursementVoucher string  `json:"disbursement_voucher" binding:"required"`
+	FundingCommission   float64 `json:"funding_commission"`
+	CommissionVoucher   string  `json:"commission_voucher" binding:"required"`
+	Remark              string  `json:"remark"`
 }
 
 type PledgeRecordRequest struct {
@@ -257,6 +259,9 @@ type FinancingRequestInfo struct {
 	BuyerSignedAt       *time.Time `json:"buyer_signed_at,omitempty"`
 	FeeVoucherURL       string     `json:"fee_voucher_url"`
 	FeePaidAt           *time.Time `json:"fee_paid_at,omitempty"`
+	FundingCommission   float64    `json:"funding_commission"`
+	CommissionVoucher   string     `json:"commission_voucher"`
+	CommissionPaidAt    *time.Time `json:"commission_paid_at,omitempty"`
 	DisbursementVoucher string     `json:"disbursement_voucher"`
 	DisbursedAt         *time.Time `json:"disbursed_at,omitempty"`
 	PledgeVoucherURL    string     `json:"pledge_voucher_url"`
