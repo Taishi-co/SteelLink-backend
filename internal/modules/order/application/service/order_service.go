@@ -393,10 +393,30 @@ func (s *OrderService) GetByID(ctx context.Context, id, enterpriseID uint64) (*d
 		return nil, ecode.ErrDatabase
 	}
 	if enterpriseID == 0 || (order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID)) {
-		return nil, ecode.ErrForbidden.WithMessage("无权查看该订单")
+		funding, fundingErr := s.isFundingParticipant(ctx, order.ID, enterpriseID)
+		if fundingErr != nil {
+			return nil, fundingErr
+		}
+		if !funding {
+			return nil, ecode.ErrForbidden.WithMessage("无权查看该订单")
+		}
 	}
 
 	return toOrderInfo(order), nil
+}
+
+func (s *OrderService) isFundingParticipant(ctx context.Context, orderID, enterpriseID uint64) (bool, error) {
+	if orderID == 0 || enterpriseID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := database.GetDB().WithContext(ctx).
+		Model(&orderEntity.OrderFinancingRequest{}).
+		Where("order_id = ? AND funding_enterprise_id = ?", orderID, enterpriseID).
+		Count(&count).Error; err != nil {
+		return false, ecode.ErrDatabase.WithMessage("查询订单资金方权限失败")
+	}
+	return count > 0, nil
 }
 
 func (s *OrderService) ListByEnterprise(ctx context.Context, enterpriseID uint64) ([]*dto.OrderInfo, error) {
@@ -410,6 +430,24 @@ func (s *OrderService) ListByEnterprise(ctx context.Context, enterpriseID uint64
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
 		result = append(result, toOrderInfo(order))
+	}
+	return result, nil
+}
+
+func (s *OrderService) ListFundingFinancingRequests(ctx context.Context, fundingEnterpriseID uint64) ([]*dto.FinancingRequestInfo, error) {
+	if fundingEnterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看融资申请")
+	}
+	var requests []orderEntity.OrderFinancingRequest
+	if err := database.GetDB().WithContext(ctx).
+		Where("funding_enterprise_id = ?", fundingEnterpriseID).
+		Order("id desc").
+		Find(&requests).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("查询资金方融资申请失败")
+	}
+	result := make([]*dto.FinancingRequestInfo, 0, len(requests))
+	for i := range requests {
+		result = append(result, toFinancingRequestInfo(&requests[i]))
 	}
 	return result, nil
 }
@@ -919,9 +957,30 @@ func (s *OrderService) SubmitRiskResult(ctx context.Context, id, fundingEnterpri
 	if !req.Approved {
 		financing.Status = orderEntity.FinancingRequestStatusRiskRejected
 		financing.RiskResult = "rejected"
-		order.Status = orderEntity.OrderStatusPendingPayment
+		order.Status = orderEntity.OrderStatusCancelled
 		order.UpdatedBy = operatorID
 		if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, item := range order.Items {
+				product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+				if findErr != nil {
+					return findErr
+				}
+				if product == nil {
+					return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法终止融资订单")
+				}
+				if !product.UnlockStock(item.Quantity) {
+					return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法终止融资订单")
+				}
+				product.UpdatedBy = operatorID
+				if err := tx.Save(product).Error; err != nil {
+					return err
+				}
+			}
+			if order.Remark == nil {
+				order.Remark = orderEntity.Remark{}
+			}
+			order.Remark["cancel_reason"] = "financing_risk_rejected"
+			order.Remark["cancelled_by"] = "finance"
 			if err := tx.Save(financing).Error; err != nil {
 				return err
 			}
@@ -929,7 +988,8 @@ func (s *OrderService) SubmitRiskResult(ctx context.Context, id, fundingEnterpri
 				return err
 			}
 			return createOrderEvent(tx, ctx, order, "financing_risk_rejected", operatorID, fundingEnterpriseID, "finance", fromStatus, order.Status, orderEntity.OrderEventPayload{
-				"risk_remark": financing.RiskRemark,
+				"risk_remark":   financing.RiskRemark,
+				"cancel_reason": "financing_risk_rejected",
 			})
 		}); err != nil {
 			return nil, ecode.ErrDatabase.WithMessage("回传风控结果失败")
@@ -1086,9 +1146,18 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	if !isHTTPURL(req.DisbursementVoucher) {
 		return nil, ecode.ErrBadRequest.WithMessage("放款凭证URL必须是有效的HTTP/HTTPS地址")
 	}
+	if req.FundingCommission < 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("资金方分佣金额不能小于0")
+	}
+	if !isHTTPURL(req.CommissionVoucher) {
+		return nil, ecode.ErrBadRequest.WithMessage("资金方分佣凭证URL必须是有效的HTTP/HTTPS地址")
+	}
 	now := time.Now()
 	fromStatus := order.Status
 	financing.Status = orderEntity.FinancingRequestStatusDisbursed
+	financing.FundingCommission = req.FundingCommission
+	financing.CommissionVoucher = strings.TrimSpace(req.CommissionVoucher)
+	financing.CommissionPaidAt = &now
 	financing.DisbursementVoucher = strings.TrimSpace(req.DisbursementVoucher)
 	financing.DisbursedAt = &now
 	financing.UpdatedBy = operatorID
@@ -1103,6 +1172,8 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 		}
 		return createOrderEvent(tx, ctx, order, "financing_disbursed", operatorID, fundingEnterpriseID, "finance", fromStatus, order.Status, orderEntity.OrderEventPayload{
 			"disbursement_voucher": financing.DisbursementVoucher,
+			"funding_commission":   financing.FundingCommission,
+			"commission_voucher":   financing.CommissionVoucher,
 			"remark":               strings.TrimSpace(req.Remark),
 		})
 	}); err != nil {
@@ -2246,7 +2317,13 @@ func (s *OrderService) ListEvents(ctx context.Context, id, enterpriseID uint64) 
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
 	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) && warehouseEnterpriseIDOf(order) != enterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("无权查看该订单事件")
+		funding, fundingErr := s.isFundingParticipant(ctx, order.ID, enterpriseID)
+		if fundingErr != nil {
+			return nil, fundingErr
+		}
+		if !funding {
+			return nil, ecode.ErrForbidden.WithMessage("无权查看该订单事件")
+		}
 	}
 	var events []orderEntity.OrderEvent
 	if err := database.GetDB().WithContext(ctx).Where("order_id = ?", order.ID).Order("id asc").Find(&events).Error; err != nil {
@@ -2401,6 +2478,9 @@ func toFinancingRequestInfo(item *orderEntity.OrderFinancingRequest) *dto.Financ
 		BuyerSignedAt:       item.BuyerSignedAt,
 		FeeVoucherURL:       item.FeeVoucherURL,
 		FeePaidAt:           item.FeePaidAt,
+		FundingCommission:   item.FundingCommission,
+		CommissionVoucher:   item.CommissionVoucher,
+		CommissionPaidAt:    item.CommissionPaidAt,
 		DisbursementVoucher: item.DisbursementVoucher,
 		DisbursedAt:         item.DisbursedAt,
 		PledgeVoucherURL:    item.PledgeVoucherURL,
