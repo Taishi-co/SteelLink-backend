@@ -123,23 +123,37 @@
 - [x] 后端：新增 `order_events`，所有关键状态变更写事件。
 - [x] 后端：下单后进入仓库确认。
 - [x] 后端：仓储方确认仓库条件。
+- [x] 后端：仓储拒绝承接时反馈平台管理端并回退重新选仓。
+  - 新增订单状态 `23`：待重新选仓。
+  - 新增 `POST /api/v1/orders/:id/warehouse-selection`，买方重新选择已审核仓储资源后回到仓储确认。
 - [x] 后端：卖方确认订单条款。
 - [x] 后端：买方最终确认订单。
 - [x] 后端：合同签署先做状态占位和文件字段。
 - [x] 后端：直采支付先做支付确认占位。
+- [x] 后端：直采支付补货权/仓单监管凭证。
+  - 直采支付接口要求 `title_voucher_url`，后续进入物流前校验已记录监管凭证。
 - [x] 后端：卖方发起物流竞价。
 - [x] 后端：物流方报价。
-- [x] 后端：买卖双方确认同一物流资源。
+- [x] 后端：按运费承担方确认物流资源。
+  - 发起物流竞价支持 `freight_payer=buyer/seller`，默认买方承担。
+  - 运费承担方确认报价后即锁定物流资源并生成运输任务。
+- [x] 后端：物流无运力时反馈平台管理端并回退重新发起物流。
+  - 新增订单状态 `24`：待重新发起物流。
+  - 新增 `POST /api/v1/orders/:id/logistics-biddings/no-capacity`。
 - [x] 后端：物流方提货、送达、签收回传。
 - [x] 后端：买方确认收货。
 - [x] 后端：卖方对账确认。
 - [x] 后端：订单归档。
-- [~] 前端：订单闭环 MVP 页面和接口接入。
-  - buyer-app 已补全 23 种订单状态映射、10 步流程条、事件时间线展示、买方确认/融资入口/物流确认操作按钮。
+- [x] 前端：订单闭环 MVP 页面和接口接入。
+  - buyer-app 已补全 24 种订单状态映射、10 步流程条、事件时间线展示、买方确认/融资入口/物流确认操作按钮。
+  - buyer-app 订单详情已按节点展示当前状态、下一步引导，并在关键动作完成后弹出“已完成 + 下一步 + 回工作台看订单”反馈。
+  - buyer-app 已接入仓储拒绝后的重新选仓、直采支付的货权/仓单监管凭证上传。
   - buyer-app orderService 已补全 attachContract、directPayment、buyerConfirm、createFinancingRequest、buyerConfirmFinancing、buyerSignDebtAndPayFee、confirmLogisticsQuote、listEvents 接口。
-  - seller-app 已补全 statusMap（12-22）、sellerConfirm、createLogisticsBidding、confirmLogisticsQuote、reconcile、archive、listEvents 接口和操作按钮。
-  - admin 订单管理已补全 statusMap（12-22）、状态筛选、交易履约说明。
-  - 仓储方/物流方/资金方工作台需要接各自履约动作。
+  - seller-app 已补全 statusMap（12-24）、sellerConfirm、createLogisticsBidding、reportLogisticsNoCapacity、confirmLogisticsQuote、reconcile、archive、listEvents 接口和操作按钮，并在详情/关键动作中展示当前状态、下一步和完成反馈。
+  - warehouse-app 已接入仓库确认/拒绝动作，并在动作完成后引导回工作台查看订单。
+  - logistics-app 已接入物流报价动作，并在报价、接单、运输状态更新后引导回工作台查看订单。
+  - finance-app 已接入资金方融资申请列表、风控审批、债务合同、分佣/放款、质押释放接口，并在每个资金节点完成后提示下一步合规动作。
+  - admin 订单管理已补全 statusMap（12-24）、状态筛选、交易履约说明和履约详情 Drawer。
 - [x] 后端：订单动作按采购、销售、仓储、物流、金融拆分服务权限。
 
 ## 阶段 4：托盘融资与货权质押
@@ -157,14 +171,15 @@
 - [x] 后端：资金方支付平台分佣并放款给卖方。
   - 放款接口已要求记录分佣金额、分佣凭证和定向放款凭证。
 - [x] 后端：记录货权质押凭证。
+  - 托盘垫资订单放款后必须先记录货权质押，才能发起物流竞价。
 - [x] 后端：记录货权释放条件和释放事件。
 - [x] 后端：资金方工作台可查询本企业融资申请并查看关联订单事件。
   - 新增 `GET /api/v1/orders/financing-requests/mine`。
   - 资金方可查看本企业参与的融资订单详情和事件链路。
-- [~] 前端：托盘融资与货权质押页面和接口接入。
-  - buyer-app 未接融资申请、确认金额、债务合同签署、手续费凭证。
-  - finance-app 仍需接入后端融资申请列表、风控审批、债务合同、分佣/放款、质押释放接口。
-  - admin 订单详情暂未展示完整融资申请、货权质押、释放事件链路。
+- [x] 前端：托盘融资与货权质押页面和接口接入。
+  - buyer-app 已接融资申请、确认金额、债务合同签署、手续费凭证。
+  - finance-app 已接入后端融资申请列表、风控审批、债务合同、分佣/放款、质押释放接口。
+  - admin 订单详情已展示融资申请、放款/分佣凭证、货权质押、释放事件链路。
 
 ## 当前优先级
 
@@ -185,12 +200,10 @@ P1：
 
 - [x] 订单状态机和 `order_events`。
 - [x] 仓库确认和合同签署占位。
-- [~] 前端接入订单状态机所有关键动作。
-  - buyer-app 和 seller-app 已补全新状态（12-22）的操作按钮和 API 接口。
-  - 仓储方/物流方/资金方工作台的履约动作（仓库确认、物流报价、融资审批/放款）尚未接入。
-- [~] 管理端订单详情展示 `order_events`、融资、质押、物流竞价和运输任务。
-  - admin 订单管理已补全 statusMap（12-22）、状态筛选、交易履约说明。
-  - 完整 `order_events` 事件列表、融资申请详情、货权质押记录、物流竞价/报价详情、运输任务跟踪尚未在订单详情 Drawer 中展示。
+- [x] 前端接入订单状态机所有关键动作。
+  - buyer-app、seller-app、warehouse-app、logistics-app、finance-app 已接入 MVP 闭环关键动作和 API 接口。
+- [x] 管理端订单详情展示 `order_events`、融资、质押、物流竞价和运输任务。
+  - admin 订单管理已补全 statusMap（12-24）、状态筛选、平台需处理事项、完整事件列表、融资申请详情、货权质押记录、物流竞价/报价详情、运输任务跟踪。
 
 P2：
 
