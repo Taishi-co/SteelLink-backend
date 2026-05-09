@@ -645,9 +645,9 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 		return toOrderInfo(order), nil
 	}
 	fromStatus := order.Status
+	db := database.GetDB()
 	order.Status = orderEntity.OrderStatusPendingSellerConfirm
 	order.UpdatedBy = operatorID
-	db := database.GetDB()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(order).Error; err != nil {
 			return err
