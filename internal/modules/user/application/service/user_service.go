@@ -8,6 +8,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"golang.org/x/crypto/bcrypt"
@@ -435,6 +436,12 @@ func (s *UserService) UpdateSubAccount(ctx context.Context, parentID, subID uint
 }
 
 func (s *UserService) GetDashboard(ctx context.Context, userID uint64) (*dto.DashboardResponse, error) {
+	dashboardKey := cache.Key("user:dashboard", userID)
+	var cached dto.DashboardResponse
+	if cache.GetJSON(ctx, dashboardKey, &cached) {
+		return &cached, nil
+	}
+
 	db := database.GetDB()
 	stats := dto.DashboardStats{}
 
@@ -501,8 +508,10 @@ func (s *UserService) GetDashboard(ctx context.Context, userID uint64) (*dto.Das
 		})
 	}
 
-	return &dto.DashboardResponse{
+	result := &dto.DashboardResponse{
 		Stats:        stats,
 		RecentOrders: recentOrders,
-	}, nil
+	}
+	cache.SetJSON(ctx, dashboardKey, result, cache.DashboardStatsTTL)
+	return result, nil
 }

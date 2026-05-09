@@ -98,11 +98,27 @@ func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.Co
 	}, nil
 }
 
-func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
+func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest, userID, enterpriseID uint64) (*dto.MatchProductsResponse, error) {
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
 	s.applyConfiguredCategory(ctx, &parsed, "")
-	matchKey := cache.Key("ai:match-products", parsed)
+	cfg := config.GetAIProcurement().VectorSearch
+	matchKey := cache.Key("ai:match-products", struct {
+		UserID       uint64                   `json:"user_id"`
+		EnterpriseID uint64                   `json:"enterprise_id"`
+		Parsed       entity.ParsedInstruction `json:"parsed"`
+		Vector       any                      `json:"vector"`
+	}{
+		UserID:       userID,
+		EnterpriseID: enterpriseID,
+		Parsed:       parsed,
+		Vector: struct {
+			Enabled    bool   `json:"enabled"`
+			Provider   string `json:"provider"`
+			Collection string `json:"collection"`
+			TopK       int    `json:"top_k"`
+		}{Enabled: cfg.Enabled, Provider: cfg.Provider, Collection: cfg.ProductCollection, TopK: cfg.TopK},
+	})
 	var cached dto.MatchProductsResponse
 	if cache.GetJSON(ctx, matchKey, &cached) {
 		return &cached, nil
@@ -115,7 +131,7 @@ func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchPr
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
 	}
-	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementMatchTTL)
 	return result, nil
 }
 
@@ -700,6 +716,19 @@ func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, par
 		matches[idx].DestinationAddress = destination
 		matches[idx].OriginWarehouseName = stringFromMap(matches[idx].Warehouse, "warehouse_name")
 		matches[idx].OriginAddress = buildWarehouseAddress(matches[idx].Warehouse)
+		if isNegotiatedLogistics(matches[idx]) {
+			matches[idx].LogisticsMatchStatus = "negotiation"
+			if strings.TrimSpace(matches[idx].LogisticsServiceName) == "" {
+				matches[idx].LogisticsServiceName = "协商解决"
+			}
+			if strings.TrimSpace(matches[idx].LogisticsRoute) == "" {
+				matches[idx].LogisticsRoute = "待买卖双方或平台协调"
+			}
+			matches[idx].FreightEstimate = 0
+			matches[idx].LandedTotal = matches[idx].TotalAmount
+			matches[idx].UnitLandedPrice = safeDiv(matches[idx].LandedTotal, matches[idx].Quantity)
+			continue
+		}
 		if destination == "" {
 			matches[idx].LogisticsMatchStatus = "destination_missing"
 			matches[idx].LandedTotal = matches[idx].TotalAmount
@@ -750,6 +779,11 @@ func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, par
 		)
 	}
 	return matches
+}
+
+func isNegotiatedLogistics(match entity.MatchedProduct) bool {
+	return strings.TrimSpace(match.LogisticsMatchStatus) == "negotiation" ||
+		strings.TrimSpace(match.LogisticsServiceName) == "协商解决"
 }
 
 func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.LogisticsService {
@@ -921,6 +955,18 @@ func stringFromMap(values map[string]any, key string) string {
 	return ""
 }
 
+func uintFromMap(values map[string]any, key string) uint64 {
+	value := stringFromMap(values, key)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
 func toString(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -1002,21 +1048,22 @@ func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
 }
 
 func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected entity.MatchedProducts, form dto.OrderForm, userID, enterpriseID uint64) ([]*orderDTO.OrderInfo, error) {
-	grouped := make(map[uint64]entity.MatchedProducts)
-	order := make([]uint64, 0)
+	grouped := make(map[string]entity.MatchedProducts)
+	order := make([]string, 0)
 	for _, item := range selected {
 		sellerID := item.EnterpriseID
 		if sellerID == 0 {
 			sellerID = item.ProductID
 		}
-		if _, exists := grouped[sellerID]; !exists {
-			order = append(order, sellerID)
+		groupKey := aiOrderGroupKey(sellerID, item)
+		if _, exists := grouped[groupKey]; !exists {
+			order = append(order, groupKey)
 		}
-		grouped[sellerID] = append(grouped[sellerID], item)
+		grouped[groupKey] = append(grouped[groupKey], item)
 	}
 	orders := make([]*orderDTO.OrderInfo, 0, len(grouped))
-	for _, sellerID := range order {
-		group := grouped[sellerID]
+	for _, groupKey := range order {
+		group := grouped[groupKey]
 		orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(group))
 		for _, item := range group {
 			orderItems = append(orderItems, orderDTO.CreateOrderItemRequest{
@@ -1043,6 +1090,34 @@ func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected 
 		orders = append(orders, orderInfo)
 	}
 	return orders, nil
+}
+
+func aiOrderGroupKey(sellerID uint64, item entity.MatchedProduct) string {
+	return strconv.FormatUint(sellerID, 10) + "|" + aiWarehouseSignature(item)
+}
+
+func aiWarehouseSignature(item entity.MatchedProduct) string {
+	if serviceID := uintFromMap(item.Warehouse, "warehouse_service_id"); serviceID > 0 {
+		return "service:" + strconv.FormatUint(serviceID, 10)
+	}
+	if warehouseID := uintFromMap(item.Warehouse, "warehouse_id"); warehouseID > 0 {
+		return "warehouse:" + strconv.FormatUint(warehouseID, 10)
+	}
+	parts := []string{
+		stringFromMap(item.Warehouse, "warehouse_name"),
+		stringFromMap(item.Warehouse, "warehouse_code"),
+		stringFromMap(item.Warehouse, "province"),
+		stringFromMap(item.Warehouse, "city"),
+		stringFromMap(item.Warehouse, "district"),
+		stringFromMap(item.Warehouse, "address"),
+	}
+	if nonEmpty := nonEmptyStrings(parts); len(nonEmpty) > 0 {
+		return strings.TrimSpace(strings.Join(parts, "|"))
+	}
+	if item.OriginWarehouseName != "" || item.OriginAddress != "" {
+		return strings.TrimSpace(item.OriginWarehouseName + "|" + item.OriginAddress)
+	}
+	return "unbound:" + strconv.FormatUint(item.ProductID, 10)
 }
 
 func buildOrderDraft(parsed entity.ParsedInstruction, matches entity.MatchedProducts) entity.OrderDraft {

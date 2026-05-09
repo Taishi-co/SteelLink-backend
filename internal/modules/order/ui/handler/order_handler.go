@@ -75,7 +75,7 @@ func (h *OrderHandler) GetByID(c *gin.Context) {
 		response.BadRequest(c, "无效的订单ID")
 		return
 	}
-	result, svcErr := h.orderService.GetByID(c.Request.Context(), id, claims.EnterpriseID)
+	result, svcErr := h.orderService.GetByID(c.Request.Context(), id, claims.EnterpriseID, isOrderAdmin(claims.UserType))
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
@@ -90,6 +90,31 @@ func (h *OrderHandler) List(c *gin.Context) {
 		return
 	}
 	role := c.Query("role")
+	statusValue := 0
+	var status *int
+	if rawStatus := c.Query("status"); rawStatus != "" {
+		parsed, parseErr := strconv.Atoi(rawStatus)
+		if parseErr != nil {
+			response.BadRequest(c, "无效的订单状态")
+			return
+		}
+		statusValue = parsed
+		status = &statusValue
+	}
+	if role == "" && isOrderAdmin(claims.UserType) {
+		page := intQuery(c, "page", 1)
+		pageSize := intQuery(c, "page_size", 0)
+		if pageSize == 0 {
+			pageSize = intQuery(c, "pageSize", 10)
+		}
+		result, err := h.orderService.ListAll(c.Request.Context(), c.Query("keyword"), status, page, pageSize)
+		if err != nil {
+			response.Error(c, err.(*ecode.Error))
+			return
+		}
+		response.Success(c, result)
+		return
+	}
 	var result []*dto.OrderInfo
 	var err error
 	switch role {
@@ -97,6 +122,10 @@ func (h *OrderHandler) List(c *gin.Context) {
 		result, err = h.orderService.ListBySeller(c.Request.Context(), claims.EnterpriseID)
 	case "buyer":
 		result, err = h.orderService.ListByBuyer(c.Request.Context(), claims.EnterpriseID)
+	case "warehouse":
+		result, err = h.orderService.ListByWarehouse(c.Request.Context(), claims.EnterpriseID, status)
+	case "logistics":
+		result, err = h.orderService.ListByLogistics(c.Request.Context(), claims.EnterpriseID, status)
 	default:
 		result, err = h.orderService.ListByEnterprise(c.Request.Context(), claims.EnterpriseID)
 	}
@@ -107,6 +136,20 @@ func (h *OrderHandler) List(c *gin.Context) {
 	response.Success(c, gin.H{
 		"list": result,
 	})
+}
+
+func (h *OrderHandler) ListFundingFinancingRequests(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	result, err := h.orderService.ListFundingFinancingRequests(c.Request.Context(), claims.EnterpriseID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"list": result})
 }
 
 func (h *OrderHandler) Cancel(c *gin.Context) {
@@ -164,6 +207,30 @@ func (h *OrderHandler) WarehouseConfirm(c *gin.Context) {
 		return
 	}
 	result, svcErr := h.orderService.WarehouseConfirm(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ReselectWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.WarehouseReselectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.ReselectWarehouse(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
@@ -608,6 +675,27 @@ func (h *OrderHandler) CreateLogisticsBidding(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OrderHandler) ReportLogisticsNoCapacity(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.CreateLogisticsBiddingRequest
+	_ = c.ShouldBindJSON(&req)
+	result, svcErr := h.orderService.ReportLogisticsNoCapacity(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) CreateLogisticsQuote(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
@@ -726,10 +814,26 @@ func (h *OrderHandler) ListEvents(c *gin.Context) {
 		response.BadRequest(c, "无效的订单ID")
 		return
 	}
-	result, svcErr := h.orderService.ListEvents(c.Request.Context(), id, claims.EnterpriseID)
+	result, svcErr := h.orderService.ListEvents(c.Request.Context(), id, claims.EnterpriseID, isOrderAdmin(claims.UserType))
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
 	}
 	response.Success(c, gin.H{"list": result})
+}
+
+func isOrderAdmin(userType string) bool {
+	return userType == "operator" || userType == "super_admin"
+}
+
+func intQuery(c *gin.Context, key string, fallback int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }

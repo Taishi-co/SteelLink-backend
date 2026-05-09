@@ -83,6 +83,11 @@ type WarehouseConfirmRequest struct {
 	VoucherURL    string `json:"voucher_url"`
 }
 
+type WarehouseReselectRequest struct {
+	WarehouseServiceID uint64 `json:"warehouse_service_id" binding:"required"`
+	ConfirmNote        string `json:"confirm_note"`
+}
+
 type SellerConfirmRequest struct {
 	TermsNote string `json:"terms_note"`
 }
@@ -92,13 +97,15 @@ type BuyerConfirmRequest struct {
 }
 
 type DirectPaymentRequest struct {
-	VoucherURL    string   `json:"voucher_url"`
-	TransactionNo string   `json:"transaction_no"`
-	PayerAccount  string   `json:"payer_account"`
-	PayeeAccount  string   `json:"payee_account"`
-	CapturedAt    string   `json:"captured_at"`
-	GPSLatitude   *float64 `json:"gps_latitude"`
-	GPSLongitude  *float64 `json:"gps_longitude"`
+	VoucherURL      string   `json:"voucher_url"`
+	TransactionNo   string   `json:"transaction_no"`
+	PayerAccount    string   `json:"payer_account"`
+	PayeeAccount    string   `json:"payee_account"`
+	TitleVoucherURL string   `json:"title_voucher_url"`
+	TitleRemark     string   `json:"title_remark"`
+	CapturedAt      string   `json:"captured_at"`
+	GPSLatitude     *float64 `json:"gps_latitude"`
+	GPSLongitude    *float64 `json:"gps_longitude"`
 }
 
 type CreateFinancingRequest struct {
@@ -132,8 +139,10 @@ type BuyerDebtSignRequest struct {
 }
 
 type FinancingDisburseRequest struct {
-	DisbursementVoucher string `json:"disbursement_voucher" binding:"required"`
-	Remark              string `json:"remark"`
+	DisbursementVoucher string  `json:"disbursement_voucher" binding:"required"`
+	FundingCommission   float64 `json:"funding_commission"`
+	CommissionVoucher   string  `json:"commission_voucher" binding:"required"`
+	Remark              string  `json:"remark"`
 }
 
 type PledgeRecordRequest struct {
@@ -151,6 +160,8 @@ type CreateLogisticsBiddingRequest struct {
 	PickupAddress      string `json:"pickup_address"`
 	DestinationAddress string `json:"destination_address"`
 	Requirement        string `json:"requirement"`
+	FreightPayer       string `json:"freight_payer" binding:"omitempty,oneof=buyer seller"`
+	NoCapacityReason   string `json:"no_capacity_reason"`
 }
 
 type CreateLogisticsQuoteRequest struct {
@@ -209,29 +220,42 @@ type OrderItemInfo struct {
 }
 
 type OrderInfo struct {
-	ID             uint64           `json:"id"`
-	OrderNo        string           `json:"order_no"`
-	BuyerID        uint64           `json:"buyer_id"`
-	BuyerName      string           `json:"buyer_name"`
-	SellerID       uint64           `json:"seller_id"`
-	SellerName     string           `json:"seller_name"`
-	Items          []OrderItemInfo  `json:"items"`
-	TotalQuantity  float64          `json:"total_quantity"`
-	TotalAmount    float64          `json:"total_amount"`
-	TaxTotalAmount float64          `json:"tax_total_amount"`
-	Currency       string           `json:"currency"`
-	Status         int              `json:"status"`
-	Expired        bool             `json:"expired"`
-	ExpiresAt      *time.Time       `json:"expires_at,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	ContractInfo   *ContractInfo    `json:"contract_info,omitempty"`
-	PaymentInfo    *PaymentInfo     `json:"payment_info,omitempty"`
-	DeliveryInfo   *DeliveryInfo    `json:"delivery_info,omitempty"`
-	ReceiptVoucher string           `json:"receipt_voucher,omitempty"`
-	ReceiptInfo    *VoucherEvidence `json:"receipt_info,omitempty"`
-	ReceiptAt      *time.Time       `json:"receipt_at,omitempty"`
-	Timeline       []TimelineItem   `json:"timeline"`
-	Events         []OrderEventInfo `json:"events,omitempty"`
+	ID               uint64                 `json:"id"`
+	OrderNo          string                 `json:"order_no"`
+	BuyerID          uint64                 `json:"buyer_id"`
+	BuyerName        string                 `json:"buyer_name"`
+	SellerID         uint64                 `json:"seller_id"`
+	SellerName       string                 `json:"seller_name"`
+	Items            []OrderItemInfo        `json:"items"`
+	TotalQuantity    float64                `json:"total_quantity"`
+	TotalAmount      float64                `json:"total_amount"`
+	TaxTotalAmount   float64                `json:"tax_total_amount"`
+	Currency         string                 `json:"currency"`
+	Status           int                    `json:"status"`
+	Expired          bool                   `json:"expired"`
+	ExpiresAt        *time.Time             `json:"expires_at,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	ContractInfo     *ContractInfo          `json:"contract_info,omitempty"`
+	PaymentInfo      *PaymentInfo           `json:"payment_info,omitempty"`
+	DeliveryInfo     *DeliveryInfo          `json:"delivery_info,omitempty"`
+	ReceiptVoucher   string                 `json:"receipt_voucher,omitempty"`
+	ReceiptInfo      *VoucherEvidence       `json:"receipt_info,omitempty"`
+	ReceiptAt        *time.Time             `json:"receipt_at,omitempty"`
+	Timeline         []TimelineItem         `json:"timeline"`
+	Events           []OrderEventInfo       `json:"events,omitempty"`
+	Remark           map[string]interface{} `json:"remark,omitempty"`
+	FinancingInfo    *FinancingRequestInfo  `json:"financing_info,omitempty"`
+	LogisticsBidding *LogisticsBiddingInfo  `json:"logistics_bidding,omitempty"`
+	LogisticsQuotes  []LogisticsQuoteInfo   `json:"logistics_quotes,omitempty"`
+	ShipmentTask     *ShipmentTaskInfo      `json:"shipment_task,omitempty"`
+	PledgeEvents     []PledgeEventInfo      `json:"pledge_events,omitempty"`
+}
+
+type OrderListResponse struct {
+	List     []*OrderInfo `json:"list"`
+	Total    int64        `json:"total"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"page_size"`
 }
 
 type FinancingRequestInfo struct {
@@ -257,6 +281,9 @@ type FinancingRequestInfo struct {
 	BuyerSignedAt       *time.Time `json:"buyer_signed_at,omitempty"`
 	FeeVoucherURL       string     `json:"fee_voucher_url"`
 	FeePaidAt           *time.Time `json:"fee_paid_at,omitempty"`
+	FundingCommission   float64    `json:"funding_commission"`
+	CommissionVoucher   string     `json:"commission_voucher"`
+	CommissionPaidAt    *time.Time `json:"commission_paid_at,omitempty"`
 	DisbursementVoucher string     `json:"disbursement_voucher"`
 	DisbursedAt         *time.Time `json:"disbursed_at,omitempty"`
 	PledgeVoucherURL    string     `json:"pledge_voucher_url"`
@@ -346,6 +373,7 @@ type LogisticsBiddingInfo struct {
 	OrderID                uint64    `json:"order_id"`
 	OrderNo                string    `json:"order_no"`
 	Status                 string    `json:"status"`
+	FreightPayer           string    `json:"freight_payer"`
 	SelectedQuoteID        uint64    `json:"selected_quote_id"`
 	BuyerConfirmedQuoteID  uint64    `json:"buyer_confirmed_quote_id"`
 	SellerConfirmedQuoteID uint64    `json:"seller_confirmed_quote_id"`
@@ -366,4 +394,35 @@ type LogisticsQuoteInfo struct {
 	EstimatedDeliveryAt   string    `json:"estimated_delivery_at"`
 	Remark                string    `json:"remark"`
 	CreatedAt             time.Time `json:"created_at"`
+}
+
+type ShipmentTaskInfo struct {
+	ID                    uint64     `json:"id"`
+	OrderID               uint64     `json:"order_id"`
+	OrderNo               string     `json:"order_no"`
+	LogisticsEnterpriseID uint64     `json:"logistics_enterprise_id"`
+	LogisticsQuoteID      uint64     `json:"logistics_quote_id"`
+	Status                string     `json:"status"`
+	PickupVoucher         string     `json:"pickup_voucher"`
+	DeliveryVoucher       string     `json:"delivery_voucher"`
+	SignatureVoucher      string     `json:"signature_voucher"`
+	PickedUpAt            *time.Time `json:"picked_up_at,omitempty"`
+	DeliveredAt           *time.Time `json:"delivered_at,omitempty"`
+	SignedAt              *time.Time `json:"signed_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+}
+
+type PledgeEventInfo struct {
+	ID                 uint64    `json:"id"`
+	FinancingRequestID uint64    `json:"financing_request_id"`
+	OrderID            uint64    `json:"order_id"`
+	OrderNo            string    `json:"order_no"`
+	EventType          string    `json:"event_type"`
+	Condition          string    `json:"condition"`
+	Reason             string    `json:"reason"`
+	VoucherURL         string    `json:"voucher_url"`
+	ActorUserID        uint64    `json:"actor_user_id"`
+	ActorEnterpriseID  uint64    `json:"actor_enterprise_id"`
+	CreatedAt          time.Time `json:"created_at"`
 }

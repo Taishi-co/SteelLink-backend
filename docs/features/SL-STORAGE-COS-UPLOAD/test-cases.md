@@ -12,6 +12,8 @@
 | TC-01 | 上传商品主图 | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=product_image`，上传 jpg/png/webp | 返回 `bucket/key/url`，bucket 为公开商品桶 |
 | TC-02 | 上传支付凭证 | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=payment_voucher`，上传图片或 PDF | 返回私有桶 URL，可提交到支付凭证接口 |
 | TC-03 | 创建商品保存图片 | 已登录卖家，已获得商品主图 URL | 调用 `POST /api/v1/products`，传入 `images` 与 `quality_cert` | 商品创建成功，查询商品详情返回图片 URL |
+| TC-04 | 上传企业营业执照 PDF | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=enterprise_license`，上传 PDF | 返回私有桶 `enterprise/licenses` URL |
+| TC-05 | 上传物流商服务资质 | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=enterprise_service_document`，上传运输许可证/承运资质图片或 PDF | 返回私有桶 `enterprise/service-documents` URL |
 
 ## Exception Path
 

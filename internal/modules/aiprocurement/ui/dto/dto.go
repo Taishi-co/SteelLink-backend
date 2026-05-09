@@ -76,6 +76,11 @@ type VectorSyncResponse struct {
 	Synced              int       `json:"synced"`
 	LastID              uint64    `json:"last_id"`
 	LastSourceUpdatedAt time.Time `json:"last_source_updated_at,omitempty"`
+	Status              string    `json:"status,omitempty"`
+	StartedAt           time.Time `json:"started_at,omitempty"`
+	CompletedAt         time.Time `json:"completed_at,omitempty"`
+	DurationMs          int64     `json:"duration_ms,omitempty"`
+	ErrorMessage        string    `json:"error_message,omitempty"`
 	ReservedTargets     []string  `json:"reserved_targets,omitempty"`
 	Message             string    `json:"message"`
 }

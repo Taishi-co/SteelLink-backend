@@ -97,6 +97,8 @@ func localPrefix(purpose Purpose) string {
 		return "identity/cards"
 	case PurposeEnterpriseLicense:
 		return "enterprise/licenses"
+	case PurposeEnterpriseServiceDoc:
+		return "enterprise/service-documents"
 	default:
 		return "misc"
 	}

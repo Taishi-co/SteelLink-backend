@@ -13,7 +13,7 @@ type ProductRepository interface {
 	Delete(ctx context.Context, product *entity.Product) error
 	FindByID(ctx context.Context, id uint64) (*entity.Product, error)
 	List(ctx context.Context, query *ProductQuery) ([]*entity.Product, int64, error)
-	UpdateStatus(ctx context.Context, id uint64, status entity.ProductStatus, updatedBy uint64) error
+	UpdateStatus(ctx context.Context, id uint64, status entity.ProductStatus, auditRemark string, updatedBy uint64) error
 }
 
 // ProductQuery 商品查询条件

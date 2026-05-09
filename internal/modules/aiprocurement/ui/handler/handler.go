@@ -52,12 +52,17 @@ func (h *ProcurementHandler) ConfirmInstruction(c *gin.Context) {
 }
 
 func (h *ProcurementHandler) MatchProducts(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
 	var req dto.MatchProductsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	result, err := h.svc.MatchProducts(c.Request.Context(), &req)
+	result, err := h.svc.MatchProducts(c.Request.Context(), &req, claims.UserID, claims.EnterpriseID)
 	if err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return
@@ -218,6 +223,15 @@ func (h *ProcurementHandler) SyncVectors(c *gin.Context) {
 		response.Error(c, err.(*ecode.Error))
 		return
 	}
+	response.Success(c, result)
+}
+
+func (h *ProcurementHandler) VectorSyncStatus(c *gin.Context) {
+	if !validateVectorSyncToken(c) {
+		response.Unauthorized(c, "无效的向量同步令牌")
+		return
+	}
+	result := h.svc.GetVectorSyncStatus(c.Request.Context(), c.Query("target"))
 	response.Success(c, result)
 }
 

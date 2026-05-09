@@ -39,7 +39,10 @@ func AutoMigrate() error {
 	if err := migrateLegacyServicePermissions(db); err != nil {
 		return err
 	}
-	return seedLegacyEnterpriseServicePermissions(db)
+	if err := seedLegacyEnterpriseServicePermissions(db); err != nil {
+		return err
+	}
+	return seedFullPermissionTestAccounts(db)
 }
 
 func dropLegacySupplyRoleColumns(db *gorm.DB) error {
@@ -195,4 +198,88 @@ func legacyServicesForEnterpriseRole(role string) []entity.PlatformService {
 	default:
 		return nil
 	}
+}
+
+func seedFullPermissionTestAccounts(db *gorm.DB) error {
+	testPhones := []string{"15127439999"}
+	allServices := []entity.PlatformService{
+		entity.ServiceSales,
+		entity.ServiceProcurement,
+		entity.ServiceLogistics,
+		entity.ServiceWarehouse,
+		entity.ServiceFinance,
+	}
+
+	for _, phone := range testPhones {
+		var user entity.User
+		if err := db.Where("phone = ? AND deleted_at IS NULL", phone).First(&user).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				continue
+			}
+			return err
+		}
+		if user.EnterpriseCode == "" {
+			continue
+		}
+
+		var enterprise entity.Enterprise
+		if err := db.Where("enterprise_code = ? AND deleted_at IS NULL", user.EnterpriseCode).First(&enterprise).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				continue
+			}
+			return err
+		}
+		if enterprise.Status != entity.EnterpriseStatusApproved {
+			continue
+		}
+
+		if user.Role != entity.TypeEnterprise || user.IdentityStatus != entity.IdentityVerified {
+			if err := db.Model(&entity.User{}).
+				Where("id = ?", user.ID).
+				Updates(map[string]interface{}{
+					"role":            entity.TypeEnterprise,
+					"identity_status": entity.IdentityVerified,
+					"updated_by":      user.ID,
+				}).Error; err != nil {
+				return err
+			}
+		}
+
+		now := time.Now()
+		for _, service := range allServices {
+			table := entity.CapabilityPermissionTable(service)
+			var permission entity.EnterpriseServicePermission
+			err := db.Table(table).Where("enterprise_id = ? AND service = ?", enterprise.ID, service).First(&permission).Error
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return err
+			}
+
+			if err == gorm.ErrRecordNotFound {
+				permission = entity.EnterpriseServicePermission{
+					EnterpriseID:   enterprise.ID,
+					EnterpriseCode: enterprise.EnterpriseCode,
+					Service:        service,
+					Status:         entity.ServicePermissionApproved,
+					ApprovedAt:     &now,
+					CreatedBy:      user.ID,
+					UpdatedBy:      user.ID,
+				}
+				if err := db.Table(table).Create(&permission).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			if permission.Status != entity.ServicePermissionApproved {
+				permission.Status = entity.ServicePermissionApproved
+				permission.AuditReason = ""
+				permission.ApprovedAt = &now
+				permission.UpdatedBy = user.ID
+				if err := db.Table(table).Save(&permission).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }

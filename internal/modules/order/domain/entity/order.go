@@ -39,6 +39,8 @@ const (
 	OrderStatusArchived                 OrderStatus = 20 // 已归档
 	OrderStatusFinancingReview          OrderStatus = 21 // 托盘融资审批中
 	OrderStatusPendingFinancingContract OrderStatus = 22 // 待融资合同
+	OrderStatusPendingWarehouseReselect OrderStatus = 23 // 待重新选仓
+	OrderStatusPendingLogisticsRebid    OrderStatus = 24 // 待重新发起物流
 )
 
 // OrderItem 订单项
@@ -334,6 +336,7 @@ type LogisticsBidding struct {
 	PickupAddress          string                 `gorm:"type:varchar(500);comment:提货地址" json:"pickup_address"`
 	DestinationAddress     string                 `gorm:"type:varchar(500);comment:目的地地址" json:"destination_address"`
 	Requirement            string                 `gorm:"type:varchar(1000);comment:承运要求" json:"requirement"`
+	FreightPayer           string                 `gorm:"type:varchar(16);default:buyer;comment:运费承担方 buyer/seller" json:"freight_payer"`
 	Status                 LogisticsBiddingStatus `gorm:"type:varchar(32);index;comment:状态" json:"status"`
 	SelectedQuoteID        uint64                 `gorm:"index;comment:选中报价ID" json:"selected_quote_id"`
 	BuyerConfirmedQuoteID  uint64                 `gorm:"comment:买方确认报价ID" json:"buyer_confirmed_quote_id"`
@@ -434,6 +437,9 @@ type OrderFinancingRequest struct {
 	BuyerSignedAt       *time.Time             `gorm:"comment:买方签署时间" json:"buyer_signed_at"`
 	FeeVoucherURL       string                 `gorm:"type:varchar(500);comment:手续费支付凭证" json:"fee_voucher_url"`
 	FeePaidAt           *time.Time             `gorm:"comment:手续费支付时间" json:"fee_paid_at"`
+	FundingCommission   float64                `gorm:"type:decimal(12,2);comment:资金方平台分佣金额" json:"funding_commission"`
+	CommissionVoucher   string                 `gorm:"type:varchar(500);comment:资金方分佣凭证" json:"commission_voucher"`
+	CommissionPaidAt    *time.Time             `gorm:"comment:资金方分佣支付时间" json:"commission_paid_at"`
 	DisbursementVoucher string                 `gorm:"type:varchar(500);comment:放款凭证" json:"disbursement_voucher"`
 	DisbursedAt         *time.Time             `gorm:"comment:放款时间" json:"disbursed_at"`
 	PledgeVoucherURL    string                 `gorm:"type:varchar(500);comment:货权质押凭证" json:"pledge_voucher_url"`
