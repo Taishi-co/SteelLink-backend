@@ -10,13 +10,14 @@ import (
 )
 
 type Claims struct {
-	UserID         uint64 `json:"user_id"`
-	Phone          string `json:"phone,omitempty"`
-	Email          string `json:"email,omitempty"`
-	UserType       string `json:"user_type"`
-	EnterpriseID   uint64 `json:"enterprise_id,omitempty"`
-	EnterpriseCode string `json:"enterprise_code,omitempty"`
-	EnterpriseRole string `json:"enterprise_role,omitempty"`
+	UserID              uint64   `json:"user_id"`
+	Phone               string   `json:"phone,omitempty"`
+	Email               string   `json:"email,omitempty"`
+	UserType            string   `json:"user_type"`
+	EnterpriseID        uint64   `json:"enterprise_id,omitempty"`
+	EnterpriseCode      string   `json:"enterprise_code,omitempty"`
+	EnterpriseRole      string   `json:"enterprise_role,omitempty"`
+	ServiceCapabilities []string `json:"service_capabilities,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -32,22 +33,28 @@ var (
 )
 
 // GenerateToken generates access token and refresh token
-func GenerateToken(userID uint64, phone, email, userType string, enterpriseID uint64, enterpriseCode, enterpriseRole string) (*TokenPair, error) {
+func GenerateToken(userID uint64, phone, email, userType string, enterpriseID uint64, enterpriseCode, enterpriseRole string, serviceCapabilities ...[]string) (*TokenPair, error) {
 	cfg := config.Get()
 
 	now := time.Now()
 	expiresAt := now.Add(cfg.JWT.ExpireDuration())
 	refreshExpiresAt := now.Add(cfg.JWT.RefreshExpireDuration())
 
+	var capabilities []string
+	if len(serviceCapabilities) > 0 {
+		capabilities = serviceCapabilities[0]
+	}
+
 	// Access token claims
 	accessClaims := Claims{
-		UserID:         userID,
-		Phone:          phone,
-		Email:          email,
-		UserType:       userType,
-		EnterpriseID:   enterpriseID,
-		EnterpriseCode: enterpriseCode,
-		EnterpriseRole: enterpriseRole,
+		UserID:              userID,
+		Phone:               phone,
+		Email:               email,
+		UserType:            userType,
+		EnterpriseID:        enterpriseID,
+		EnterpriseCode:      enterpriseCode,
+		EnterpriseRole:      enterpriseRole,
+		ServiceCapabilities: capabilities,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    cfg.JWT.Issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -64,9 +71,10 @@ func GenerateToken(userID uint64, phone, email, userType string, enterpriseID ui
 
 	// Refresh token claims
 	refreshClaims := Claims{
-		UserID:       userID,
-		UserType:     userType,
-		EnterpriseID: enterpriseID,
+		UserID:              userID,
+		UserType:            userType,
+		EnterpriseID:        enterpriseID,
+		ServiceCapabilities: capabilities,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    cfg.JWT.Issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -117,5 +125,5 @@ func RefreshToken(refreshTokenString string) (*TokenPair, error) {
 		return nil, err
 	}
 
-	return GenerateToken(claims.UserID, claims.Phone, claims.Email, claims.UserType, claims.EnterpriseID, claims.EnterpriseCode, claims.EnterpriseRole)
+	return GenerateToken(claims.UserID, claims.Phone, claims.Email, claims.UserType, claims.EnterpriseID, claims.EnterpriseCode, claims.EnterpriseRole, claims.ServiceCapabilities)
 }

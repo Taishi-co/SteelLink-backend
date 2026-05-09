@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/ui/dto"
@@ -441,6 +442,86 @@ func (h *Handler) ListMyFinance(c *gin.Context) {
 	response.Success(c, list)
 }
 
+func (h *Handler) UpdateFinance(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("企业用户才能编辑金融服务"))
+		return
+	}
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req dto.FinanceServiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var item entity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "金融服务不存在或无权修改")
+		return
+	}
+	item.Name = req.Name
+	item.FinanceType = req.FinanceType
+	item.MinAmount = req.MinAmount
+	item.MaxAmount = req.MaxAmount
+	item.TermDays = req.TermDays
+	item.AnnualRate = req.AnnualRate
+	item.FeeRule = req.FeeRule
+	item.RiskControlRule = req.RiskControlRule
+	item.RequiredDocuments = entity.StringList(req.RequiredDocuments)
+	item.SupportedScenarios = entity.StringList(req.SupportedScenarios)
+	item.Description = req.Description
+	item.Status = entity.OfferStatusPending
+	item.AuditRemark = ""
+	item.ApprovedAt = nil
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新金融服务失败"))
+		return
+	}
+	response.Success(c, financeToInfo(&item))
+}
+
+func (h *Handler) DeleteFinance(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var item entity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.NotFound(c, "金融服务不存在或无权下线")
+		return
+	}
+	item.Status = entity.OfferStatusOffline
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("下线金融服务失败"))
+		return
+	}
+	response.Success(c, financeToInfo(&item))
+}
+
+func (h *Handler) AuditWarehouse(c *gin.Context) {
+	var item entity.WarehouseService
+	if !h.auditOffer(c, &item) {
+		return
+	}
+	response.Success(c, warehouseToInfo(&item))
+}
+
+func (h *Handler) AuditLogistics(c *gin.Context) {
+	var item entity.LogisticsService
+	if !h.auditOffer(c, &item) {
+		return
+	}
+	response.Success(c, logisticsToInfo(&item))
+}
+
+func (h *Handler) AuditFinance(c *gin.Context) {
+	var item entity.FinanceService
+	if !h.auditOffer(c, &item) {
+		return
+	}
+	response.Success(c, financeToInfo(&item))
+}
+
 func (h *Handler) GetWarehouse(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	key := "service:warehouse:detail:" + cache.Hash(id)
@@ -461,6 +542,64 @@ func (h *Handler) GetWarehouse(c *gin.Context) {
 	result := warehouseToInfo(&item)
 	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferDetailTTL)
 	response.Success(c, result)
+}
+
+func (h *Handler) auditOffer(c *gin.Context, item any) bool {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return false
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的服务资源ID")
+		return false
+	}
+	var req dto.AuditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return false
+	}
+	status := entity.OfferStatus(req.Status)
+	remark := strings.TrimSpace(req.AuditRemark)
+	if remark == "" {
+		remark = strings.TrimSpace(req.AuditRemarkCamel)
+	}
+	if err := h.db.WithContext(c.Request.Context()).First(item, id).Error; err != nil {
+		response.NotFound(c, "服务资源不存在")
+		return false
+	}
+	setOfferAudit(item, status, remark, claims.UserID)
+	if err := h.db.WithContext(c.Request.Context()).Save(item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("审核服务资源失败"))
+		return false
+	}
+	return true
+}
+
+func setOfferAudit(item any, status entity.OfferStatus, remark string, operatorID uint64) {
+	var approvedAt *time.Time
+	if status == entity.OfferStatusApproved {
+		now := time.Now()
+		approvedAt = &now
+	}
+	switch target := item.(type) {
+	case *entity.WarehouseService:
+		target.Status = status
+		target.AuditRemark = remark
+		target.UpdatedBy = operatorID
+		target.ApprovedAt = approvedAt
+	case *entity.LogisticsService:
+		target.Status = status
+		target.AuditRemark = remark
+		target.UpdatedBy = operatorID
+		target.ApprovedAt = approvedAt
+	case *entity.FinanceService:
+		target.Status = status
+		target.AuditRemark = remark
+		target.UpdatedBy = operatorID
+		target.ApprovedAt = approvedAt
+	}
 }
 
 func (h *Handler) GetLogistics(c *gin.Context) {

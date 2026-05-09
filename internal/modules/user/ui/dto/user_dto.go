@@ -3,23 +3,25 @@ package dto
 import "time"
 
 type UserInfo struct {
-	ID             uint64    `json:"id"`
-	UID            string    `json:"uid"`
-	UserNo         string    `json:"user_no"`
-	PlatformID     string    `json:"platform_id"`
-	PersonalCode   string    `json:"personal_code"`
-	EnterpriseCode string    `json:"enterprise_code"`
-	Role           string    `json:"role"`
-	Phone          string    `json:"phone"`
-	QQ             string    `json:"qq"`
-	Email          string    `json:"email"`
-	RealName       string    `json:"real_name"`
-	IDCard         string    `json:"id_card"`
-	IdentityStatus int       `json:"identity_status"`
-	IdentityReject string    `json:"identity_reject"`
-	Status         int       `json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                  uint64    `json:"id"`
+	UID                 string    `json:"uid"`
+	UserNo              string    `json:"user_no"`
+	PlatformID          string    `json:"platform_id"`
+	PersonalCode        string    `json:"personal_code"`
+	EnterpriseCode      string    `json:"enterprise_code"`
+	EnterpriseRole      string    `json:"enterprise_role"`
+	ServiceCapabilities []string  `json:"service_capabilities"`
+	Role                string    `json:"role"`
+	Phone               string    `json:"phone"`
+	QQ                  string    `json:"qq"`
+	Email               string    `json:"email"`
+	RealName            string    `json:"real_name"`
+	IDCard              string    `json:"id_card"`
+	IdentityStatus      int       `json:"identity_status"`
+	IdentityReject      string    `json:"identity_reject"`
+	Status              int       `json:"status"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type SubmitIdentityRequest struct {

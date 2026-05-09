@@ -135,12 +135,17 @@ func (s *AuthService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Lo
 		return nil, err
 	}
 
+	serviceCapabilities, err := listApprovedServiceCapabilities(ctx, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
+
 	// 生成Token
 	var email string
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole, serviceCapabilities)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -178,17 +183,21 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 		return nil, ecode.ErrUserDisabled
 	}
 
-	// 生成新Token
 	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
 	if err != nil {
 		return nil, err
 	}
+	serviceCapabilities, err := listApprovedServiceCapabilities(ctx, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
 
+	// 生成新Token
 	var email string
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole, serviceCapabilities)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -271,17 +280,21 @@ func (s *AuthService) SmsLogin(ctx context.Context, req *dto.SmsLoginRequest) (*
 		return nil, ecode.ErrUserDisabled
 	}
 
-	// 生成Token
 	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
 	if err != nil {
 		return nil, err
 	}
+	serviceCapabilities, err := listApprovedServiceCapabilities(ctx, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
 
+	// 生成Token
 	var email string
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole, serviceCapabilities)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
 	}
@@ -358,6 +371,37 @@ func authSnapshotCacheKey(userID uint64) string {
 	return "auth:user-snapshot:" + cache.Hash(userID)
 }
 
+func listApprovedServiceCapabilities(ctx context.Context, enterpriseID uint64) ([]string, error) {
+	if enterpriseID == 0 {
+		return nil, nil
+	}
+	db := database.GetDB()
+	if db == nil {
+		return nil, ecode.ErrDatabase.WithMessage("数据库未初始化")
+	}
+
+	capabilities := make([]string, 0, 5)
+	for table := range map[string]struct{}{
+		entity.TradeCapabilityPermissionTable: {},
+		entity.ProviderServicePermissionTable: {},
+	} {
+		var rows []struct {
+			Service string
+		}
+		if err := db.WithContext(ctx).
+			Table(table).
+			Select("service").
+			Where("enterprise_id = ? AND status = ? AND deleted_at IS NULL", enterpriseID, entity.ServicePermissionApproved).
+			Find(&rows).Error; err != nil {
+			return nil, ecode.ErrDatabase.WithMessage("查询企业能力失败")
+		}
+		for _, row := range rows {
+			capabilities = append(capabilities, row.Service)
+		}
+	}
+	return capabilities, nil
+}
+
 // 辅助函数
 
 // isPhone 判断是否为手机号
@@ -410,7 +454,7 @@ func toUserInfo(user *entity.User) *dto.UserInfo {
 	if user.Email != nil {
 		email = *user.Email
 	}
-	return &dto.UserInfo{
+	info := &dto.UserInfo{
 		ID:             user.ID,
 		UID:            user.UID,
 		UserNo:         user.UserNo,
@@ -429,4 +473,17 @@ func toUserInfo(user *entity.User) *dto.UserInfo {
 		CreatedAt:      user.CreatedAt,
 		UpdatedAt:      user.UpdatedAt,
 	}
+	if user.EnterpriseCode != "" {
+		db := database.GetDB()
+		if db != nil {
+			var enterprise entity.Enterprise
+			if err := db.Where("enterprise_code = ? AND deleted_at IS NULL", user.EnterpriseCode).First(&enterprise).Error; err == nil {
+				info.EnterpriseRole = enterprise.EnterpriseRole
+				if capabilities, err := listApprovedServiceCapabilities(context.Background(), enterprise.ID); err == nil {
+					info.ServiceCapabilities = capabilities
+				}
+			}
+		}
+	}
+	return info
 }

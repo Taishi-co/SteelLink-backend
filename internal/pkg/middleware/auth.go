@@ -18,11 +18,12 @@ const (
 )
 
 type authUserSnapshot struct {
-	UserID         uint64 `json:"user_id"`
-	UserType       string `json:"user_type"`
-	EnterpriseID   uint64 `json:"enterprise_id"`
-	EnterpriseCode string `json:"enterprise_code"`
-	EnterpriseRole string `json:"enterprise_role"`
+	UserID              uint64   `json:"user_id"`
+	UserType            string   `json:"user_type"`
+	EnterpriseID        uint64   `json:"enterprise_id"`
+	EnterpriseCode      string   `json:"enterprise_code"`
+	EnterpriseRole      string   `json:"enterprise_role"`
+	ServiceCapabilities []string `json:"service_capabilities"`
 }
 
 func AuthRequired() gin.HandlerFunc {
@@ -73,7 +74,6 @@ func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, s
 	needsRefresh := false
 	currentUserType := claims.UserType
 	currentEnterpriseCode := claims.EnterpriseCode
-	currentEnterpriseID := claims.EnterpriseID
 
 	if snapshot.UserType != claims.UserType {
 		currentUserType = snapshot.UserType
@@ -89,6 +89,7 @@ func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, s
 		newToken, err := auth.GenerateToken(
 			claims.UserID, claims.Phone, claims.Email,
 			currentUserType, snapshot.EnterpriseID, currentEnterpriseCode, snapshot.EnterpriseRole,
+			snapshot.ServiceCapabilities,
 		)
 		if err != nil {
 			return nil, ""
@@ -102,11 +103,12 @@ func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, s
 		return newClaims, newToken.AccessToken
 	}
 
-	if currentEnterpriseID == 0 && snapshot.EnterpriseCode != "" {
-		if snapshot.EnterpriseID != claims.EnterpriseID || snapshot.EnterpriseRole != claims.EnterpriseRole {
+	if snapshot.EnterpriseCode != "" {
+		if snapshot.EnterpriseID != claims.EnterpriseID || snapshot.EnterpriseRole != claims.EnterpriseRole || !sameStringSet(snapshot.ServiceCapabilities, claims.ServiceCapabilities) {
 			newToken, err := auth.GenerateToken(
 				claims.UserID, claims.Phone, claims.Email,
 				currentUserType, snapshot.EnterpriseID, currentEnterpriseCode, snapshot.EnterpriseRole,
+				snapshot.ServiceCapabilities,
 			)
 			if err != nil {
 				return nil, ""
@@ -150,6 +152,7 @@ func loadAuthUserSnapshot(c *gin.Context, userID uint64) (authUserSnapshot, bool
 			snapshot.EnterpriseID = enterprise.ID
 			snapshot.EnterpriseCode = enterprise.EnterpriseCode
 			snapshot.EnterpriseRole = enterprise.EnterpriseRole
+			snapshot.ServiceCapabilities = approvedServiceCapabilities(c, enterprise.ID)
 		}
 	}
 	cache.SetJSON(c.Request.Context(), key, snapshot, cache.AuthSnapshotTTL)
@@ -158,6 +161,51 @@ func loadAuthUserSnapshot(c *gin.Context, userID uint64) (authUserSnapshot, bool
 
 func authSnapshotCacheKey(userID uint64) string {
 	return "auth:user-snapshot:" + cache.Hash(userID)
+}
+
+func approvedServiceCapabilities(c *gin.Context, enterpriseID uint64) []string {
+	db := database.GetDB()
+	if db == nil || enterpriseID == 0 {
+		return nil
+	}
+
+	capabilities := make([]string, 0, 5)
+	for table := range map[string]struct{}{
+		entity.TradeCapabilityPermissionTable: {},
+		entity.ProviderServicePermissionTable: {},
+	} {
+		var rows []struct {
+			Service string
+		}
+		if err := db.WithContext(c.Request.Context()).
+			Table(table).
+			Select("service").
+			Where("enterprise_id = ? AND status = ? AND deleted_at IS NULL", enterpriseID, entity.ServicePermissionApproved).
+			Find(&rows).Error; err != nil {
+			return nil
+		}
+		for _, row := range rows {
+			capabilities = append(capabilities, row.Service)
+		}
+	}
+	return capabilities
+}
+
+func sameStringSet(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, item := range a {
+		seen[item]++
+	}
+	for _, item := range b {
+		seen[item]--
+		if seen[item] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func GetClaims(c *gin.Context) *auth.Claims {
