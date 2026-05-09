@@ -47,6 +47,36 @@ func (h *ProductHandler) Create(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// Update 更新卖家自有商品，提交后重新进入平台审核
+func (h *ProductHandler) Update(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的商品ID")
+		return
+	}
+
+	var req dto.CreateProductRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, svcErr := h.productService.Update(c.Request.Context(), id, &req, userID, claims.EnterpriseID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // GetByID 获取商品详情
 func (h *ProductHandler) GetByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -68,6 +98,29 @@ func (h *ProductHandler) GetByID(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// Delete 删除卖家自有商品
+func (h *ProductHandler) Delete(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的商品ID")
+		return
+	}
+
+	if svcErr := h.productService.Delete(c.Request.Context(), id, userID, claims.EnterpriseID); svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, gin.H{"message": "商品删除成功"})
 }
 
 // UpdateDisplay 更新商品展示/审核补充资料
@@ -121,6 +174,80 @@ func (h *ProductHandler) List(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// ListCategories 获取商品品类列表
+func (h *ProductHandler) ListCategories(c *gin.Context) {
+	var req dto.ProductCategoryListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.ListCategories(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// CreateCategory 创建商品品类
+func (h *ProductHandler) CreateCategory(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req dto.UpsertProductCategoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.CreateCategory(c.Request.Context(), &req, userID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// UpdateCategory 更新商品品类
+func (h *ProductHandler) UpdateCategory(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的品类ID")
+		return
+	}
+	var req dto.UpsertProductCategoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.productService.UpdateCategory(c.Request.Context(), id, &req, userID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// DeleteCategory 删除商品品类
+func (h *ProductHandler) DeleteCategory(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的品类ID")
+		return
+	}
+	if err := h.productService.DeleteCategory(c.Request.Context(), id); err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"message": "商品品类删除成功"})
 }
 
 // UpdateStatus 更新商品状态

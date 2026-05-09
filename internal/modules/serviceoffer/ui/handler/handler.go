@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/ui/dto"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
@@ -59,6 +61,7 @@ func (h *Handler) CreateWarehouse(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("创建仓储资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, warehouseToInfo(&item))
 }
 
@@ -71,6 +74,12 @@ func (h *Handler) ListWarehouses(c *gin.Context) {
 	if req.Status == nil {
 		status := int(entity.OfferStatusApproved)
 		req.Status = &status
+	}
+	key := cache.Key("service:warehouse:list", req)
+	var cached dto.PageResponse[dto.WarehouseServiceInfo]
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
 	}
 	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseService{})
 	query = applyCommonQuery(query, req, "warehouse_name")
@@ -91,7 +100,9 @@ func (h *Handler) ListWarehouses(c *gin.Context) {
 	for _, row := range rows {
 		list = append(list, warehouseToInfo(&row))
 	}
-	response.Success(c, dto.PageResponse[dto.WarehouseServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+	result := dto.PageResponse[dto.WarehouseServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize}
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferListTTL)
+	response.Success(c, result)
 }
 
 func (h *Handler) ListMyWarehouses(c *gin.Context) {
@@ -154,6 +165,7 @@ func (h *Handler) UpdateWarehouse(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新仓储资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, warehouseToInfo(&item))
 }
 
@@ -171,6 +183,7 @@ func (h *Handler) DeleteWarehouse(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("下线仓储资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, warehouseToInfo(&item))
 }
 
@@ -209,6 +222,7 @@ func (h *Handler) CreateLogistics(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("创建物流资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, logisticsToInfo(&item))
 }
 
@@ -221,6 +235,12 @@ func (h *Handler) ListLogistics(c *gin.Context) {
 	if req.Status == nil {
 		status := int(entity.OfferStatusApproved)
 		req.Status = &status
+	}
+	key := cache.Key("service:logistics:list", req)
+	var cached dto.PageResponse[dto.LogisticsServiceInfo]
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
 	}
 	query := h.db.WithContext(c.Request.Context()).Model(&entity.LogisticsService{})
 	query = applyCommonQuery(query, req, "name", "route_start", "route_end", "service_scope", "vehicle_type")
@@ -241,7 +261,9 @@ func (h *Handler) ListLogistics(c *gin.Context) {
 	for _, row := range rows {
 		list = append(list, logisticsToInfo(&row))
 	}
-	response.Success(c, dto.PageResponse[dto.LogisticsServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+	result := dto.PageResponse[dto.LogisticsServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize}
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferListTTL)
+	response.Success(c, result)
 }
 
 func (h *Handler) ListMyLogistics(c *gin.Context) {
@@ -302,6 +324,7 @@ func (h *Handler) UpdateLogistics(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新物流资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, logisticsToInfo(&item))
 }
 
@@ -319,6 +342,7 @@ func (h *Handler) DeleteLogistics(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("下线物流资源失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, logisticsToInfo(&item))
 }
 
@@ -354,6 +378,7 @@ func (h *Handler) CreateFinance(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("创建金融服务失败"))
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, financeToInfo(&item))
 }
 
@@ -366,6 +391,12 @@ func (h *Handler) ListFinance(c *gin.Context) {
 	if req.Status == nil {
 		status := int(entity.OfferStatusApproved)
 		req.Status = &status
+	}
+	key := cache.Key("service:finance:list", req)
+	var cached dto.PageResponse[dto.FinanceServiceInfo]
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
 	}
 	query := h.db.WithContext(c.Request.Context()).Model(&entity.FinanceService{})
 	query = applyCommonQuery(query, req, "name")
@@ -386,7 +417,9 @@ func (h *Handler) ListFinance(c *gin.Context) {
 	for _, row := range rows {
 		list = append(list, financeToInfo(&row))
 	}
-	response.Success(c, dto.PageResponse[dto.FinanceServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+	result := dto.PageResponse[dto.FinanceServiceInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize}
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferListTTL)
+	response.Success(c, result)
 }
 
 func (h *Handler) ListMyFinance(c *gin.Context) {
@@ -410,6 +443,12 @@ func (h *Handler) ListMyFinance(c *gin.Context) {
 
 func (h *Handler) GetWarehouse(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	key := "service:warehouse:detail:" + cache.Hash(id)
+	var cached dto.WarehouseServiceInfo
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
+	}
 	var item entity.WarehouseService
 	if err := h.db.WithContext(c.Request.Context()).First(&item, id).Error; err != nil {
 		response.NotFound(c, "仓储资源不存在")
@@ -419,11 +458,19 @@ func (h *Handler) GetWarehouse(c *gin.Context) {
 		response.NotFound(c, "仓储资源不存在")
 		return
 	}
-	response.Success(c, warehouseToInfo(&item))
+	result := warehouseToInfo(&item)
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferDetailTTL)
+	response.Success(c, result)
 }
 
 func (h *Handler) GetLogistics(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	key := "service:logistics:detail:" + cache.Hash(id)
+	var cached dto.LogisticsServiceInfo
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
+	}
 	var item entity.LogisticsService
 	if err := h.db.WithContext(c.Request.Context()).First(&item, id).Error; err != nil {
 		response.NotFound(c, "物流资源不存在")
@@ -433,11 +480,19 @@ func (h *Handler) GetLogistics(c *gin.Context) {
 		response.NotFound(c, "物流资源不存在")
 		return
 	}
-	response.Success(c, logisticsToInfo(&item))
+	result := logisticsToInfo(&item)
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferDetailTTL)
+	response.Success(c, result)
 }
 
 func (h *Handler) GetFinance(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	key := "service:finance:detail:" + cache.Hash(id)
+	var cached dto.FinanceServiceInfo
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
+	}
 	var item entity.FinanceService
 	if err := h.db.WithContext(c.Request.Context()).First(&item, id).Error; err != nil {
 		response.NotFound(c, "金融服务不存在")
@@ -447,7 +502,17 @@ func (h *Handler) GetFinance(c *gin.Context) {
 		response.NotFound(c, "金融服务不存在")
 		return
 	}
-	response.Success(c, financeToInfo(&item))
+	result := financeToInfo(&item)
+	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferDetailTTL)
+	response.Success(c, result)
+}
+
+func invalidateServiceOfferCache(ctx context.Context) {
+	cache.DeleteByPattern(ctx, "service:warehouse:*")
+	cache.DeleteByPattern(ctx, "service:logistics:*")
+	cache.DeleteByPattern(ctx, "service:finance:*")
+	cache.DeleteByPattern(ctx, "ai:match-logistics:*")
+	cache.Delete(ctx, "ai:approved-logistics-services")
 }
 
 func applyCommonQuery(query *gorm.DB, req dto.ListRequest, searchColumns ...string) *gorm.DB {

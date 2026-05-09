@@ -12,6 +12,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/sms"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
@@ -159,6 +160,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	if err != nil {
 		return nil, err
 	}
+	if cache.Exists(ctx, refreshTokenBlacklistKey(req.RefreshToken)) {
+		return nil, ecode.ErrTokenInvalid
+	}
 
 	// 查询用户
 	user, err := s.userRepo.FindByID(ctx, claims.UserID)
@@ -187,6 +191,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole)
 	if err != nil {
 		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
+	}
+	if claims.ExpiresAt != nil {
+		if ttl := time.Until(claims.ExpiresAt.Time); ttl > 0 {
+			cache.SetString(ctx, refreshTokenBlacklistKey(req.RefreshToken), "1", ttl)
+		}
 	}
 
 	return &dto.LoginResponse{
@@ -310,6 +319,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *dto.ResetPasswordR
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return ecode.ErrDatabase.WithMessage("更新密码失败")
 	}
+	cache.Delete(ctx, authSnapshotCacheKey(user.ID))
 
 	return nil
 }
@@ -338,6 +348,14 @@ func (s *AuthService) resolveEnterpriseInfo(ctx context.Context, user *entity.Us
 	}
 
 	return enterprise.ID, enterprise.EnterpriseCode, enterprise.EnterpriseRole, nil
+}
+
+func refreshTokenBlacklistKey(token string) string {
+	return "auth:refresh-token:blacklist:" + cache.HashString(token)
+}
+
+func authSnapshotCacheKey(userID uint64) string {
+	return "auth:user-snapshot:" + cache.Hash(userID)
 }
 
 // 辅助函数

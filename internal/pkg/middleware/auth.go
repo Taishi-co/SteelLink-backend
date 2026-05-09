@@ -3,18 +3,27 @@ package middleware
 import (
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 const (
 	ClaimsKey         = "claims"
 	TokenRefreshedKey = "X-Token-Refreshed"
 )
+
+type authUserSnapshot struct {
+	UserID         uint64 `json:"user_id"`
+	UserType       string `json:"user_type"`
+	EnterpriseID   uint64 `json:"enterprise_id"`
+	EnterpriseCode string `json:"enterprise_code"`
+	EnterpriseRole string `json:"enterprise_role"`
+}
 
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -56,13 +65,8 @@ func AuthRequired() gin.HandlerFunc {
 }
 
 func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, string) {
-	db := database.GetDB()
-	if db == nil {
-		return nil, ""
-	}
-
-	var user entity.User
-	if err := db.WithContext(c.Request.Context()).Select("id, role, enterprise_code").First(&user, claims.UserID).Error; err != nil {
+	snapshot, ok := loadAuthUserSnapshot(c, claims.UserID)
+	if !ok {
 		return nil, ""
 	}
 
@@ -71,30 +75,20 @@ func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, s
 	currentEnterpriseCode := claims.EnterpriseCode
 	currentEnterpriseID := claims.EnterpriseID
 
-	if string(user.Role) != claims.UserType {
-		currentUserType = string(user.Role)
+	if snapshot.UserType != claims.UserType {
+		currentUserType = snapshot.UserType
 		needsRefresh = true
 	}
 
-	if user.EnterpriseCode != claims.EnterpriseCode {
-		currentEnterpriseCode = user.EnterpriseCode
+	if snapshot.EnterpriseCode != claims.EnterpriseCode {
+		currentEnterpriseCode = snapshot.EnterpriseCode
 		needsRefresh = true
 	}
 
 	if needsRefresh {
-		var enterpriseID uint64
-		var enterpriseRole string
-		if user.EnterpriseCode != "" {
-			var enterprise entity.Enterprise
-			if err := db.WithContext(c.Request.Context()).Select("id, enterprise_code, enterprise_role").Where("enterprise_code = ?", user.EnterpriseCode).First(&enterprise).Error; err == nil {
-				enterpriseID = enterprise.ID
-				enterpriseRole = enterprise.EnterpriseRole
-			}
-		}
-
 		newToken, err := auth.GenerateToken(
-			user.ID, claims.Phone, claims.Email,
-			currentUserType, enterpriseID, currentEnterpriseCode, enterpriseRole,
+			claims.UserID, claims.Phone, claims.Email,
+			currentUserType, snapshot.EnterpriseID, currentEnterpriseCode, snapshot.EnterpriseRole,
 		)
 		if err != nil {
 			return nil, ""
@@ -108,27 +102,62 @@ func checkAndRefreshClaims(c *gin.Context, claims *auth.Claims) (*auth.Claims, s
 		return newClaims, newToken.AccessToken
 	}
 
-	if currentEnterpriseID == 0 && user.EnterpriseCode != "" {
-		var enterprise entity.Enterprise
-		if err := db.WithContext(c.Request.Context()).Select("id, enterprise_code, enterprise_role").Where("enterprise_code = ?", user.EnterpriseCode).First(&enterprise).Error; err == nil {
-			if enterprise.ID != claims.EnterpriseID || enterprise.EnterpriseRole != claims.EnterpriseRole {
-				newToken, err := auth.GenerateToken(
-					user.ID, claims.Phone, claims.Email,
-					currentUserType, enterprise.ID, currentEnterpriseCode, enterprise.EnterpriseRole,
-				)
-				if err != nil {
-					return nil, ""
-				}
-				newClaims, err := auth.ParseToken(newToken.AccessToken)
-				if err != nil {
-					return nil, ""
-				}
-				return newClaims, newToken.AccessToken
+	if currentEnterpriseID == 0 && snapshot.EnterpriseCode != "" {
+		if snapshot.EnterpriseID != claims.EnterpriseID || snapshot.EnterpriseRole != claims.EnterpriseRole {
+			newToken, err := auth.GenerateToken(
+				claims.UserID, claims.Phone, claims.Email,
+				currentUserType, snapshot.EnterpriseID, currentEnterpriseCode, snapshot.EnterpriseRole,
+			)
+			if err != nil {
+				return nil, ""
 			}
+			newClaims, err := auth.ParseToken(newToken.AccessToken)
+			if err != nil {
+				return nil, ""
+			}
+			return newClaims, newToken.AccessToken
 		}
 	}
 
 	return nil, ""
+}
+
+func loadAuthUserSnapshot(c *gin.Context, userID uint64) (authUserSnapshot, bool) {
+	key := authSnapshotCacheKey(userID)
+	var snapshot authUserSnapshot
+	if cache.GetJSON(c.Request.Context(), key, &snapshot) {
+		return snapshot, true
+	}
+
+	db := database.GetDB()
+	if db == nil {
+		return authUserSnapshot{}, false
+	}
+
+	var user entity.User
+	if err := db.WithContext(c.Request.Context()).Select("id, role, enterprise_code").First(&user, userID).Error; err != nil {
+		return authUserSnapshot{}, false
+	}
+
+	snapshot = authUserSnapshot{
+		UserID:         user.ID,
+		UserType:       string(user.Role),
+		EnterpriseCode: user.EnterpriseCode,
+	}
+	if user.EnterpriseCode != "" {
+		var enterprise entity.Enterprise
+		if err := db.WithContext(c.Request.Context()).Select("id, enterprise_code, enterprise_role").Where("enterprise_code = ?", user.EnterpriseCode).First(&enterprise).Error; err == nil {
+			snapshot.EnterpriseID = enterprise.ID
+			snapshot.EnterpriseCode = enterprise.EnterpriseCode
+			snapshot.EnterpriseRole = enterprise.EnterpriseRole
+		}
+	}
+	cache.SetJSON(c.Request.Context(), key, snapshot, cache.AuthSnapshotTTL)
+	return snapshot, true
+}
+
+func authSnapshotCacheKey(userID uint64) string {
+	return "auth:user-snapshot:" + cache.Hash(userID)
 }
 
 func GetClaims(c *gin.Context) *auth.Claims {

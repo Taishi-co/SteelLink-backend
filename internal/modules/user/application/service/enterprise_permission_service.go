@@ -7,6 +7,7 @@ import (
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/dto"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"gorm.io/gorm"
@@ -144,6 +145,7 @@ func (s *EnterprisePermissionService) Apply(ctx context.Context, userID uint64, 
 		}
 		return nil, ecode.ErrDatabase.WithMessage("提交服务申请失败")
 	}
+	invalidateEnterprisePermissionCache(ctx, enterprise.ID)
 
 	return s.GetApplicationByID(ctx, application.ID)
 }
@@ -214,7 +216,8 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 		return ecode.ErrBadRequest.WithMessage("审核状态无效")
 	}
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var enterpriseID uint64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var application entity.EnterpriseServiceApplication
 		if err := tx.First(&application, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -222,6 +225,7 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 			}
 			return ecode.ErrDatabase
 		}
+		enterpriseID = application.EnterpriseID
 
 		now := time.Now()
 		permissionStatus := entity.ServicePermissionRejected
@@ -266,6 +270,11 @@ func (s *EnterprisePermissionService) Audit(ctx context.Context, id uint64, req 
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	invalidateEnterprisePermissionCache(ctx, enterpriseID)
+	return nil
 }
 
 func (s *EnterprisePermissionService) UpdatePermissionStatus(ctx context.Context, enterpriseID uint64, serviceName string, req *dto.UpdateEnterpriseServicePermissionRequest, operatorID uint64) (*dto.EnterpriseServicePermissionInfo, error) {
@@ -318,6 +327,7 @@ func (s *EnterprisePermissionService) UpdatePermissionStatus(ctx context.Context
 		}
 		return nil, ecode.ErrDatabase.WithMessage("更新企业服务权限失败")
 	}
+	invalidateEnterprisePermissionCache(ctx, enterprise.ID)
 	return permissionToInfo(&permission), nil
 }
 
@@ -405,4 +415,8 @@ func permissionToInfo(permission *entity.EnterpriseServicePermission) *dto.Enter
 		ApprovedAt:     permission.ApprovedAt,
 		UpdatedAt:      permission.UpdatedAt,
 	}
+}
+
+func invalidateEnterprisePermissionCache(ctx context.Context, enterpriseID uint64) {
+	cache.DeleteByPattern(ctx, "enterprise:services:"+cache.Hash(enterpriseID)+":*")
 }

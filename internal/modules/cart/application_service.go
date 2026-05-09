@@ -163,16 +163,36 @@ func (s *Service) toCartItemInfo(ctx context.Context, item *cartEntity.CartItem)
 	if product.Spec != nil {
 		spec = fmt.Sprintf("%s %s", product.Spec.Material, product.Spec.Spec)
 	}
+	imageURL := ""
+	if len(product.Images) > 0 {
+		imageURL = product.Images[0]
+	}
+	var warehouseInfo *dto.CartWarehouseInfo
+	if product.WarehouseInfo != nil {
+		warehouseInfo = &dto.CartWarehouseInfo{
+			WarehouseID:           product.WarehouseInfo.WarehouseID,
+			WarehouseServiceID:    product.WarehouseInfo.WarehouseServiceID,
+			WarehouseEnterpriseID: product.WarehouseInfo.WarehouseEnterpriseID,
+			WarehouseName:         product.WarehouseInfo.WarehouseName,
+			WarehouseCode:         product.WarehouseInfo.WarehouseCode,
+			Address:               product.WarehouseInfo.Address,
+			Province:              product.WarehouseInfo.Province,
+			City:                  product.WarehouseInfo.City,
+			District:              product.WarehouseInfo.District,
+		}
+	}
 	return &dto.CartItemInfo{
-		ID:          item.ID,
-		ProductID:   product.ID,
-		ProductName: product.Name,
-		Spec:        spec,
-		Price:       product.UnitPrice,
-		Quantity:    item.Quantity,
-		SellerID:    product.EnterpriseID,
-		SellerName:  sellerName,
-		Unit:        "吨",
-		SubTotal:    item.Quantity * product.UnitPrice,
+		ID:            item.ID,
+		ProductID:     product.ID,
+		ProductName:   product.Name,
+		ImageURL:      imageURL,
+		Spec:          spec,
+		Price:         product.UnitPrice,
+		Quantity:      item.Quantity,
+		SellerID:      product.EnterpriseID,
+		SellerName:    sellerName,
+		WarehouseInfo: warehouseInfo,
+		Unit:          "吨",
+		SubTotal:      item.Quantity * product.UnitPrice,
 	}, nil
 }

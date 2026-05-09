@@ -11,6 +11,7 @@ import (
 	orderentity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"gorm.io/gorm"
@@ -40,7 +41,15 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
 
+func invalidateMarketCache(ctx context.Context) {
+	cache.Delete(ctx, "market:bidding:stats", "market:procurement:stats")
+}
+
 func (s *MarketService) GetBiddingStats(ctx context.Context) (*marketdto.BiddingStats, error) {
+	var cached marketdto.BiddingStats
+	if cache.GetJSON(ctx, "market:bidding:stats", &cached) {
+		return &cached, nil
+	}
 	var stats marketdto.BiddingStats
 	err := s.db.WithContext(ctx).Model(&marketentity.BiddingActivity{}).
 		Select(`
@@ -57,6 +66,7 @@ func (s *MarketService) GetBiddingStats(ctx context.Context) (*marketdto.Bidding
 	if err != nil {
 		return nil, err
 	}
+	cache.SetJSON(ctx, "market:bidding:stats", &stats, cache.MarketStatsTTL)
 	return &stats, nil
 }
 
@@ -174,6 +184,7 @@ func (s *MarketService) CreateBidding(ctx context.Context, userID, enterpriseID 
 	if err := s.db.WithContext(ctx).Create(activity).Error; err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建竞价失败")
 	}
+	invalidateMarketCache(ctx)
 	item := toBiddingItem(*activity, nil, BiddingViewBuyer, enterpriseID)
 	_ = userID
 	return &item, nil
@@ -258,6 +269,7 @@ func (s *MarketService) SubmitBiddingQuote(ctx context.Context, userID, enterpri
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("提交报价失败")
 	}
+	invalidateMarketCache(ctx)
 	return s.GetBidding(ctx, biddingID, enterpriseID)
 }
 
@@ -309,6 +321,7 @@ func (s *MarketService) AwardBidding(ctx context.Context, enterpriseID, biddingI
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("定标失败")
 	}
+	invalidateMarketCache(ctx)
 	return s.GetBidding(ctx, biddingID, enterpriseID)
 }
 
@@ -369,6 +382,7 @@ func (s *MarketService) CreateBiddingOrder(ctx context.Context, enterpriseID, us
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("生成订单失败")
 	}
+	invalidateMarketCache(ctx)
 	activity.Status = marketentity.BiddingStatusOrderCreated
 	activity.OrderID = order.ID
 	item, err := s.GetBidding(ctx, biddingID, enterpriseID)
@@ -379,6 +393,10 @@ func (s *MarketService) CreateBiddingOrder(ctx context.Context, enterpriseID, us
 }
 
 func (s *MarketService) GetProcurementStats(ctx context.Context) (*marketdto.ProcurementStats, error) {
+	var cached marketdto.ProcurementStats
+	if cache.GetJSON(ctx, "market:procurement:stats", &cached) {
+		return &cached, nil
+	}
 	var stats marketdto.ProcurementStats
 	err := s.db.WithContext(ctx).Model(&marketentity.ProcurementActivity{}).
 		Select(`
@@ -393,6 +411,7 @@ func (s *MarketService) GetProcurementStats(ctx context.Context) (*marketdto.Pro
 	if err != nil {
 		return nil, err
 	}
+	cache.SetJSON(ctx, "market:procurement:stats", &stats, cache.MarketStatsTTL)
 	return &stats, nil
 }
 

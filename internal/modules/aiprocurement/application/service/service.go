@@ -21,6 +21,7 @@ import (
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"go.uber.org/zap"
@@ -47,6 +48,11 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 	if prompt == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("采购指令不能为空")
 	}
+	parseKey := cache.Key("ai:parse", prompt)
+	var cached dto.ParseResponse
+	if cache.GetJSON(ctx, parseKey, &cached) {
+		return &cached, nil
+	}
 	parsed, ok, err := parseInstructionWithModel(ctx, prompt)
 	if err != nil || !ok {
 		if err != nil {
@@ -66,18 +72,22 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 			zap.Float64("confidence", parsed.Confidence),
 		)
 	}
-	return &dto.ParseResponse{
+	s.applyConfiguredCategory(ctx, &parsed, prompt)
+	result := &dto.ParseResponse{
 		Parsed:          parsed,
 		MatchedProducts: entity.MatchedProducts{},
 		OrderDraft:      entity.OrderDraft{},
 		FinancePlans:    entity.FinancePlans{},
 		AuditItems:      buildAuditItems(parsed, nil, nil),
 		Stages:          buildStages(entity.StageInstructionParsing, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, parseKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.ConfirmInstructionRequest) (*dto.ParseResponse, error) {
 	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	s.applyConfiguredCategory(ctx, &parsed, req.Prompt)
 	return &dto.ParseResponse{
 		Parsed:          parsed,
 		MatchedProducts: entity.MatchedProducts{},
@@ -91,18 +101,27 @@ func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.Co
 func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
+	s.applyConfiguredCategory(ctx, &parsed, "")
+	matchKey := cache.Key("ai:match-products", parsed)
+	var cached dto.MatchProductsResponse
+	if cache.GetJSON(ctx, matchKey, &cached) {
+		return &cached, nil
+	}
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
 	}
-	return &dto.MatchProductsResponse{
+	result := &dto.MatchProductsResponse{
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *dto.MatchLogisticsWarehouseRequest) (*dto.MatchLogisticsWarehouseResponse, error) {
 	parsed := normalizeParsedInput(req.Parsed, "")
+	s.applyConfiguredCategory(ctx, &parsed, "")
 	selectedProducts := normalizeMatchedProducts(req.SelectedProducts)
 	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再匹配物流仓储")
@@ -114,11 +133,21 @@ func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *d
 		}
 		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
 	}
+	matchKey := cache.Key("ai:match-logistics", struct {
+		Parsed           entity.ParsedInstruction `json:"parsed"`
+		SelectedProducts entity.MatchedProducts   `json:"selected_products"`
+	}{Parsed: parsed, SelectedProducts: selectedProducts})
+	var cached dto.MatchLogisticsWarehouseResponse
+	if cache.GetJSON(ctx, matchKey, &cached) {
+		return &cached, nil
+	}
 	matches := s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
-	return &dto.MatchLogisticsWarehouseResponse{
+	result := &dto.MatchLogisticsWarehouseResponse{
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageLogisticsWarehouseMatching, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.GenerateOrderRequest, userID, enterpriseID uint64) (*dto.GenerateOrderResponse, error) {
@@ -129,6 +158,7 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能生成AI采购订单")
 	}
 	parsed := normalizeParsedInput(req.Parsed, req.Prompt)
+	s.applyConfiguredCategory(ctx, &parsed, req.Prompt)
 	selectedProducts := normalizeSelectedProducts(req)
 	if len(selectedProducts) == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("请选择召回商品后再生成订单")
@@ -369,6 +399,132 @@ func normalizeParsedInput(parsed entity.ParsedInstruction, prompt string) entity
 	return parsed
 }
 
+type configuredProductCategory struct {
+	Name        string
+	DisplayName string
+}
+
+func (s *ProcurementService) applyConfiguredCategory(ctx context.Context, parsed *entity.ParsedInstruction, prompt string) {
+	if parsed == nil {
+		return
+	}
+	categories, err := loadConfiguredProductCategories(ctx)
+	if err != nil {
+		logAIProcurementWarn("AI procurement category config lookup failed",
+			zap.String("category", parsed.Category),
+			zap.Error(err),
+		)
+		return
+	}
+	category := chooseConfiguredCategory(*parsed, prompt, categories)
+	if category == "" || category == parsed.Category {
+		return
+	}
+	logAIProcurementInfo("AI procurement category normalized by configured categories",
+		zap.String("from", parsed.Category),
+		zap.String("to", category),
+		zap.String("product_name", parsed.ProductName),
+	)
+	parsed.Category = category
+	if category != "" && !containsString(parsed.Keywords, category) {
+		parsed.Keywords = append(parsed.Keywords, category)
+	}
+}
+
+func loadConfiguredProductCategories(ctx context.Context) ([]configuredProductCategory, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, nil
+	}
+	var categories []configuredProductCategory
+	err := db.WithContext(ctx).Raw(`
+		SELECT name, COALESCE(display_name, '') AS display_name
+		FROM product_categories
+		WHERE status = 1 AND deleted_at IS NULL
+		ORDER BY sort ASC, id ASC`).Scan(&categories).Error
+	if err != nil {
+		return nil, err
+	}
+	return categories, nil
+}
+
+func chooseConfiguredCategory(parsed entity.ParsedInstruction, prompt string, categories []configuredProductCategory) string {
+	type match struct {
+		name  string
+		score int
+	}
+	sourceCategory := strings.TrimSpace(parsed.Category)
+	if sourceCategory == "" && strings.TrimSpace(prompt) == "" && strings.TrimSpace(parsed.ProductName) == "" {
+		return ""
+	}
+	for _, category := range categories {
+		for _, value := range configuredCategoryValues(category) {
+			if sourceCategory != "" && value == sourceCategory {
+				return category.Name
+			}
+		}
+	}
+
+	haystack := strings.Join([]string{prompt, parsed.ProductName, sourceCategory}, " ")
+	best := match{}
+	for _, category := range categories {
+		name := strings.TrimSpace(category.Name)
+		if name == "" {
+			continue
+		}
+		for _, value := range configuredCategoryValues(category) {
+			score := configuredCategoryScore(value, sourceCategory, haystack)
+			if score > best.score || (score == best.score && len([]rune(name)) > len([]rune(best.name))) {
+				best = match{name: name, score: score}
+			}
+		}
+	}
+	return best.name
+}
+
+func configuredCategoryValues(category configuredProductCategory) []string {
+	values := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	for _, value := range []string{category.Name, category.DisplayName} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+func configuredCategoryScore(value, sourceCategory, haystack string) int {
+	if value == "" {
+		return 0
+	}
+	valueLen := len([]rune(value))
+	switch {
+	case strings.Contains(haystack, value):
+		return 100 + valueLen
+	case sourceCategory != "" && strings.Contains(value, sourceCategory):
+		return 80 + valueLen
+	case sourceCategory != "" && strings.Contains(sourceCategory, value):
+		return 70 + valueLen
+	default:
+		return 0
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ProcurementService) matchProducts(ctx context.Context, parsed entity.ParsedInstruction) (entity.MatchedProducts, error) {
 	cfg := config.GetAIProcurement().VectorSearch
 	logAIProcurementInfo("AI procurement product matching started",
@@ -597,6 +753,10 @@ func (s *ProcurementService) enrichMatchesWithLogistics(ctx context.Context, par
 }
 
 func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.LogisticsService {
+	var cached []serviceOfferEntity.LogisticsService
+	if cache.GetJSON(ctx, "ai:approved-logistics-services", &cached) {
+		return cached
+	}
 	db := database.GetDB()
 	if db == nil {
 		return nil
@@ -606,6 +766,7 @@ func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.Log
 		logAIProcurementWarn("AI procurement logistics services load failed", zap.Error(err))
 		return nil
 	}
+	cache.SetJSON(ctx, "ai:approved-logistics-services", rows, cache.ServiceOfferListTTL)
 	return rows
 }
 
