@@ -425,6 +425,7 @@ func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int
 	default:
 		return ecode.ErrBadRequest.WithMessage("商品状态无效")
 	}
+	invalidateProductCache(ctx)
 
 	if err := s.productRepo.UpdateStatus(ctx, id, productStatus, auditRemark, operatorID); err != nil {
 		return ecode.ErrDatabase.WithMessage("更新商品状态失败")

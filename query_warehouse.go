@@ -8,7 +8,7 @@ import (
 
 func main() {
 	db, _ := sql.Open("mysql", "root:Steellink2026@tcp(117.72.123.14:3306)/steellink?parseTime=true")
-	
+
 	fmt.Println("=== 仓储企业列表 ===")
 	rows, _ := db.Query(`SELECT e.id, e.name, e.enterprise_code 
 		FROM enterprises e 
@@ -21,7 +21,7 @@ func main() {
 		fmt.Printf("ID: %d, 名称: %s, 企业编码: %s\n", id, name, code)
 	}
 	rows.Close()
-	
+
 	fmt.Println("\n=== 关联仓储企业的用户 ===")
 	rows2, _ := db.Query(`SELECT u.id, u.phone, e.name as enterprise_name 
 		FROM users u 
