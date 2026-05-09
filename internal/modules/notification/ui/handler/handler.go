@@ -1,23 +1,85 @@
 package handler
 
 import (
+	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/realtime"
 	notificationService "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/service"
 	notificationEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/notification/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
+	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 type Handler struct {
 	service *notificationService.NotificationService
 }
 
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
 func NewHandler() *Handler {
 	return &Handler{service: notificationService.NewNotificationService()}
+}
+
+func (h *Handler) Subscribe(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		response.Unauthorized(c, "缺少访问令牌")
+		return
+	}
+	claims, err := auth.ParseToken(token)
+	if err != nil || claims == nil || claims.UserID == 0 {
+		response.Unauthorized(c, "访问令牌无效")
+		return
+	}
+	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	client := &realtime.Client{
+		UserID: claims.UserID,
+		Send:   make(chan realtime.NotificationEnvelope, 16),
+	}
+	realtime.DefaultHub.Register(client)
+	defer realtime.DefaultHub.Unregister(client)
+	defer conn.Close()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case message, ok := <-client.Send:
+				if !ok {
+					_ = conn.WriteMessage(websocket.CloseMessage, nil)
+					return
+				}
+				if err := conn.WriteJSON(message); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if err := conn.WriteJSON(gin.H{"type": "ping"}); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
 }
 
 func (h *Handler) List(c *gin.Context) {

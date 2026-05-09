@@ -13,6 +13,7 @@
 - [ ] `./harness/release.sh docs/features/SL-BE-NOTIFICATIONS` 已通过
 - [ ] 已确认生产启动会执行 `notifications` 表迁移
 - [ ] 已完成管理员发送和用户收件箱 smoke test
+- [ ] 已完成 WebSocket 订阅 smoke test
 
 ## 回滚信息
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/realtime"
 	notificationEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/domain/entity"
 	userEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
@@ -74,6 +75,9 @@ func (s *NotificationService) Create(ctx context.Context, input CreateNotificati
 	}
 	if err := s.db.WithContext(ctx).Create(&notifications).Error; err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建站内信失败")
+	}
+	for _, notification := range notifications {
+		realtime.DefaultHub.Publish(notification)
 	}
 	return notifications, nil
 }

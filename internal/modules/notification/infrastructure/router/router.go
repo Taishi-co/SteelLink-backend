@@ -9,6 +9,8 @@ import (
 func RegisterRoutes(r *gin.RouterGroup) {
 	h := handler.NewHandler()
 
+	r.GET("/notifications/ws", h.Subscribe)
+
 	notifications := r.Group("/notifications")
 	notifications.Use(middleware.AuthRequired())
 	{
