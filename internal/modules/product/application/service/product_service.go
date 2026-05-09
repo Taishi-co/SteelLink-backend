@@ -9,6 +9,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/ui/dto"
 	offerentity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 )
@@ -90,6 +91,7 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 	if err := s.productRepo.Create(ctx, product); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建商品失败")
 	}
+	invalidateProductCache(ctx)
 
 	return toProductInfo(product), nil
 }
@@ -171,6 +173,7 @@ func (s *ProductService) Update(ctx context.Context, id uint64, req *dto.CreateP
 	if err := s.productRepo.Update(ctx, product); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("更新商品失败")
 	}
+	invalidateProductCache(ctx)
 
 	return toProductInfo(product), nil
 }
@@ -198,10 +201,16 @@ func (s *ProductService) Delete(ctx context.Context, id uint64, operatorID, ente
 	if err := s.productRepo.Delete(ctx, product); err != nil {
 		return ecode.ErrDatabase.WithMessage("删除商品失败")
 	}
+	invalidateProductCache(ctx)
 	return nil
 }
 
 func (s *ProductService) ListCategories(ctx context.Context, req *dto.ProductCategoryListRequest) ([]*dto.ProductCategoryInfo, error) {
+	key := cache.Key("product:categories", req)
+	var cached []*dto.ProductCategoryInfo
+	if cache.GetJSON(ctx, key, &cached) {
+		return cached, nil
+	}
 	categories, err := s.categoryRepo.List(ctx, !req.IncludeDisabled)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -210,6 +219,7 @@ func (s *ProductService) ListCategories(ctx context.Context, req *dto.ProductCat
 	for _, category := range categories {
 		list = append(list, toProductCategoryInfo(category))
 	}
+	cache.SetJSON(ctx, key, list, cache.ProductListTTL)
 	return list, nil
 }
 
@@ -224,6 +234,7 @@ func (s *ProductService) CreateCategory(ctx context.Context, req *dto.UpsertProd
 	if err := s.categoryRepo.Create(ctx, category); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("创建商品品类失败")
 	}
+	invalidateProductCache(ctx)
 	return toProductCategoryInfo(category), nil
 }
 
@@ -254,6 +265,7 @@ func (s *ProductService) UpdateCategory(ctx context.Context, id uint64, req *dto
 	if err := s.categoryRepo.Update(ctx, category); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("更新商品品类失败")
 	}
+	invalidateProductCache(ctx)
 	return toProductCategoryInfo(category), nil
 }
 
@@ -268,6 +280,7 @@ func (s *ProductService) DeleteCategory(ctx context.Context, id uint64) error {
 	if err := s.categoryRepo.Delete(ctx, id); err != nil {
 		return ecode.ErrDatabase.WithMessage("删除商品品类失败")
 	}
+	invalidateProductCache(ctx)
 	return nil
 }
 
@@ -286,6 +299,11 @@ func (s *ProductService) GetByID(ctx context.Context, id uint64) (*dto.ProductIn
 
 // GetPublicByID 获取对外可见商品详情
 func (s *ProductService) GetPublicByID(ctx context.Context, id uint64) (*dto.ProductInfo, error) {
+	key := "product:public-detail:" + cache.Hash(id)
+	var cached dto.ProductInfo
+	if cache.GetJSON(ctx, key, &cached) {
+		return &cached, nil
+	}
 	product, err := s.productRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -294,7 +312,9 @@ func (s *ProductService) GetPublicByID(ctx context.Context, id uint64) (*dto.Pro
 		return nil, ecode.ErrNotFound.WithMessage("商品不存在")
 	}
 
-	return toProductInfo(product), nil
+	result := toProductInfo(product)
+	cache.SetJSON(ctx, key, result, cache.ProductDetailTTL)
+	return result, nil
 }
 
 // List 获取商品列表
@@ -304,6 +324,11 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 	}
 	if req.PageSize <= 0 {
 		req.PageSize = 10
+	}
+	key := cache.Key("product:list", req)
+	var cached dto.ProductListResponse
+	if cache.GetJSON(ctx, key, &cached) {
+		return &cached, nil
 	}
 
 	products, total, err := s.productRepo.List(ctx, &repository.ProductQuery{
@@ -333,12 +358,14 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 		list = append(list, toProductInfo(product))
 	}
 
-	return &dto.ProductListResponse{
+	result := &dto.ProductListResponse{
 		List:     list,
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
-	}, nil
+	}
+	cache.SetJSON(ctx, key, result, cache.ProductListTTL)
+	return result, nil
 }
 
 // UpdateDisplay 更新商品展示/审核补充资料，不允许修改捆包号、库存、价格、规格、仓库等关键交易字段。
@@ -378,6 +405,7 @@ func (s *ProductService) UpdateDisplay(ctx context.Context, id uint64, req *dto.
 	if err := s.productRepo.Update(ctx, product); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("更新商品资料失败")
 	}
+	invalidateProductCache(ctx)
 
 	return toProductInfo(product), nil
 }
@@ -395,8 +423,17 @@ func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int
 	if err := s.productRepo.UpdateStatus(ctx, id, entity.ProductStatus(status), operatorID); err != nil {
 		return ecode.ErrDatabase.WithMessage("更新商品状态失败")
 	}
+	invalidateProductCache(ctx)
 
 	return nil
+}
+
+func invalidateProductCache(ctx context.Context) {
+	cache.DeleteByPattern(ctx, "product:list:*")
+	cache.DeleteByPattern(ctx, "product:public-detail:*")
+	cache.DeleteByPattern(ctx, "product:categories:*")
+	cache.DeleteByPattern(ctx, "ai:match-products:*")
+	cache.DeleteByPattern(ctx, "ai:match-logistics:*")
 }
 
 func toProductInfo(product *entity.Product) *dto.ProductInfo {
