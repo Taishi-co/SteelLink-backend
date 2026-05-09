@@ -11,6 +11,8 @@ import (
 	cartEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/domain/entity"
 	cartRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/domain/repository"
 	cartPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/persistence"
+	"github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/realtime"
+	notificationEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/domain/entity"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/repository"
 	orderPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/persistence"
@@ -19,6 +21,7 @@ import (
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	offerEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	userEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/contract"
@@ -288,6 +291,53 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 type productOrderItem struct {
 	Product  *productEntity.Product
 	Quantity float64
+}
+
+func createEnterpriseNotification(tx *gorm.DB, ctx context.Context, enterpriseID, senderUserID uint64, notificationType notificationEntity.NotificationType, title, content, linkURL string, metadata notificationEntity.NotificationMetadata) error {
+	if enterpriseID == 0 {
+		return nil
+	}
+	var enterprise userEntity.Enterprise
+	if err := tx.WithContext(ctx).Select("id, enterprise_code").First(&enterprise, enterpriseID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if enterprise.EnterpriseCode == "" {
+		return nil
+	}
+	var users []userEntity.User
+	if err := tx.WithContext(ctx).
+		Select("id").
+		Where("enterprise_code = ? AND status = ? AND deleted_at IS NULL", enterprise.EnterpriseCode, userEntity.StatusActive).
+		Find(&users).Error; err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	notifications := make([]notificationEntity.Notification, 0, len(users))
+	for _, user := range users {
+		notifications = append(notifications, notificationEntity.Notification{
+			RecipientUserID:       user.ID,
+			RecipientEnterpriseID: enterpriseID,
+			SenderUserID:          senderUserID,
+			Type:                  notificationType,
+			Title:                 title,
+			Content:               content,
+			LinkURL:               linkURL,
+			Status:                notificationEntity.NotificationStatusUnread,
+			Metadata:              metadata,
+		})
+	}
+	if err := tx.WithContext(ctx).Create(&notifications).Error; err != nil {
+		return err
+	}
+	for _, notification := range notifications {
+		realtime.DefaultHub.Publish(notification)
+	}
+	return nil
 }
 
 func isSingleWarehouseOrder(items []productOrderItem) bool {
@@ -672,7 +722,15 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 			payload["condition_note"] = strings.TrimSpace(req.ConditionNote)
 			payload["voucher_url"] = strings.TrimSpace(req.VoucherURL)
 		}
-		return createOrderEvent(tx, ctx, order, "warehouse_confirmed", operatorID, warehouseEnterpriseID, "warehouse", fromStatus, order.Status, payload)
+		if err := createOrderEvent(tx, ctx, order, "warehouse_confirmed", operatorID, warehouseEnterpriseID, "warehouse", fromStatus, order.Status, payload); err != nil {
+			return err
+		}
+		return createEnterpriseNotification(tx, ctx, order.SellerEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder,
+			"仓库已确认订单",
+			"仓储方已确认订单「"+order.OrderNo+"」，请卖方继续确认订单。",
+			"/orders",
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "event": "warehouse_confirmed"},
+		)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("仓库确认失败")
 	}
@@ -758,7 +816,15 @@ func (s *OrderService) SellerConfirm(ctx context.Context, id, sellerEnterpriseID
 		if req != nil {
 			payload["terms_note"] = strings.TrimSpace(req.TermsNote)
 		}
-		return createOrderEvent(tx, ctx, order, "seller_confirmed", operatorID, sellerEnterpriseID, "sales", fromStatus, order.Status, payload)
+		if err := createOrderEvent(tx, ctx, order, "seller_confirmed", operatorID, sellerEnterpriseID, "sales", fromStatus, order.Status, payload); err != nil {
+			return err
+		}
+		return createEnterpriseNotification(tx, ctx, order.BuyerID, operatorID, notificationEntity.NotificationTypeOrder,
+			"卖方已确认订单",
+			"卖方已确认订单「"+order.OrderNo+"」，请买方继续确认交易条件。",
+			"/dashboard/orders",
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "event": "seller_confirmed"},
+		)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("卖方确认订单失败")
 	}
@@ -1898,11 +1964,19 @@ func (s *OrderService) CreateLogisticsQuote(ctx context.Context, orderID, enterp
 		if err := tx.Create(quote).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, &order, "logistics_quote_submitted", operatorID, enterpriseID, "logistics", order.Status, order.Status, orderEntity.OrderEventPayload{
+		if err := createOrderEvent(tx, ctx, &order, "logistics_quote_submitted", operatorID, enterpriseID, "logistics", order.Status, order.Status, orderEntity.OrderEventPayload{
 			"bidding_id": quote.BiddingID,
 			"quote_id":   quote.ID,
 			"amount":     quote.Amount,
-		})
+		}); err != nil {
+			return err
+		}
+		return createEnterpriseNotification(tx, ctx, order.SellerEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder,
+			"物流方已提交报价",
+			"物流方已为订单「"+order.OrderNo+"」提交报价，请及时查看并确认。",
+			"/orders",
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "quote_id": quote.ID, "event": "logistics_quote_submitted"},
+		)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("物流报价失败")
 	}
@@ -1972,10 +2046,18 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "logistics_quote_confirmed", operatorID, enterpriseID, role, fromStatus, order.Status, orderEntity.OrderEventPayload{
+		if err := createOrderEvent(tx, ctx, order, "logistics_quote_confirmed", operatorID, enterpriseID, role, fromStatus, order.Status, orderEntity.OrderEventPayload{
 			"quote_id":      req.QuoteID,
 			"freight_payer": freightPayer,
-		})
+		}); err != nil {
+			return err
+		}
+		return createEnterpriseNotification(tx, ctx, quote.LogisticsEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder,
+			"物流报价已确认",
+			"订单「"+order.OrderNo+"」已确认采用您的物流报价，请安排提货运输。",
+			"/orders",
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "quote_id": quote.ID, "event": "logistics_quote_confirmed"},
+		)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认物流资源失败")
 	}
@@ -2037,10 +2119,26 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
+		if err := createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
 			"voucher_url": strings.TrimSpace(req.VoucherURL),
 			"remark":      strings.TrimSpace(req.Remark),
-		})
+		}); err != nil {
+			return err
+		}
+		title := "物流进度已更新"
+		content := "订单「" + order.OrderNo + "」物流进度已更新。"
+		if eventType == "shipment_picked_up" {
+			content = "订单「" + order.OrderNo + "」物流方已提货。"
+		} else if eventType == "shipment_delivered" {
+			content = "订单「" + order.OrderNo + "」物流方已送达，请买方及时确认收货。"
+		} else if eventType == "shipment_signature_uploaded" {
+			content = "订单「" + order.OrderNo + "」物流方已上传签收凭证。"
+		}
+		metadata := notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "event": eventType}
+		if err := createEnterpriseNotification(tx, ctx, order.BuyerID, operatorID, notificationEntity.NotificationTypeOrder, title, content, "/dashboard/orders", metadata); err != nil {
+			return err
+		}
+		return createEnterpriseNotification(tx, ctx, order.SellerEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder, title, content, "/orders", metadata)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("回传运输进度失败")
 	}
