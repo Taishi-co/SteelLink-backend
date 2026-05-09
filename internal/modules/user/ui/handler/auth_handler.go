@@ -110,6 +110,44 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *AuthHandler) CreateSwitchSession(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	var req dto.SwitchSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.authService.CreateSwitchSession(c.Request.Context(), userID, req.Target)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *AuthHandler) ConsumeSwitchSession(c *gin.Context) {
+	var req dto.ConsumeSwitchSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.authService.ConsumeSwitchSession(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // SendSms 发送验证码
 // @Summary 发送短信验证码
 // @Description 发送短信验证码

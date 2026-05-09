@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"math/rand"
+	mathrand "math/rand"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +21,13 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"github.com/redis/go-redis/v9"
 )
+
+const switchSessionTTL = time.Minute
+
+type switchSessionPayload struct {
+	UserID uint64 `json:"user_id"`
+	Target string `json:"target"`
+}
 
 // AuthService 认证服务
 type AuthService struct {
@@ -215,6 +224,93 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 	}, nil
 }
 
+func (s *AuthService) CreateSwitchSession(ctx context.Context, userID uint64, target string) (*dto.SwitchSessionResponse, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.CanLogin() {
+		return nil, ecode.ErrUserDisabled
+	}
+
+	enterpriseID, _, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	serviceCapabilities, err := listApprovedServiceCapabilities(ctx, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
+	if !canAccessPortal(target, enterpriseRole, serviceCapabilities) {
+		return nil, ecode.ErrForbidden.WithMessage("当前账号未开通目标中心权限")
+	}
+
+	switchToken, err := generateSwitchToken()
+	if err != nil {
+		return nil, ecode.ErrInternal.WithMessage("生成切换凭证失败")
+	}
+	cache.SetJSON(ctx, switchSessionCacheKey(switchToken), switchSessionPayload{
+		UserID: user.ID,
+		Target: target,
+	}, switchSessionTTL)
+
+	return &dto.SwitchSessionResponse{SwitchToken: switchToken}, nil
+}
+
+func (s *AuthService) ConsumeSwitchSession(ctx context.Context, req *dto.ConsumeSwitchSessionRequest) (*dto.LoginResponse, error) {
+	var payload switchSessionPayload
+	if !cache.GetJSON(ctx, switchSessionCacheKey(req.SwitchToken), &payload) {
+		return nil, ecode.ErrBadRequest.WithMessage("切换凭证已失效，请重新发起切换")
+	}
+	cache.Delete(ctx, switchSessionCacheKey(req.SwitchToken))
+
+	if payload.Target != req.Target {
+		return nil, ecode.ErrBadRequest.WithMessage("切换目标不匹配")
+	}
+
+	user, err := s.userRepo.FindByID(ctx, payload.UserID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.CanLogin() {
+		return nil, ecode.ErrUserDisabled
+	}
+
+	enterpriseID, enterpriseCode, enterpriseRole, err := s.resolveEnterpriseInfo(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	serviceCapabilities, err := listApprovedServiceCapabilities(ctx, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
+	if !canAccessPortal(req.Target, enterpriseRole, serviceCapabilities) {
+		return nil, ecode.ErrForbidden.WithMessage("当前账号未开通目标中心权限")
+	}
+
+	var email string
+	if user.Email != nil {
+		email = *user.Email
+	}
+	tokenPair, err := auth.GenerateToken(user.ID, user.Phone, email, string(user.Role), enterpriseID, enterpriseCode, enterpriseRole, serviceCapabilities)
+	if err != nil {
+		return nil, ecode.ErrInternal.WithMessage("生成Token失败")
+	}
+
+	return &dto.LoginResponse{
+		AccessToken:  tokenPair.AccessToken,
+		RefreshToken: tokenPair.RefreshToken,
+		ExpiresIn:    tokenPair.ExpiresIn,
+		User:         toUserInfo(user),
+	}, nil
+}
+
 // SendSms 发送短信验证码
 func (s *AuthService) SendSms(ctx context.Context, req *dto.SendSmsRequest) error {
 	// 检查发送频率限制
@@ -367,8 +463,30 @@ func refreshTokenBlacklistKey(token string) string {
 	return "auth:refresh-token:blacklist:" + cache.HashString(token)
 }
 
+func switchSessionCacheKey(token string) string {
+	return "auth:switch-session:" + cache.HashString(token)
+}
+
 func authSnapshotCacheKey(userID uint64) string {
 	return "auth:user-snapshot:" + cache.Hash(userID)
+}
+
+func canAccessPortal(target string, enterpriseRole string, serviceCapabilities []string) bool {
+	requiredService := "procurement"
+	requiredRole := "buyer"
+	if target == "seller" {
+		requiredService = "sales"
+		requiredRole = "seller"
+	}
+	if enterpriseRole == requiredRole {
+		return true
+	}
+	for _, capability := range serviceCapabilities {
+		if capability == requiredService {
+			return true
+		}
+	}
+	return false
 }
 
 func listApprovedServiceCapabilities(ctx context.Context, enterpriseID uint64) ([]string, error) {
@@ -419,8 +537,16 @@ func isPhone(s string) bool {
 
 // generateSmsCode 生成6位验证码
 func generateSmsCode() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 	return fmt.Sprintf("%06d", r.Intn(1000000))
+}
+
+func generateSwitchToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func resolveSmsCode() string {
