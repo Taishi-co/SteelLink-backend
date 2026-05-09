@@ -536,8 +536,12 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 			if product == nil {
 				return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法取消")
 			}
-			if !product.UnlockStock(item.Quantity) {
-				return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+			if product.LockedQty >= item.Quantity {
+				if !product.UnlockStock(item.Quantity) {
+					return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+				}
+			} else {
+				product.ReturnStock(item.Quantity)
 			}
 			product.UpdatedBy = operatorID
 			if saveErr := tx.Save(product).Error; saveErr != nil {
@@ -1016,6 +1020,22 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	order.UpdatedBy = operatorID
 
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在")
+			}
+			if !product.DeductStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("订单库存扣减异常")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
@@ -1168,8 +1188,12 @@ func (s *OrderService) SubmitRiskResult(ctx context.Context, id, fundingEnterpri
 				if product == nil {
 					return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法终止融资订单")
 				}
-				if !product.UnlockStock(item.Quantity) {
-					return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法终止融资订单")
+				if product.LockedQty >= item.Quantity {
+					if !product.UnlockStock(item.Quantity) {
+						return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法终止融资订单")
+					}
+				} else {
+					product.ReturnStock(item.Quantity)
 				}
 				product.UpdatedBy = operatorID
 				if err := tx.Save(product).Error; err != nil {
@@ -1364,6 +1388,22 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	order.Status = orderEntity.OrderStatusPaid
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在")
+			}
+			if !product.DeductStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("订单库存扣减异常")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
 		if err := tx.Save(financing).Error; err != nil {
 			return err
 		}
@@ -1598,7 +1638,28 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 
 	order.Status = orderEntity.OrderStatusDelivering
 	order.UpdatedBy = operatorID
-	if err := s.orderRepo.Update(ctx, order); err != nil {
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				continue
+			}
+			if product.LockedQty >= item.Quantity {
+				product.DeductStock(item.Quantity)
+				product.UpdatedBy = operatorID
+				if saveErr := tx.Save(product).Error; saveErr != nil {
+					return saveErr
+				}
+			}
+		}
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "outbound_confirmed", operatorID, enterpriseID, "sales", orderEntity.OrderStatusPendingDelivery, order.Status, nil)
+	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认出库失败")
 	}
 	return toOrderInfo(order), nil
@@ -2509,7 +2570,7 @@ func (s *OrderService) reconcileOrderState(ctx context.Context, order *orderEnti
 		return s.cancelOrderWithUnlock(ctx, order, order.UpdatedBy)
 	}
 
-	if order.Status == orderEntity.OrderStatusDelivering {
+	if order.Status == orderEntity.OrderStatusDelivering || order.Status == orderEntity.OrderStatusShipping {
 		if order.UpdatedAt.Before(time.Now().Add(-autoReceiptTimeout)) {
 			now := time.Now()
 			order.ReceiptVoucher = autoReceiptVoucher
@@ -2543,8 +2604,12 @@ func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEn
 			if product == nil {
 				return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法取消")
 			}
-			if !product.UnlockStock(item.Quantity) {
-				return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+			if product.LockedQty >= item.Quantity {
+				if !product.UnlockStock(item.Quantity) {
+					return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法取消")
+				}
+			} else {
+				product.ReturnStock(item.Quantity)
 			}
 			product.UpdatedBy = operatorID
 			if saveErr := tx.Save(product).Error; saveErr != nil {
@@ -2552,12 +2617,13 @@ func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEn
 			}
 		}
 
+		fromStatus := order.Status
 		order.Status = orderEntity.OrderStatusCancelled
 		order.UpdatedBy = operatorID
 		if saveErr := tx.Save(order).Error; saveErr != nil {
 			return saveErr
 		}
-		return nil
+		return createOrderEvent(tx, ctx, order, "order_cancelled_with_unlock", operatorID, 0, "system", fromStatus, orderEntity.OrderStatusCancelled, nil)
 	}); err != nil {
 		return err
 	}

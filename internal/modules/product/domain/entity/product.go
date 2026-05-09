@@ -227,6 +227,13 @@ func (p *Product) DeductStock(qty float64) bool {
 	return false
 }
 
+// ReturnStock 退回已扣减库存（取消/异常时回退）
+func (p *Product) ReturnStock(qty float64) bool {
+	p.Quantity += qty
+	p.AvailableQty += qty
+	return true
+}
+
 // BeforeCreate GORM钩子：创建前生成商品编号
 func (p *Product) BeforeCreate(tx *gorm.DB) error {
 	if p.ProductNo == "" {
