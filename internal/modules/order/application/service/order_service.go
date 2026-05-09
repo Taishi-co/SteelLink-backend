@@ -560,7 +560,9 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 		if saveErr := tx.Save(order).Error; saveErr != nil {
 			return saveErr
 		}
-		if saveErr := createOrderEvent(tx, ctx, order, "order_cancelled", operatorID, enterpriseID, "procurement", fromStatus, order.Status, nil); saveErr != nil {
+		if saveErr := createOrderEvent(tx, ctx, order, "order_cancelled", operatorID, enterpriseID, "procurement", fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"cancel_reason": "buyer_cancelled",
+		}); saveErr != nil {
 			return saveErr
 		}
 		return nil
@@ -1536,7 +1538,10 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "seller_payment_confirmed", operatorID, enterpriseID, "sales", currentStatus, order.Status, nil)
+		return createOrderEvent(tx, ctx, order, "seller_payment_confirmed", operatorID, enterpriseID, "sales", currentStatus, order.Status, orderEntity.OrderEventPayload{
+			"payment_voucher_url": order.PaymentInfo.VoucherURL,
+			"transaction_no":      order.PaymentInfo.TransactionNo,
+		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认收款失败")
 	}
@@ -1658,7 +1663,10 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "outbound_confirmed", operatorID, enterpriseID, "sales", orderEntity.OrderStatusPendingDelivery, order.Status, nil)
+		return createOrderEvent(tx, ctx, order, "outbound_confirmed", operatorID, enterpriseID, "sales", orderEntity.OrderStatusPendingDelivery, order.Status, orderEntity.OrderEventPayload{
+			"warehouse_name":    order.DeliveryInfo.WarehouseName,
+			"warehouse_address": order.DeliveryInfo.WarehouseAddress,
+		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认出库失败")
 	}
@@ -2027,7 +2035,9 @@ func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operator
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "seller_reconciled", operatorID, enterpriseID, "sales", fromStatus, order.Status, nil)
+		return createOrderEvent(tx, ctx, order, "seller_reconciled", operatorID, enterpriseID, "sales", fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"reconciled_amount": order.TotalAmount,
+		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("对账确认失败")
 	}
@@ -2055,7 +2065,9 @@ func (s *OrderService) Archive(ctx context.Context, id, enterpriseID, operatorID
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "order_archived", operatorID, enterpriseID, actorServiceForOrder(order, enterpriseID), fromStatus, order.Status, nil)
+		return createOrderEvent(tx, ctx, order, "order_archived", operatorID, enterpriseID, actorServiceForOrder(order, enterpriseID), fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"total_amount": order.TotalAmount,
+		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("订单归档失败")
 	}
@@ -2623,7 +2635,9 @@ func (s *OrderService) cancelOrderWithUnlock(ctx context.Context, order *orderEn
 		if saveErr := tx.Save(order).Error; saveErr != nil {
 			return saveErr
 		}
-		return createOrderEvent(tx, ctx, order, "order_cancelled_with_unlock", operatorID, 0, "system", fromStatus, orderEntity.OrderStatusCancelled, nil)
+		return createOrderEvent(tx, ctx, order, "order_cancelled_with_unlock", operatorID, 0, "system", fromStatus, orderEntity.OrderStatusCancelled, orderEntity.OrderEventPayload{
+			"cancel_reason": "system_timeout_unlock",
+		})
 	}); err != nil {
 		return err
 	}
