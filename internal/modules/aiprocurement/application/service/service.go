@@ -98,11 +98,27 @@ func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.Co
 	}, nil
 }
 
-func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest) (*dto.MatchProductsResponse, error) {
+func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchProductsRequest, userID, enterpriseID uint64) (*dto.MatchProductsResponse, error) {
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
 	s.applyConfiguredCategory(ctx, &parsed, "")
-	matchKey := cache.Key("ai:match-products", parsed)
+	cfg := config.GetAIProcurement().VectorSearch
+	matchKey := cache.Key("ai:match-products", struct {
+		UserID       uint64                   `json:"user_id"`
+		EnterpriseID uint64                   `json:"enterprise_id"`
+		Parsed       entity.ParsedInstruction `json:"parsed"`
+		Vector       any                      `json:"vector"`
+	}{
+		UserID:       userID,
+		EnterpriseID: enterpriseID,
+		Parsed:       parsed,
+		Vector: struct {
+			Enabled    bool   `json:"enabled"`
+			Provider   string `json:"provider"`
+			Collection string `json:"collection"`
+			TopK       int    `json:"top_k"`
+		}{Enabled: cfg.Enabled, Provider: cfg.Provider, Collection: cfg.ProductCollection, TopK: cfg.TopK},
+	})
 	var cached dto.MatchProductsResponse
 	if cache.GetJSON(ctx, matchKey, &cached) {
 		return &cached, nil
@@ -115,7 +131,7 @@ func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchPr
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
 	}
-	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementMatchTTL)
 	return result, nil
 }
 

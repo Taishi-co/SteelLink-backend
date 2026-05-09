@@ -40,15 +40,23 @@ func (s *EnterprisePermissionService) GetOverview(ctx context.Context, userID ui
 		return nil, ecode.ErrEnterpriseNotFound
 	}
 
+	overviewKey := cache.Key("enterprise:services:overview", enterprise.ID)
+	var cached dto.EnterpriseServiceOverview
+	if cache.GetJSON(ctx, overviewKey, &cached) {
+		return &cached, nil
+	}
+
 	permissions, err := s.listPermissions(ctx, enterprise.ID)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("查询企业服务权限失败")
 	}
 
-	return &dto.EnterpriseServiceOverview{
+	result := &dto.EnterpriseServiceOverview{
 		Permissions:       permissions,
 		RequiredDocuments: RequiredServiceDocuments(),
-	}, nil
+	}
+	cache.SetJSON(ctx, overviewKey, result, cache.EnterpriseServiceTTL)
+	return result, nil
 }
 
 func (s *EnterprisePermissionService) Apply(ctx context.Context, userID uint64, req *dto.ApplyEnterpriseServiceRequest) (*dto.EnterpriseServiceApplicationInfo, error) {
@@ -419,4 +427,5 @@ func permissionToInfo(permission *entity.EnterpriseServicePermission) *dto.Enter
 
 func invalidateEnterprisePermissionCache(ctx context.Context, enterpriseID uint64) {
 	cache.DeleteByPattern(ctx, "enterprise:services:"+cache.Hash(enterpriseID)+":*")
+	cache.Delete(ctx, cache.Key("enterprise:services:overview", enterpriseID))
 }
