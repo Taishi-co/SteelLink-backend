@@ -95,8 +95,6 @@ func localPrefix(purpose Purpose) string {
 		return "orders/title-vouchers"
 	case PurposeReceiptVoucher:
 		return "orders/receipt-vouchers"
-	case PurposeTitleVoucher:
-		return "orders/title-vouchers"
 	case PurposeIdentityCard:
 		return "identity/cards"
 	case PurposeEnterpriseLicense:
