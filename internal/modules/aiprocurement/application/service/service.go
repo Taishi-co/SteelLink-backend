@@ -16,6 +16,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
 	orderService "github.com/Taishi-co/SteelLink-backend/internal/modules/order/application/service"
+	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderDTO "github.com/Taishi-co/SteelLink-backend/internal/modules/order/ui/dto"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
@@ -243,7 +244,7 @@ func (s *ProcurementService) MatchFinance(ctx context.Context, id, userID, enter
 	item.FinancingRequired = req.FinancingRequired
 	item.ParsedInstruction.FinancingRequired = req.FinancingRequired
 	if req.FinancingRequired {
-		item.FinancePlans = buildFinancePlans(item.ParsedInstruction, item.OrderDraft.EstimatedAmt)
+		item.FinancePlans = s.matchFinancePlans(ctx, item.ParsedInstruction, item.OrderDraft.EstimatedAmt, req.SelectedFinanceServiceID)
 		item.CurrentStage = entity.StageFinancingMatching
 		item.Status = entity.ProcurementStatusFinancingReady
 	} else {
@@ -255,6 +256,15 @@ func (s *ProcurementService) MatchFinance(ctx context.Context, id, userID, enter
 	item.UpdatedBy = userID
 	if err := s.procurementRepo.Update(ctx, item); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("融资匹配更新失败")
+	}
+	if req.FinancingRequired && req.SelectedFinanceServiceID > 0 {
+		if err := attachAIRecommendedFinanceToOrders(ctx, item.OrderDraft, selectedFinancePlan(item.FinancePlans)); err != nil {
+			logAIProcurementWarn("AI procurement finance recommendation failed to attach to orders",
+				zap.Uint64("procurement_id", item.ID),
+				zap.Uint64("finance_service_id", req.SelectedFinanceServiceID),
+				zap.Error(err),
+			)
+		}
 	}
 	return toProcurementInfo(item), nil
 }
@@ -276,7 +286,7 @@ func (s *ProcurementService) Create(ctx context.Context, req *dto.CreateProcurem
 	}
 	parsedResult.MatchedProducts = matches
 	parsedResult.OrderDraft = buildOrderDraft(parsedResult.Parsed, matches)
-	parsedResult.FinancePlans = buildFinancePlans(parsedResult.Parsed, parsedResult.OrderDraft.EstimatedAmt)
+	parsedResult.FinancePlans = s.matchFinancePlans(ctx, parsedResult.Parsed, parsedResult.OrderDraft.EstimatedAmt, 0)
 	parsedResult.AuditItems = buildAuditItems(parsedResult.Parsed, matches, parsedResult.FinancePlans)
 	procurement := &entity.AIProcurement{
 		Prompt:            strings.TrimSpace(req.Prompt),
@@ -1381,14 +1391,61 @@ func sumFreightEstimate(selected entity.MatchedProducts) float64 {
 	return total
 }
 
-func buildFinancePlans(parsed entity.ParsedInstruction, amount float64) entity.FinancePlans {
-	if !parsed.FinancingRequired {
-		return entity.FinancePlans{}
+func selectedFinancePlan(plans entity.FinancePlans) entity.FinancePlan {
+	for _, plan := range plans {
+		if plan.Selected {
+			return plan
+		}
 	}
-	return entity.FinancePlans{
-		{Provider: "钢链金融", ProductName: "订单融资", Amount: amount * 0.8, Rate: 6.2, TermDays: 90, Matched: true, Reason: "采购用途和订单金额满足订单融资初筛"},
-		{Provider: "合作银行", ProductName: "短期经营贷", Amount: amount * 0.7, Rate: 6.8, TermDays: 120, Matched: true, Reason: "作为备选融资方案"},
+	return entity.FinancePlan{}
+}
+
+func attachAIRecommendedFinanceToOrders(ctx context.Context, draft entity.OrderDraft, plan entity.FinancePlan) error {
+	if plan.FinanceServiceID == 0 {
+		return nil
 	}
+	orderIDs := make([]uint64, 0, 1+len(draft.Orders))
+	if draft.OrderID > 0 {
+		orderIDs = append(orderIDs, draft.OrderID)
+	}
+	for _, order := range draft.Orders {
+		if order.OrderID > 0 {
+			orderIDs = append(orderIDs, order.OrderID)
+		}
+	}
+	if len(orderIDs) == 0 {
+		return nil
+	}
+	db := database.GetDB()
+	if db == nil {
+		return nil
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var orders []orderEntity.Order
+		if err := tx.Where("id IN ?", orderIDs).Find(&orders).Error; err != nil {
+			return err
+		}
+		for idx := range orders {
+			if orders[idx].Remark == nil {
+				orders[idx].Remark = orderEntity.Remark{}
+			}
+			orders[idx].Remark["ai_finance_recommendation"] = map[string]any{
+				"finance_service_id":    plan.FinanceServiceID,
+				"funding_enterprise_id": plan.FundingEnterpriseID,
+				"provider":              plan.Provider,
+				"product_name":          plan.ProductName,
+				"finance_type":          plan.FinanceType,
+				"amount":                plan.Amount,
+				"annual_rate":           plan.Rate,
+				"term_days":             plan.TermDays,
+				"ai_recommended":        true,
+			}
+			if err := tx.Save(&orders[idx]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func buildAuditItems(parsed entity.ParsedInstruction, matches entity.MatchedProducts, financePlans entity.FinancePlans) entity.AuditItems {

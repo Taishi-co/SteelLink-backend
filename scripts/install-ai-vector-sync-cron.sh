@@ -25,6 +25,7 @@ AI_PROCUREMENT_VECTOR_SYNC_TOKEN=
 # Optional.
 # STEELLINK_BACKEND_BASE_URL=http://127.0.0.1:8080
 AI_PROCUREMENT_VECTOR_SYNC_BATCH_SIZE=100
+AI_PROCUREMENT_VECTOR_SYNC_TARGET=all
 EOF
   chmod 600 "${ENV_FILE}"
   echo "created ${ENV_FILE}; fill AI_PROCUREMENT_VECTOR_SYNC_TOKEN before relying on cron" >&2
@@ -39,7 +40,7 @@ set +a
 
 flock -n "${LOCK_FILE}" "${BIN_PATH}" \\
   --schedule=manual \\
-  --target=products \\
+  --target="\${AI_PROCUREMENT_VECTOR_SYNC_TARGET:-all}" \\
   --batch-size="\${AI_PROCUREMENT_VECTOR_SYNC_BATCH_SIZE:-100}" \\
   >>"${LOG_FILE}" 2>&1
 EOF

@@ -9,6 +9,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
+	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/embedding"
@@ -54,12 +55,18 @@ func (s *ProcurementService) SyncVectors(ctx context.Context, req *dto.VectorSyn
 	case "suppliers", "supplier":
 		result = reservedVectorSync(target)
 	case "finance", "finance-products", "finance_products":
-		result = reservedVectorSync(target)
+		result, err = s.syncFinanceVectors(ctx, req)
 	case "all":
 		result, err = s.syncProductVectors(ctx, req)
 		if err == nil {
-			result.ReservedTargets = append(result.ReservedTargets, "suppliers", "finance")
-			result.Message = "product vectors synced; supplier and finance product sync are reserved"
+			financeResult, financeErr := s.syncFinanceVectors(ctx, req)
+			if financeErr != nil {
+				err = financeErr
+			} else {
+				result.Synced += financeResult.Synced
+				result.ReservedTargets = append(result.ReservedTargets, "suppliers")
+				result.Message = "product and finance product vectors synced; supplier sync is reserved"
+			}
 		}
 	default:
 		return nil, ecode.ErrBadRequest.WithMessagef("unsupported vector sync target %q", req.Target)
@@ -81,6 +88,97 @@ func (s *ProcurementService) SyncVectors(ctx context.Context, req *dto.VectorSyn
 	result.Status = "succeeded"
 	cache.SetJSON(ctx, vectorSyncStatusKey(target), result, cache.VectorSyncStatusTTL)
 	return result, nil
+}
+
+func (s *ProcurementService) syncFinanceVectors(ctx context.Context, req *dto.VectorSyncRequest) (*dto.VectorSyncResponse, error) {
+	config.RefreshAIProcurementRuntimeConfig(ctx)
+	cfg := config.GetAIProcurement().VectorSearch
+	if !cfg.Enabled {
+		return nil, ecode.ErrBadRequest.WithMessage("vector search is disabled in runtime config")
+	}
+	if cfg.Provider != "pgvector" {
+		return nil, ecode.ErrBadRequest.WithMessagef("vector provider must be pgvector, got %q", cfg.Provider)
+	}
+	if cfg.ConnectionString() == "" {
+		return nil, ecode.ErrBadRequest.WithMessagef("%s is not configured", cfg.ConnectionEnv)
+	}
+	batchSize := req.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	store := vectorstore.NewPGVectorClient(cfg)
+	if req.CreateSchema == nil || *req.CreateSchema {
+		if err := store.EnsureFinanceSchema(ctx, cfg.Dimension); err != nil {
+			return nil, ecode.ErrDatabase.WithMessagef("ensure pgvector finance schema failed: %v", err)
+		}
+	}
+	embedder := embedding.NewClient(cfg)
+
+	var synced int
+	db := database.GetDB()
+	watermark, err := store.GetFinanceSyncWatermark(ctx)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessagef("read pgvector finance sync watermark failed: %v", err)
+	}
+	watermark, err = normalizeFinanceSyncWatermark(ctx, db, store, watermark)
+	if err != nil {
+		return nil, ecode.ErrDatabase.WithMessagef("initialize finance sync watermark failed: %v", err)
+	}
+	for {
+		remaining := req.Limit - synced
+		if req.Limit > 0 && remaining <= 0 {
+			break
+		}
+		currentBatchSize := batchSize
+		if req.Limit > 0 && remaining < currentBatchSize {
+			currentBatchSize = remaining
+		}
+		services, err := listFinanceServicesForVectorSync(ctx, db, watermark, currentBatchSize)
+		if err != nil {
+			return nil, ecode.ErrDatabase.WithMessagef("list finance services failed: %v", err)
+		}
+		if len(services) == 0 {
+			break
+		}
+		for _, item := range services {
+			text := buildFinanceEmbeddingText(item)
+			vector, err := embedder.Embed(ctx, text)
+			if err != nil {
+				return nil, ecode.ErrInternal.WithMessagef("embed finance service %d failed: %v", item.ID, err)
+			}
+			if err := store.UpsertFinance(ctx, vectorstore.FinanceEmbedding{
+				FinanceServiceID:    item.ID,
+				ProductName:         item.Name,
+				FinanceType:         item.FinanceType,
+				FundingEnterpriseID: item.EnterpriseID,
+				MinAmount:           item.MinAmount,
+				MaxAmount:           item.MaxAmount,
+				TermDays:            item.TermDays,
+				AnnualRate:          item.AnnualRate,
+				SourceUpdatedAt:     item.UpdatedAt,
+				Embedding:           vector,
+			}); err != nil {
+				return nil, ecode.ErrDatabase.WithMessagef("upsert finance service %d vector failed: %v", item.ID, err)
+			}
+			synced++
+			watermark.SourceUpdatedAt = item.UpdatedAt
+			watermark.FinanceServiceID = item.ID
+			watermark.Initialized = true
+			if err := store.SaveFinanceSyncWatermark(ctx, watermark); err != nil {
+				return nil, ecode.ErrDatabase.WithMessagef("save finance sync watermark failed: %v", err)
+			}
+		}
+	}
+
+	return &dto.VectorSyncResponse{
+		Target:              "finance",
+		Synced:              synced,
+		LastID:              watermark.FinanceServiceID,
+		LastSourceUpdatedAt: watermark.SourceUpdatedAt,
+		Status:              "succeeded",
+		Message:             fmt.Sprintf("finance product vector incremental sync complete count=%d", synced),
+	}, nil
 }
 
 func (s *ProcurementService) GetVectorSyncStatus(ctx context.Context, target string) *dto.VectorSyncResponse {
@@ -254,6 +352,54 @@ func isLegacyZeroWatermark(value time.Time) bool {
 	return value.IsZero() || value.Year() <= 1970
 }
 
+func normalizeFinanceSyncWatermark(ctx context.Context, db *gorm.DB, store *vectorstore.PGVectorClient, watermark vectorstore.FinanceSyncWatermark) (vectorstore.FinanceSyncWatermark, error) {
+	if watermark.Initialized {
+		return watermark, nil
+	}
+	if isLegacyZeroWatermark(watermark.SourceUpdatedAt) && watermark.FinanceServiceID == 0 {
+		return watermark, nil
+	}
+	if !isLegacyZeroWatermark(watermark.SourceUpdatedAt) && watermark.FinanceServiceID > 0 {
+		watermark.Initialized = true
+		if err := store.SaveFinanceSyncWatermark(ctx, watermark); err != nil {
+			return watermark, err
+		}
+		return watermark, nil
+	}
+	current, err := latestFinanceWatermark(ctx, db, watermark.FinanceServiceID)
+	if err != nil {
+		return watermark, err
+	}
+	if current.SourceUpdatedAt.IsZero() {
+		return watermark, nil
+	}
+	current.Initialized = true
+	if err := store.SaveFinanceSyncWatermark(ctx, current); err != nil {
+		return watermark, err
+	}
+	return current, nil
+}
+
+func latestFinanceWatermark(ctx context.Context, db *gorm.DB, maxFinanceServiceID uint64) (vectorstore.FinanceSyncWatermark, error) {
+	var item serviceOfferEntity.FinanceService
+	query := db.WithContext(ctx).Order("updated_at DESC, id DESC")
+	if maxFinanceServiceID > 0 {
+		query = query.Where("id <= ?", maxFinanceServiceID)
+	}
+	err := query.First(&item).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return vectorstore.FinanceSyncWatermark{}, nil
+		}
+		return vectorstore.FinanceSyncWatermark{}, err
+	}
+	return vectorstore.FinanceSyncWatermark{
+		SourceUpdatedAt:  item.UpdatedAt,
+		FinanceServiceID: item.ID,
+		Initialized:      true,
+	}, nil
+}
+
 func listProductsForVectorSync(ctx context.Context, db *gorm.DB, watermark vectorstore.ProductSyncWatermark, limit int) ([]*productEntity.Product, error) {
 	var products []*productEntity.Product
 	err := db.WithContext(ctx).
@@ -262,6 +408,16 @@ func listProductsForVectorSync(ctx context.Context, db *gorm.DB, watermark vecto
 		Limit(limit).
 		Find(&products).Error
 	return products, err
+}
+
+func listFinanceServicesForVectorSync(ctx context.Context, db *gorm.DB, watermark vectorstore.FinanceSyncWatermark, limit int) ([]*serviceOfferEntity.FinanceService, error) {
+	var services []*serviceOfferEntity.FinanceService
+	err := db.WithContext(ctx).
+		Where("(updated_at > ?) OR (updated_at = ? AND id > ?)", watermark.SourceUpdatedAt, watermark.SourceUpdatedAt, watermark.FinanceServiceID).
+		Order("updated_at ASC, id ASC").
+		Limit(limit).
+		Find(&services).Error
+	return services, err
 }
 
 func buildProductEmbeddingText(product *productEntity.Product) string {
@@ -295,6 +451,22 @@ func buildProductEmbeddingText(product *productEntity.Product) string {
 	}
 	if product.Description != "" {
 		parts = append(parts, "描述:"+product.Description)
+	}
+	return strings.Join(compactEmbeddingParts(parts), "；")
+}
+
+func buildFinanceEmbeddingText(item *serviceOfferEntity.FinanceService) string {
+	parts := []string{
+		"融资产品:" + item.Name,
+		"类型:" + item.FinanceType,
+		fmt.Sprintf("额度:%.2f-%.2f", item.MinAmount, item.MaxAmount),
+		fmt.Sprintf("期限:%d天", item.TermDays),
+		fmt.Sprintf("年化费率:%.4f", item.AnnualRate),
+		"手续费:" + item.FeeRule,
+		"风控:" + item.RiskControlRule,
+		"材料:" + strings.Join([]string(item.RequiredDocuments), " "),
+		"适用场景:" + strings.Join([]string(item.SupportedScenarios), " "),
+		"描述:" + item.Description,
 	}
 	return strings.Join(compactEmbeddingParts(parts), "；")
 }

@@ -49,7 +49,8 @@ type OrderForm struct {
 }
 
 type MatchFinanceRequest struct {
-	FinancingRequired bool `json:"financing_required"`
+	FinancingRequired        bool   `json:"financing_required"`
+	SelectedFinanceServiceID uint64 `json:"selected_finance_service_id"`
 }
 
 type ProcurementListRequest struct {

@@ -6,6 +6,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
 	orderDTO "github.com/Taishi-co/SteelLink-backend/internal/modules/order/ui/dto"
+	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 )
 
 func TestAIOrderGroupKeySplitsSameSellerByWarehouse(t *testing.T) {
@@ -120,5 +121,32 @@ func TestBuildAILogisticsOrderSkipsNegotiation(t *testing.T) {
 
 	if _, ok := buildAILogisticsOrder(plan, dto.OrderForm{}, 7, 8, 0); ok {
 		t.Fatal("expected negotiated logistics to skip concrete carrier logistics order")
+	}
+}
+
+func TestFinancePlansFromServicesMarksSelectedAIRecommendation(t *testing.T) {
+	plans := financePlansFromServices([]*serviceOfferEntity.FinanceService{
+		{
+			ID:                 11,
+			EnterpriseID:       21,
+			Name:               "订单融资A",
+			FinanceType:        "订单融资",
+			MinAmount:          1000,
+			MaxAmount:          50000,
+			TermDays:           90,
+			AnnualRate:         6.2,
+			RequiredDocuments:  serviceOfferEntity.StringList{"交易合同"},
+			SupportedScenarios: serviceOfferEntity.StringList{"设备维修"},
+		},
+	}, entity.ParsedInstruction{Usage: "设备维修", FinancingRequired: true}, 12000, 11)
+
+	if len(plans) != 1 {
+		t.Fatalf("expected one finance plan, got %d", len(plans))
+	}
+	if plans[0].FinanceServiceID != 11 || !plans[0].Selected || !plans[0].AIRecommended {
+		t.Fatalf("expected selected AI-recommended finance service, got %#v", plans[0])
+	}
+	if plans[0].Provider == "" || plans[0].ProductName != "订单融资A" {
+		t.Fatalf("expected real finance product fields, got %#v", plans[0])
 	}
 }
