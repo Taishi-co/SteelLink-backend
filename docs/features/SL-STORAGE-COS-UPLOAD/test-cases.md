@@ -14,6 +14,7 @@
 | TC-03 | 创建商品保存图片 | 已登录卖家，已获得商品主图 URL | 调用 `POST /api/v1/products`，传入 `images` 与 `quality_cert` | 商品创建成功，查询商品详情返回图片 URL |
 | TC-04 | 上传企业营业执照 PDF | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=enterprise_license`，上传 PDF | 返回私有桶 `enterprise/licenses` URL |
 | TC-05 | 上传物流商服务资质 | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=enterprise_service_document`，上传运输许可证/承运资质图片或 PDF | 返回私有桶 `enterprise/service-documents` URL |
+| TC-06 | 上传货权/监管凭证 | 已登录，COS 环境变量已配置 | `POST /api/v1/uploads`，`purpose=title_voucher`，上传图片或 PDF | 返回私有桶 `orders/title-vouchers` URL，可提交到直采支付监管凭证接口 |
 
 ## Exception Path
 
@@ -29,7 +30,7 @@
 | 编号 | 角色 | 场景 | 期望结果 |
 | --- | --- | --- | --- |
 | TC-AUTH-01 | 游客 | 上传任意文件 | 被 `AuthRequired` 拦截 |
-| TC-AUTH-02 | 已登录买家 | 上传支付/签收凭证 | 上传成功，后续订单服务继续校验订单归属 |
+| TC-AUTH-02 | 已登录买家 | 上传支付/货权监管/签收凭证 | 上传成功，后续订单服务继续校验订单归属 |
 | TC-AUTH-03 | 已登录卖家 | 上传商品主图/审核资料 | 上传成功，后续商品创建继续校验企业身份 |
 
 ## 配置与部署验证

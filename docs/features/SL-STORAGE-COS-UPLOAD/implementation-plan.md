@@ -32,9 +32,10 @@
 2. 引入腾讯云 COS SDK，封装按 purpose 选择 bucket、key 前缀、文件类型校验的上传客户端。
 3. 新增 `POST /api/v1/uploads`，复用登录态鉴权，接收 multipart 文件。
 4. 扩展商品创建 DTO 与服务逻辑，保存商品图片和质保资料 URL。
-5. 与前端联调支付凭证、签收凭证、商品图片上传链路。
+5. 与前端联调支付凭证、货权/监管凭证、签收凭证、商品图片上传链路。
 6. 收紧 provider 选择逻辑，避免 COS 密钥缺失时静默降级到本地 `uploads` 导致容器权限错误。
 7. 补齐企业营业执照和企业服务资质资料 purpose，支持物流商运输许可证、承运资质等私有桶上传。
+8. 补齐买家直采支付环节的 `title_voucher` purpose，写入私有桶 `orders/title-vouchers`，支持图片与 PDF。
 
 ## 验证计划
 
@@ -42,7 +43,7 @@
 - `./harness/verify.sh`
 - `./harness/review.sh docs/features/SL-STORAGE-COS-UPLOAD`
 - `./harness/release.sh docs/features/SL-STORAGE-COS-UPLOAD`
-- 人工验证: 配置真实 COS 密钥后上传一张商品图、一份支付凭证、一份签收凭证、一份企业营业执照和一份物流商服务资质。
+- 人工验证: 配置真实 COS 密钥后上传一张商品图、一份支付凭证、一份货权/监管凭证、一份签收凭证、一份企业营业执照和一份物流商服务资质。
 
 ## 风险与回滚关注点
 

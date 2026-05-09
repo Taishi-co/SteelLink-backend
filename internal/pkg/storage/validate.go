@@ -13,7 +13,7 @@ func ValidateExtension(purpose Purpose, filename string) error {
 		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp") {
 			return fmt.Errorf("%s files only support jpg, jpeg, png, webp", purpose)
 		}
-	case PurposeProductQualification, PurposePaymentVoucher, PurposeReceiptVoucher, PurposeEnterpriseLicense, PurposeEnterpriseServiceDoc:
+	case PurposeProductQualification, PurposePaymentVoucher, PurposeTitleVoucher, PurposeReceiptVoucher, PurposeEnterpriseLicense, PurposeEnterpriseServiceDoc:
 		if !allowedExt(ext, ".jpg", ".jpeg", ".png", ".webp", ".pdf") {
 			return fmt.Errorf("%s files only support jpg, jpeg, png, webp, pdf", purpose)
 		}
