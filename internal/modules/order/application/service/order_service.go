@@ -392,7 +392,7 @@ func (s *OrderService) GetByID(ctx context.Context, id, enterpriseID uint64, all
 		}
 		return nil, ecode.ErrDatabase
 	}
-	if !allowAll && (enterpriseID == 0 || (order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID))) {
+	if !allowAll && (enterpriseID == 0 || (order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) && warehouseEnterpriseIDOf(order) != enterpriseID)) {
 		funding, fundingErr := s.isFundingParticipant(ctx, order.ID, enterpriseID)
 		if fundingErr != nil {
 			return nil, fundingErr
