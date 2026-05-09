@@ -21,6 +21,7 @@ import (
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
 	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"go.uber.org/zap"
@@ -47,6 +48,11 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 	if prompt == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("采购指令不能为空")
 	}
+	parseKey := cache.Key("ai:parse", prompt)
+	var cached dto.ParseResponse
+	if cache.GetJSON(ctx, parseKey, &cached) {
+		return &cached, nil
+	}
 	parsed, ok, err := parseInstructionWithModel(ctx, prompt)
 	if err != nil || !ok {
 		if err != nil {
@@ -67,14 +73,16 @@ func (s *ProcurementService) Parse(ctx context.Context, prompt string) (*dto.Par
 		)
 	}
 	s.applyConfiguredCategory(ctx, &parsed, prompt)
-	return &dto.ParseResponse{
+	result := &dto.ParseResponse{
 		Parsed:          parsed,
 		MatchedProducts: entity.MatchedProducts{},
 		OrderDraft:      entity.OrderDraft{},
 		FinancePlans:    entity.FinancePlans{},
 		AuditItems:      buildAuditItems(parsed, nil, nil),
 		Stages:          buildStages(entity.StageInstructionParsing, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, parseKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) ConfirmInstruction(ctx context.Context, req *dto.ConfirmInstructionRequest) (*dto.ParseResponse, error) {
@@ -94,14 +102,21 @@ func (s *ProcurementService) MatchProducts(ctx context.Context, req *dto.MatchPr
 	config.RefreshAIProcurementRuntimeConfig(ctx)
 	parsed := normalizeParsedInput(req.Parsed, "")
 	s.applyConfiguredCategory(ctx, &parsed, "")
+	matchKey := cache.Key("ai:match-products", parsed)
+	var cached dto.MatchProductsResponse
+	if cache.GetJSON(ctx, matchKey, &cached) {
+		return &cached, nil
+	}
 	matches, err := s.matchProducts(ctx, parsed)
 	if err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("商品匹配失败")
 	}
-	return &dto.MatchProductsResponse{
+	result := &dto.MatchProductsResponse{
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageProductMatching, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *dto.MatchLogisticsWarehouseRequest) (*dto.MatchLogisticsWarehouseResponse, error) {
@@ -118,11 +133,21 @@ func (s *ProcurementService) MatchLogisticsWarehouse(ctx context.Context, req *d
 		}
 		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
 	}
+	matchKey := cache.Key("ai:match-logistics", struct {
+		Parsed           entity.ParsedInstruction `json:"parsed"`
+		SelectedProducts entity.MatchedProducts   `json:"selected_products"`
+	}{Parsed: parsed, SelectedProducts: selectedProducts})
+	var cached dto.MatchLogisticsWarehouseResponse
+	if cache.GetJSON(ctx, matchKey, &cached) {
+		return &cached, nil
+	}
 	matches := s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
-	return &dto.MatchLogisticsWarehouseResponse{
+	result := &dto.MatchLogisticsWarehouseResponse{
 		MatchedProducts: matches,
 		Stages:          buildStages(entity.StageLogisticsWarehouseMatching, false, parsed.FinancingRequired),
-	}, nil
+	}
+	cache.SetJSON(ctx, matchKey, result, cache.AIProcurementTTL)
+	return result, nil
 }
 
 func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.GenerateOrderRequest, userID, enterpriseID uint64) (*dto.GenerateOrderResponse, error) {
@@ -746,6 +771,10 @@ func isNegotiatedLogistics(match entity.MatchedProduct) bool {
 }
 
 func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.LogisticsService {
+	var cached []serviceOfferEntity.LogisticsService
+	if cache.GetJSON(ctx, "ai:approved-logistics-services", &cached) {
+		return cached
+	}
 	db := database.GetDB()
 	if db == nil {
 		return nil
@@ -755,6 +784,7 @@ func loadApprovedLogisticsServices(ctx context.Context) []serviceOfferEntity.Log
 		logAIProcurementWarn("AI procurement logistics services load failed", zap.Error(err))
 		return nil
 	}
+	cache.SetJSON(ctx, "ai:approved-logistics-services", rows, cache.ServiceOfferListTTL)
 	return rows
 }
 

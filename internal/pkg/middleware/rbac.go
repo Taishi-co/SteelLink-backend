@@ -1,7 +1,10 @@
 package middleware
 
 import (
+	"sort"
+
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/auth"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
@@ -73,20 +76,13 @@ func RequireEnterpriseService(services ...string) gin.HandlerFunc {
 			return
 		}
 
-		var total int64
-		for table, tableServices := range entity.PermissionTablesForServices(services) {
-			var count int64
-			if err := db.WithContext(c.Request.Context()).
-				Table(table).
-				Where("enterprise_id = ? AND service IN ? AND status = ?", claims.EnterpriseID, tableServices, entity.ServicePermissionApproved).
-				Count(&count).Error; err != nil {
-				response.Error(c, ecode.ErrDatabase.WithMessage("查询企业能力权限失败"))
-				c.Abort()
-				return
-			}
-			total += count
+		allowed, err := enterpriseServiceAllowed(c, claims.EnterpriseID, services)
+		if err != nil {
+			response.Error(c, ecode.ErrDatabase.WithMessage("查询企业能力权限失败"))
+			c.Abort()
+			return
 		}
-		if total == 0 {
+		if !allowed {
 			response.Error(c, ecode.ErrForbidden.WithMessage("无权访问：企业未开通对应能力"))
 			c.Abort()
 			return
@@ -94,6 +90,35 @@ func RequireEnterpriseService(services ...string) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func enterpriseServiceAllowed(c *gin.Context, enterpriseID uint64, services []string) (bool, error) {
+	keyServices := append([]string(nil), services...)
+	sort.Strings(keyServices)
+	key := "enterprise:services:" + cache.Hash(enterpriseID) + ":" + cache.Hash(keyServices)
+	var allowed bool
+	if cache.GetJSON(c.Request.Context(), key, &allowed) {
+		return allowed, nil
+	}
+
+	gormDB := database.GetDB()
+	if gormDB == nil {
+		return false, nil
+	}
+	var total int64
+	for table, tableServices := range entity.PermissionTablesForServices(services) {
+		var count int64
+		if err := gormDB.WithContext(c.Request.Context()).
+			Table(table).
+			Where("enterprise_id = ? AND service IN ? AND status = ?", enterpriseID, tableServices, entity.ServicePermissionApproved).
+			Count(&count).Error; err != nil {
+			return false, err
+		}
+		total += count
+	}
+	allowed = total > 0
+	cache.SetJSON(c.Request.Context(), key, allowed, cache.EnterpriseServiceTTL)
+	return allowed, nil
 }
 
 func RequireTradeCapability(capabilities ...string) gin.HandlerFunc {
@@ -105,19 +130,7 @@ func RequireProviderService(services ...string) gin.HandlerFunc {
 }
 
 func RequireFulfillmentParticipant() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := GetClaims(c)
-		if claims == nil {
-			response.Unauthorized(c, "未登录")
-			c.Abort()
-			return
-		}
-		if claims.UserType == string(entity.TypeOperator) || claims.UserType == string(entity.TypeSuperAdmin) {
-			c.Next()
-			return
-		}
-		RequireEnterpriseService("procurement", "sales", "warehouse", "logistics", "finance")(c)
-	}
+	return RequireEnterpriseService("procurement", "sales", "warehouse", "logistics", "finance")
 }
 
 func GetEnterpriseCode(c *gin.Context) string {
