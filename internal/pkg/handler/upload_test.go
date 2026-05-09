@@ -111,6 +111,53 @@ func TestUploadFileAllowsEnterpriseServiceDocumentPurpose(t *testing.T) {
 	}
 }
 
+func TestUploadFileAllowsTitleVoucherPurpose(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_LOCAL_DIR", t.TempDir())
+	t.Setenv("STORAGE_LOCAL_BASE_URL", "http://localhost/uploads")
+
+	config.GlobalConfig = &config.Config{
+		Server: config.ServerConfig{Port: 8080},
+		Storage: config.StorageConfig{
+			Provider:      "local",
+			MaxFileSizeMB: 20,
+		},
+	}
+	resetUploadClientsForTest()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("purpose", "title_voucher"); err != nil {
+		t.Fatalf("write purpose: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "title-voucher.pdf")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("%PDF-1.4 fake")); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	UploadFile(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	responseBody := rec.Body.String()
+	if !strings.Contains(responseBody, "orders/title-vouchers") {
+		t.Fatalf("expected title voucher path, got %s", responseBody)
+	}
+}
+
 func resetUploadClientsForTest() {
 	cosClientOnce = syncOnceForTest()
 	cosClient = nil

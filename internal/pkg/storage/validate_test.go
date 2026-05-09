@@ -11,6 +11,8 @@ func TestValidateExtensionAllowsEnterpriseServiceDocuments(t *testing.T) {
 		{name: "enterprise license pdf", purpose: PurposeEnterpriseLicense, file: "business-license.pdf"},
 		{name: "service document pdf", purpose: PurposeEnterpriseServiceDoc, file: "transport-license.pdf"},
 		{name: "service document image", purpose: PurposeEnterpriseServiceDoc, file: "carrier-certificate.jpeg"},
+		{name: "title voucher pdf", purpose: PurposeTitleVoucher, file: "title-voucher.pdf"},
+		{name: "title voucher image", purpose: PurposeTitleVoucher, file: "title-voucher.png"},
 	}
 
 	for _, tt := range tests {
