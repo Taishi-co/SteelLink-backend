@@ -507,16 +507,22 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权取消该订单")
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment &&
+	if err := validateTransition(order, orderEntity.OrderStatusCancelled); err != nil {
+		return nil, err
+	}
+	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
+		return nil, ecode.ErrBadRequest.WithMessage("已上传支付凭证，无法直接取消订单")
+	}
+	if order.Status != orderEntity.OrderStatusDraft &&
 		order.Status != orderEntity.OrderStatusPendingConfirm &&
 		order.Status != orderEntity.OrderStatusPendingWarehouseConfirm &&
 		order.Status != orderEntity.OrderStatusPendingSellerConfirm &&
 		order.Status != orderEntity.OrderStatusPendingBuyerConfirm &&
-		order.Status != orderEntity.OrderStatusPendingContract {
+		order.Status != orderEntity.OrderStatusPendingContract &&
+		order.Status != orderEntity.OrderStatusPendingPayment &&
+		order.Status != orderEntity.OrderStatusPendingWarehouseReselect &&
+		order.Status != orderEntity.OrderStatusPendingLogisticsRebid {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可取消")
-	}
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		return nil, ecode.ErrBadRequest.WithMessage("已上传支付凭证，无法直接取消订单")
 	}
 
 	db := database.GetDB()
@@ -1580,8 +1586,8 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认出库")
 	}
-	if order.Status != orderEntity.OrderStatusPendingDelivery {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认出库")
+	if err := validateTransition(order, orderEntity.OrderStatusDelivering); err != nil {
+		return nil, err
 	}
 	if order.DeliveryInfo == nil || order.DeliveryInfo.PickupCode == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("买家尚未录入提货信息")
@@ -1612,8 +1618,8 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
 	}
-	if order.Status != orderEntity.OrderStatusDelivering && order.Status != orderEntity.OrderStatusShipping && order.Status != orderEntity.OrderStatusDelivered {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
+	if err := validateTransition(order, orderEntity.OrderStatusReceived); err != nil {
+		return nil, err
 	}
 	if !isHTTPURL(req.ReceiptVoucher) {
 		return nil, ecode.ErrBadRequest.WithMessage("签收凭证地址必须是有效的 HTTP/HTTPS URL")
@@ -1656,8 +1662,8 @@ func (s *OrderService) CreateLogisticsBidding(ctx context.Context, id, enterpris
 	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权发起该订单物流竞价")
 	}
-	if order.Status != orderEntity.OrderStatusPaid && order.Status != orderEntity.OrderStatusPendingDelivery && order.Status != orderEntity.OrderStatusPendingLogisticsRebid {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可发起物流竞价")
+	if err := validateTransition(order, orderEntity.OrderStatusLogisticsBidding); err != nil {
+		return nil, err
 	}
 	if err := s.ensureTitleControlReadyForLogistics(ctx, order); err != nil {
 		return nil, err
@@ -1716,8 +1722,8 @@ func (s *OrderService) ReportLogisticsNoCapacity(ctx context.Context, id, enterp
 	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权反馈该订单物流无运力")
 	}
-	if order.Status != orderEntity.OrderStatusLogisticsBidding && order.Status != orderEntity.OrderStatusPendingLogisticsConfirm {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可反馈物流无运力")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingLogisticsRebid); err != nil {
+		return nil, err
 	}
 	db := database.GetDB()
 	var bidding orderEntity.LogisticsBidding
@@ -1812,8 +1818,8 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单物流资源")
 	}
-	if order.Status != orderEntity.OrderStatusLogisticsBidding && order.Status != orderEntity.OrderStatusPendingLogisticsConfirm {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认物流资源")
+	if err := validateTransition(order, orderEntity.OrderStatusShipping); err != nil {
+		return nil, err
 	}
 	var bidding orderEntity.LogisticsBidding
 	db := database.GetDB()
@@ -1885,6 +1891,9 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 	if order.Status != orderEntity.OrderStatusShipping && order.Status != orderEntity.OrderStatusDelivered {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可回传运输进度")
 	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return nil, err
+	}
 	fromStatus := order.Status
 	db := database.GetDB()
 	var task orderEntity.ShipmentTask
@@ -1903,6 +1912,9 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 		task.PickedUpAt = &now
 		eventType = "shipment_picked_up"
 	case "deliver":
+		if err := validateTransition(order, orderEntity.OrderStatusDelivered); err != nil {
+			return nil, err
+		}
 		task.Status = orderEntity.ShipmentStatusDelivered
 		task.DeliveryVoucher = strings.TrimSpace(req.VoucherURL)
 		task.DeliveredAt = &now
@@ -1944,8 +1956,8 @@ func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operator
 	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单对账")
 	}
-	if order.Status != orderEntity.OrderStatusReceived {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可对账")
+	if err := validateTransition(order, orderEntity.OrderStatusReconciled); err != nil {
+		return nil, err
 	}
 	fromStatus := order.Status
 	order.Status = orderEntity.OrderStatusReconciled
@@ -1972,8 +1984,8 @@ func (s *OrderService) Archive(ctx context.Context, id, enterpriseID, operatorID
 	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权归档该订单")
 	}
-	if order.Status != orderEntity.OrderStatusReconciled {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可归档")
+	if err := validateTransition(order, orderEntity.OrderStatusArchived); err != nil {
+		return nil, err
 	}
 	fromStatus := order.Status
 	order.Status = orderEntity.OrderStatusArchived
