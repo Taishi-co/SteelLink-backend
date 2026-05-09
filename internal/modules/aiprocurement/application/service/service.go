@@ -20,11 +20,13 @@ import (
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
+	serviceFulfillmentEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/domain/entity"
 	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/ecode"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type ProcurementService struct {
@@ -186,11 +188,19 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 		}
 		selectedProducts[idx].TotalAmount = selectedProducts[idx].Quantity * selectedProducts[idx].UnitPrice
 	}
-	selectedProducts = s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
-	orderInfos, err := s.createOrdersBySeller(ctx, selectedProducts, req.OrderForm, userID, enterpriseID)
+	selectedProducts, err := s.enrichSelectedProductsFromCatalog(ctx, selectedProducts)
 	if err != nil {
 		return nil, err
 	}
+	selectedProducts = s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
+	orderPlans, err := s.createOrdersBySeller(ctx, selectedProducts, req.OrderForm, userID, enterpriseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.createLogisticsOrdersForAIOrders(ctx, orderPlans, req.OrderForm, userID, enterpriseID); err != nil {
+		return nil, err
+	}
+	orderInfos := orderInfosFromPlans(orderPlans)
 	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, req.OrderForm, orderInfos)
 	financePlans := entity.FinancePlans{}
 	nextStage := entity.StageReviewSubmission
@@ -1047,7 +1057,46 @@ func totalSelectedQuantity(selected entity.MatchedProducts) float64 {
 	return total
 }
 
-func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected entity.MatchedProducts, form dto.OrderForm, userID, enterpriseID uint64) ([]*orderDTO.OrderInfo, error) {
+type aiOrderPlan struct {
+	Products  entity.MatchedProducts
+	OrderInfo *orderDTO.OrderInfo
+}
+
+func (s *ProcurementService) enrichSelectedProductsFromCatalog(ctx context.Context, selected entity.MatchedProducts) (entity.MatchedProducts, error) {
+	enriched := make(entity.MatchedProducts, 0, len(selected))
+	for _, item := range selected {
+		product, err := s.productRepo.FindByID(ctx, item.ProductID)
+		if err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		if product == nil {
+			return nil, ecode.ErrNotFound.WithMessage("商品不存在")
+		}
+		item.EnterpriseID = product.EnterpriseID
+		if strings.TrimSpace(item.ProductName) == "" {
+			item.ProductName = product.Name
+		}
+		if item.UnitPrice <= 0 {
+			item.UnitPrice = product.UnitPrice
+		}
+		if item.AvailableQty <= 0 {
+			item.AvailableQty = product.AvailableQty
+		}
+		if item.Warehouse == nil && product.WarehouseInfo != nil {
+			item.Warehouse = structToMap(product.WarehouseInfo)
+		}
+		if strings.TrimSpace(item.OriginWarehouseName) == "" && product.WarehouseInfo != nil {
+			item.OriginWarehouseName = product.WarehouseInfo.WarehouseName
+		}
+		if strings.TrimSpace(item.OriginAddress) == "" && product.WarehouseInfo != nil {
+			item.OriginAddress = buildWarehouseAddress(item.Warehouse)
+		}
+		enriched = append(enriched, item)
+	}
+	return enriched, nil
+}
+
+func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected entity.MatchedProducts, form dto.OrderForm, userID, enterpriseID uint64) ([]aiOrderPlan, error) {
 	grouped := make(map[string]entity.MatchedProducts)
 	order := make([]string, 0)
 	for _, item := range selected {
@@ -1061,7 +1110,7 @@ func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected 
 		}
 		grouped[groupKey] = append(grouped[groupKey], item)
 	}
-	orders := make([]*orderDTO.OrderInfo, 0, len(grouped))
+	orders := make([]aiOrderPlan, 0, len(grouped))
 	for _, groupKey := range order {
 		group := grouped[groupKey]
 		orderItems := make([]orderDTO.CreateOrderItemRequest, 0, len(group))
@@ -1087,9 +1136,110 @@ func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected 
 		if err != nil {
 			return nil, err
 		}
-		orders = append(orders, orderInfo)
+		orders = append(orders, aiOrderPlan{Products: group, OrderInfo: orderInfo})
 	}
 	return orders, nil
+}
+
+func orderInfosFromPlans(plans []aiOrderPlan) []*orderDTO.OrderInfo {
+	orders := make([]*orderDTO.OrderInfo, 0, len(plans))
+	for _, plan := range plans {
+		if plan.OrderInfo != nil {
+			orders = append(orders, plan.OrderInfo)
+		}
+	}
+	return orders
+}
+
+func (s *ProcurementService) createLogisticsOrdersForAIOrders(ctx context.Context, plans []aiOrderPlan, form dto.OrderForm, userID, enterpriseID uint64) error {
+	db := database.GetDB()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for idx, plan := range plans {
+			if plan.OrderInfo == nil || len(plan.Products) == 0 {
+				continue
+			}
+			logisticsOrder, ok := buildAILogisticsOrder(plan, form, userID, enterpriseID, idx)
+			if !ok {
+				continue
+			}
+			if err := tx.Create(logisticsOrder).Error; err != nil {
+				return ecode.ErrDatabase.WithMessage("创建AI采购物流委托失败")
+			}
+		}
+		return nil
+	})
+}
+
+func buildAILogisticsOrder(plan aiOrderPlan, form dto.OrderForm, userID, enterpriseID uint64, idx int) (*serviceFulfillmentEntity.LogisticsOrder, bool) {
+	if plan.OrderInfo == nil || len(plan.Products) == 0 {
+		return nil, false
+	}
+	logisticsServiceID := uint64(0)
+	for _, item := range plan.Products {
+		if item.LogisticsServiceID > 0 && !isNegotiatedLogistics(item) {
+			logisticsServiceID = item.LogisticsServiceID
+			break
+		}
+	}
+	if logisticsServiceID == 0 {
+		return nil, false
+	}
+	first := plan.Products[0]
+	origin := strings.TrimSpace(first.OriginAddress)
+	if origin == "" {
+		origin = buildWarehouseAddress(first.Warehouse)
+	}
+	if origin == "" {
+		origin = strings.TrimSpace(first.OriginWarehouseName)
+	}
+	destination := strings.TrimSpace(first.DestinationAddress)
+	if destination == "" {
+		destination = strings.TrimSpace(form.DeliveryAddress)
+	}
+	return &serviceFulfillmentEntity.LogisticsOrder{
+		LogisticsNo:        generateAILogisticsNo(idx),
+		OrderID:            plan.OrderInfo.ID,
+		OrderNo:            plan.OrderInfo.OrderNo,
+		BuyerEnterpriseID:  enterpriseID,
+		LogisticsServiceID: logisticsServiceID,
+		WarehouseServiceID: uintFromMap(first.Warehouse, "warehouse_service_id"),
+		Origin:             origin,
+		Destination:        destination,
+		CargoName:          aiLogisticsCargoName(plan.Products),
+		Weight:             totalSelectedQuantity(plan.Products),
+		EstimatedPrice:     sumFreightEstimate(plan.Products),
+		Status:             serviceFulfillmentEntity.LogisticsOrderPending,
+		GuaranteeType:      "平台履约保障",
+		CreatedBy:          userID,
+		UpdatedBy:          userID,
+	}, true
+}
+
+func generateAILogisticsNo(idx int) string {
+	return "LG" + time.Now().Format("20060102150405") + strconv.FormatInt(time.Now().UnixNano()%1000000, 10) + strconv.Itoa(idx)
+}
+
+func aiLogisticsCargoName(products entity.MatchedProducts) string {
+	names := make([]string, 0, len(products))
+	seen := make(map[string]struct{})
+	for _, item := range products {
+		name := strings.TrimSpace(item.ProductName)
+		if name == "" {
+			name = strings.TrimSpace(item.ProductNo)
+		}
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "AI采购钢材"
+	}
+	return strings.Join(names, "、")
 }
 
 func aiOrderGroupKey(sellerID uint64, item entity.MatchedProduct) string {
