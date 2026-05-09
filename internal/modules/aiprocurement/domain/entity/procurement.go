@@ -171,13 +171,22 @@ func (o *OrderSummaries) Scan(value interface{}) error {
 }
 
 type FinancePlan struct {
-	Provider    string  `json:"provider"`
-	ProductName string  `json:"product_name"`
-	Amount      float64 `json:"amount"`
-	Rate        float64 `json:"rate"`
-	TermDays    int     `json:"term_days"`
-	Matched     bool    `json:"matched"`
-	Reason      string  `json:"reason"`
+	FinanceServiceID    uint64   `json:"finance_service_id,omitempty"`
+	FundingEnterpriseID uint64   `json:"funding_enterprise_id,omitempty"`
+	Provider            string   `json:"provider"`
+	ProductName         string   `json:"product_name"`
+	FinanceType         string   `json:"finance_type,omitempty"`
+	Amount              float64  `json:"amount"`
+	MinAmount           float64  `json:"min_amount,omitempty"`
+	MaxAmount           float64  `json:"max_amount,omitempty"`
+	Rate                float64  `json:"rate"`
+	TermDays            int      `json:"term_days"`
+	RequiredDocuments   []string `json:"required_documents,omitempty"`
+	SupportedScenarios  []string `json:"supported_scenarios,omitempty"`
+	Matched             bool     `json:"matched"`
+	AIRecommended       bool     `json:"ai_recommended,omitempty"`
+	Selected            bool     `json:"selected,omitempty"`
+	Reason              string   `json:"reason"`
 }
 
 type FinancePlans []FinancePlan
