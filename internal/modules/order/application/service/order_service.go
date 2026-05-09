@@ -282,7 +282,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		return nil, ecode.ErrDatabase.WithMessage("创建订单失败")
 	}
 
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 type productOrderItem struct {
@@ -429,7 +429,7 @@ func (s *OrderService) ListByEnterprise(ctx context.Context, enterpriseID uint64
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -467,7 +467,7 @@ func (s *OrderService) ListAll(ctx context.Context, keyword string, status *int,
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return &dto.OrderListResponse{List: result, Total: total, Page: page, PageSize: pageSize}, nil
 }
@@ -573,7 +573,7 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 		return nil, ecode.ErrDatabase.WithMessage("取消订单失败")
 	}
 
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func shouldRestoreCartOnCancel(order *orderEntity.Order) bool {
@@ -654,7 +654,7 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 		}); err != nil {
 			return nil, ecode.ErrDatabase.WithMessage("仓库拒绝确认失败")
 		}
-		return toOrderInfo(order), nil
+		return toOrderInfo(order, nil), nil
 	}
 	fromStatus := order.Status
 	db := database.GetDB()
@@ -676,7 +676,7 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("仓库确认失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) ReselectWarehouse(ctx context.Context, id, buyerEnterpriseID, operatorID uint64, req *dto.WarehouseReselectRequest) (*dto.OrderInfo, error) {
@@ -729,7 +729,7 @@ func (s *OrderService) ReselectWarehouse(ctx context.Context, id, buyerEnterpris
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("重新选择仓库失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) SellerConfirm(ctx context.Context, id, sellerEnterpriseID, operatorID uint64, req *dto.SellerConfirmRequest) (*dto.OrderInfo, error) {
@@ -762,7 +762,7 @@ func (s *OrderService) SellerConfirm(ctx context.Context, id, sellerEnterpriseID
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("卖方确认订单失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) BuyerConfirm(ctx context.Context, id, buyerEnterpriseID, operatorID uint64, req *dto.BuyerConfirmRequest) (*dto.OrderInfo, error) {
@@ -798,10 +798,10 @@ func (s *OrderService) BuyerConfirm(ctx context.Context, id, buyerEnterpriseID, 
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("买方最终确认失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
-func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64, tradeRole string) (*dto.OrderInfo, error) {
 	order, err := s.orderRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -818,9 +818,11 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if err := s.ensureContract(ctx, order); err != nil {
 		return nil, err
 	}
-	signer := "seller"
-	if order.BuyerID == enterpriseID {
-		signer = "buyer"
+	signer, actorService, signErr := resolveContractSigner(order, enterpriseID, tradeRole)
+	if signErr != nil {
+		return nil, signErr
+	}
+	if signer == "buyer" {
 		order.ContractInfo.BuyerSigned = true
 	} else {
 		order.ContractInfo.SellerSigned = true
@@ -848,13 +850,44 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 		if toStatus == orderEntity.OrderStatusPendingPayment {
 			eventType = "contract_completed"
 		}
-		return createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, actorServiceForOrder(order, enterpriseID), fromStatus, toStatus, orderEntity.OrderEventPayload{
+		return createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, actorService, fromStatus, toStatus, orderEntity.OrderEventPayload{
 			"signer": signer,
 		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("签署合同失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
+}
+
+func resolveContractSigner(order *orderEntity.Order, enterpriseID uint64, tradeRole string) (string, string, *ecode.Error) {
+	isBuyer := order != nil && order.BuyerID == enterpriseID
+	isSeller := isOrderSeller(order, enterpriseID)
+
+	switch strings.ToLower(strings.TrimSpace(tradeRole)) {
+	case "buyer":
+		if !isBuyer {
+			return "", "", ecode.ErrForbidden.WithMessage("当前身份不是该订单买方")
+		}
+		return "buyer", "procurement", nil
+	case "seller":
+		if !isSeller {
+			return "", "", ecode.ErrForbidden.WithMessage("当前身份不是该订单卖方")
+		}
+		return "seller", "sales", nil
+	case "":
+		if isBuyer && !isSeller {
+			return "buyer", "procurement", nil
+		}
+		if isSeller && !isBuyer {
+			return "seller", "sales", nil
+		}
+		if isBuyer && isSeller {
+			return "", "", ecode.ErrBadRequest.WithMessage("无法判定当前签署身份，请从对应买家或卖家中心重新发起签署")
+		}
+		return "", "", ecode.ErrForbidden.WithMessage("无权签署该订单合同")
+	default:
+		return "", "", ecode.ErrBadRequest.WithMessage("无效的签署身份")
+	}
 }
 
 func (s *OrderService) AttachContract(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.AttachContractRequest) (*dto.OrderInfo, error) {
@@ -899,7 +932,7 @@ func (s *OrderService) AttachContract(ctx context.Context, id, enterpriseID, ope
 	if err := s.orderRepo.Update(ctx, order); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("绑定合同失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) ListByBuyer(ctx context.Context, buyerID uint64) ([]*dto.OrderInfo, error) {
@@ -912,7 +945,7 @@ func (s *OrderService) ListByBuyer(ctx context.Context, buyerID uint64) ([]*dto.
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -927,7 +960,7 @@ func (s *OrderService) ListBySeller(ctx context.Context, sellerID uint64) ([]*dt
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -947,7 +980,7 @@ func (s *OrderService) ListByWarehouse(ctx context.Context, warehouseEnterpriseI
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -974,7 +1007,7 @@ func (s *OrderService) ListByLogistics(ctx context.Context, logisticsEnterpriseI
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, toOrderInfo(order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -1048,7 +1081,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("上传支付凭证失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.DirectPaymentRequest) (*dto.OrderInfo, error) {
@@ -1545,7 +1578,7 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认收款失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.SetDeliveryInfoRequest) (*dto.OrderInfo, error) {
@@ -1614,7 +1647,7 @@ func (s *OrderService) SetDeliveryInfo(ctx context.Context, id, enterpriseID, op
 	if err := s.orderRepo.Update(ctx, order); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("保存提货信息失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.VerifyPickupCodeRequest) (*dto.OrderInfo, error) {
@@ -1670,7 +1703,7 @@ func (s *OrderService) ConfirmOutbound(ctx context.Context, id, enterpriseID, op
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认出库失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.ConfirmReceiptRequest) (*dto.OrderInfo, error) {
@@ -1717,7 +1750,7 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认收货失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) CreateLogisticsBidding(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.CreateLogisticsBiddingRequest) (*dto.LogisticsBiddingInfo, error) {
@@ -1828,7 +1861,7 @@ func (s *OrderService) ReportLogisticsNoCapacity(ctx context.Context, id, enterp
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("反馈物流无运力失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) CreateLogisticsQuote(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.CreateLogisticsQuoteRequest) (*dto.LogisticsQuoteInfo, error) {
@@ -1946,7 +1979,7 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认物流资源失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpriseID, operatorID uint64, action string, req *dto.ShipmentProgressRequest) (*dto.OrderInfo, error) {
@@ -2011,7 +2044,7 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("回传运输进度失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
@@ -2041,7 +2074,7 @@ func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operator
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("对账确认失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func (s *OrderService) Archive(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
@@ -2071,7 +2104,7 @@ func (s *OrderService) Archive(ctx context.Context, id, enterpriseID, operatorID
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("订单归档失败")
 	}
-	return toOrderInfo(order), nil
+	return toOrderInfo(order, nil), nil
 }
 
 func isOrderSeller(order *orderEntity.Order, enterpriseID uint64) bool {
@@ -2081,7 +2114,7 @@ func isOrderSeller(order *orderEntity.Order, enterpriseID uint64) bool {
 	return order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID
 }
 
-func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
+func toOrderInfo(order *orderEntity.Order, events []orderEntity.OrderEvent) *dto.OrderInfo {
 	if order == nil {
 		return nil
 	}
@@ -2191,13 +2224,13 @@ func toOrderInfo(order *orderEntity.Order) *dto.OrderInfo {
 		ReceiptVoucher: order.ReceiptVoucher,
 		ReceiptInfo:    receiptInfo,
 		ReceiptAt:      order.ReceiptAt,
-		Timeline:       buildOrderTimeline(order),
+		Timeline:       buildOrderTimeline(order, events),
 		Remark:         map[string]interface{}(order.Remark),
 	}
 }
 
 func (s *OrderService) toOrderDetailInfo(ctx context.Context, order *orderEntity.Order) *dto.OrderInfo {
-	info := toOrderInfo(order)
+	info := toOrderInfo(order, nil)
 	if info == nil {
 		return nil
 	}
@@ -2245,7 +2278,7 @@ func (s *OrderService) toOrderDetailInfo(ctx context.Context, order *orderEntity
 	return info
 }
 
-func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
+func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEvent) []dto.TimelineItem {
 	if order == nil {
 		return nil
 	}
@@ -2264,6 +2297,11 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		},
 	}
 
+	eventTimeMap := make(map[string]time.Time)
+	for _, event := range events {
+		eventTimeMap[event.EventType] = event.CreatedAt
+	}
+
 	skippedOrPending := func(reached bool) string {
 		if isCancelled || isException {
 			return "skipped"
@@ -2274,11 +2312,18 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		return "pending"
 	}
 
-	addItem := func(key, label, desc string, reached bool) {
+	getEventTime := func(eventType string) *time.Time {
+		if t, ok := eventTimeMap[eventType]; ok {
+			return &t
+		}
+		return &order.UpdatedAt
+	}
+
+	addItem := func(key, label, desc string, reached bool, eventType string) {
 		s := skippedOrPending(reached)
 		var t *time.Time
 		if s == "completed" {
-			t = &order.UpdatedAt
+			t = getEventTime(eventType)
 		}
 		items = append(items, dto.TimelineItem{
 			Key:         key,
@@ -2305,7 +2350,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "等待仓储方核验仓库条件并反馈。",
 		})
 	} else {
-		addItem("warehouse_confirm", "仓储方确认仓库条件", "仓储方已确认仓库条件。", warehouseReached)
+		addItem("warehouse_confirm", "仓储方确认仓库条件", "仓储方已确认仓库条件。", warehouseReached, "warehouse_confirmed")
 	}
 
 	sellerReached := orderStatusReached(status, orderEntity.OrderStatusPendingBuyerConfirm)
@@ -2317,7 +2362,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "等待卖方确认价格、数量和交付条款。",
 		})
 	} else {
-		addItem("seller_confirm", "卖方确认条款", "卖方已确认订单条款。", sellerReached)
+		addItem("seller_confirm", "卖方确认条款", "卖方已确认订单条款。", sellerReached, "seller_confirmed")
 	}
 
 	buyerReached := orderStatusReached(status, orderEntity.OrderStatusPendingContract)
@@ -2329,7 +2374,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "等待买方确认订单最终版本。",
 		})
 	} else {
-		addItem("buyer_confirm", "买方最终确认", "买方已确认订单。", buyerReached)
+		addItem("buyer_confirm", "买方最终确认", "买方已确认订单。", buyerReached, "buyer_confirmed")
 	}
 
 	contractReached := orderStatusReached(status, orderEntity.OrderStatusPendingPayment)
@@ -2362,7 +2407,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			})
 		}
 	} else {
-		addItem("contract_signed", "双方签署合同", "买卖双方已签署合同。", contractReached)
+		addItem("contract_signed", "双方签署合同", "买卖双方已签署合同。", contractReached, "contract_signed")
 	}
 
 	paymentReached := orderStatusReached(status, orderEntity.OrderStatusPaid)
@@ -2392,7 +2437,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		if !paymentReached && !isCancelled && !isException {
 			paymentDesc = "等待买方支付或申请托盘融资。"
 		}
-		addItem("payment", "支付/融资", paymentDesc, paymentReached)
+		addItem("payment", "支付/融资", paymentDesc, paymentReached, "direct_payment_confirmed")
 	}
 
 	if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract || orderStatusReached(status, orderEntity.OrderStatusPaid) {
@@ -2412,7 +2457,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 				Description: "买方需签署债务合同并支付手续费。",
 			})
 		} else {
-			addItem("financing", "托盘融资", "融资已放款。", financingReached)
+			addItem("financing", "托盘融资", "融资已放款。", financingReached, "financing_disbursed")
 		}
 	}
 
@@ -2439,7 +2484,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "等待买卖双方确认物流报价。",
 		})
 	} else {
-		addItem("logistics", "物流竞价与确认", "物流资源已确认，运输任务已下发。", logisticsReached)
+		addItem("logistics", "物流竞价与确认", "物流资源已确认，运输任务已下发。", logisticsReached, "logistics_quote_confirmed")
 	}
 
 	shippingReached := orderStatusReached(status, orderEntity.OrderStatusDelivered)
@@ -2459,7 +2504,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "物流方已送达，等待买方签收确认。",
 		})
 	} else {
-		addItem("shipping", "运输交付", "物流方已送达货物。", shippingReached)
+		addItem("shipping", "运输交付", "物流方已送达货物。", shippingReached, "logistics_delivered")
 	}
 
 	receiptReached := orderStatusReached(status, orderEntity.OrderStatusReceived)
@@ -2475,7 +2520,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 		if !receiptReached && !isCancelled && !isException {
 			receiptDesc = "等待买家确认收货。"
 		}
-		addItem("receipt", "买家确认收货", receiptDesc, receiptReached)
+		addItem("receipt", "买家确认收货", receiptDesc, receiptReached, "buyer_received")
 		if receiptReached {
 			items[len(items)-1].Time = order.ReceiptAt
 		}
@@ -2490,7 +2535,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "等待卖方完成收款对账确认。",
 		})
 	} else {
-		addItem("reconciled", "卖方对账确认", "卖方已完成收款对账确认。", reconciledReached)
+		addItem("reconciled", "卖方对账确认", "卖方已完成收款对账确认。", reconciledReached, "seller_reconciled")
 	}
 
 	archivedReached := status == orderEntity.OrderStatusArchived
@@ -2502,7 +2547,7 @@ func buildOrderTimeline(order *orderEntity.Order) []dto.TimelineItem {
 			Description: "对账完成，等待归档。",
 		})
 	} else {
-		addItem("archived", "订单归档", "订单已归档。", archivedReached)
+		addItem("archived", "订单归档", "订单已归档。", archivedReached, "order_archived")
 	}
 
 	if isCancelled {
