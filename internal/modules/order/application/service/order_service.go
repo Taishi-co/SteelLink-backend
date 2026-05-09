@@ -786,7 +786,7 @@ func (s *OrderService) BuyerConfirm(ctx context.Context, id, buyerEnterpriseID, 
 	return toOrderInfo(order), nil
 }
 
-func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
+func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, operatorID uint64, tradeRole string) (*dto.OrderInfo, error) {
 	order, err := s.orderRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -803,9 +803,11 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if err := s.ensureContract(ctx, order); err != nil {
 		return nil, err
 	}
-	signer := "seller"
-	if order.BuyerID == enterpriseID {
-		signer = "buyer"
+	signer, actorService, signErr := resolveContractSigner(order, enterpriseID, tradeRole)
+	if signErr != nil {
+		return nil, signErr
+	}
+	if signer == "buyer" {
 		order.ContractInfo.BuyerSigned = true
 	} else {
 		order.ContractInfo.SellerSigned = true
@@ -833,13 +835,44 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 		if toStatus == orderEntity.OrderStatusPendingPayment {
 			eventType = "contract_completed"
 		}
-		return createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, actorServiceForOrder(order, enterpriseID), fromStatus, toStatus, orderEntity.OrderEventPayload{
+		return createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, actorService, fromStatus, toStatus, orderEntity.OrderEventPayload{
 			"signer": signer,
 		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("签署合同失败")
 	}
 	return toOrderInfo(order), nil
+}
+
+func resolveContractSigner(order *orderEntity.Order, enterpriseID uint64, tradeRole string) (string, string, *ecode.Error) {
+	isBuyer := order != nil && order.BuyerID == enterpriseID
+	isSeller := isOrderSeller(order, enterpriseID)
+
+	switch strings.ToLower(strings.TrimSpace(tradeRole)) {
+	case "buyer":
+		if !isBuyer {
+			return "", "", ecode.ErrForbidden.WithMessage("当前身份不是该订单买方")
+		}
+		return "buyer", "procurement", nil
+	case "seller":
+		if !isSeller {
+			return "", "", ecode.ErrForbidden.WithMessage("当前身份不是该订单卖方")
+		}
+		return "seller", "sales", nil
+	case "":
+		if isBuyer && !isSeller {
+			return "buyer", "procurement", nil
+		}
+		if isSeller && !isBuyer {
+			return "seller", "sales", nil
+		}
+		if isBuyer && isSeller {
+			return "", "", ecode.ErrBadRequest.WithMessage("无法判定当前签署身份，请从对应买家或卖家中心重新发起签署")
+		}
+		return "", "", ecode.ErrForbidden.WithMessage("无权签署该订单合同")
+	default:
+		return "", "", ecode.ErrBadRequest.WithMessage("无效的签署身份")
+	}
 }
 
 func (s *OrderService) AttachContract(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.AttachContractRequest) (*dto.OrderInfo, error) {
