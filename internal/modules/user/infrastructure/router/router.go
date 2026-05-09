@@ -1,6 +1,8 @@
 package router
 
 import (
+	"time"
+
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/user/ui/handler"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/middleware"
 	"github.com/gin-gonic/gin"
@@ -15,11 +17,31 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
 	{
 		auth.POST("/register", authHandler.Register)
-		auth.POST("/login", authHandler.Login)
-		auth.POST("/refresh", authHandler.RefreshToken)
-		auth.POST("/sms/send", authHandler.SendSms)
-		auth.POST("/sms/login", authHandler.SmsLogin)
-		auth.POST("/password/reset", authHandler.ResetPassword)
+		auth.POST("/login", middleware.RedisRateLimit(middleware.RateLimitConfig{
+			Name:   "auth-login",
+			Limit:  20,
+			Window: 10 * time.Minute,
+		}), authHandler.Login)
+		auth.POST("/refresh", middleware.RedisRateLimit(middleware.RateLimitConfig{
+			Name:   "auth-refresh",
+			Limit:  60,
+			Window: 10 * time.Minute,
+		}), authHandler.RefreshToken)
+		auth.POST("/sms/send", middleware.RedisRateLimit(middleware.RateLimitConfig{
+			Name:   "sms-send",
+			Limit:  10,
+			Window: 10 * time.Minute,
+		}), authHandler.SendSms)
+		auth.POST("/sms/login", middleware.RedisRateLimit(middleware.RateLimitConfig{
+			Name:   "sms-login",
+			Limit:  20,
+			Window: 10 * time.Minute,
+		}), authHandler.SmsLogin)
+		auth.POST("/password/reset", middleware.RedisRateLimit(middleware.RateLimitConfig{
+			Name:   "password-reset",
+			Limit:  10,
+			Window: 10 * time.Minute,
+		}), authHandler.ResetPassword)
 	}
 
 	users := r.Group("/users")

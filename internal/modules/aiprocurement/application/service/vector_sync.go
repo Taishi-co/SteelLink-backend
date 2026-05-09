@@ -9,6 +9,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/config"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/embedding"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/vectorstore"
@@ -24,23 +25,76 @@ func (s *ProcurementService) SyncVectors(ctx context.Context, req *dto.VectorSyn
 	if target == "" {
 		target = "products"
 	}
+	startedAt := time.Now()
+	lockKey := "ai:vector-sync:lock:" + target
+	lockToken := fmt.Sprintf("%d", startedAt.UnixNano())
+	if !cache.TryLock(ctx, lockKey, lockToken, cache.VectorSyncLockTTL) {
+		status := readVectorSyncStatus(ctx, target)
+		if status == nil {
+			status = &dto.VectorSyncResponse{Target: target, Status: "running", Message: "vector sync is already running"}
+		}
+		status.Status = "running"
+		status.Message = "vector sync is already running"
+		return status, nil
+	}
+	defer cache.Unlock(ctx, lockKey, lockToken)
+
+	cache.SetJSON(ctx, vectorSyncStatusKey(target), &dto.VectorSyncResponse{
+		Target:    target,
+		Status:    "running",
+		StartedAt: startedAt,
+		Message:   "vector sync started",
+	}, cache.VectorSyncStatusTTL)
+
+	var result *dto.VectorSyncResponse
+	var err error
 	switch target {
 	case "products":
-		return s.syncProductVectors(ctx, req)
+		result, err = s.syncProductVectors(ctx, req)
 	case "suppliers", "supplier":
-		return reservedVectorSync(target), nil
+		result = reservedVectorSync(target)
 	case "finance", "finance-products", "finance_products":
-		return reservedVectorSync(target), nil
+		result = reservedVectorSync(target)
 	case "all":
-		result, err := s.syncProductVectors(ctx, req)
-		if err != nil {
-			return nil, err
+		result, err = s.syncProductVectors(ctx, req)
+		if err == nil {
+			result.ReservedTargets = append(result.ReservedTargets, "suppliers", "finance")
+			result.Message = "product vectors synced; supplier and finance product sync are reserved"
 		}
-		result.ReservedTargets = append(result.ReservedTargets, "suppliers", "finance")
-		result.Message = "product vectors synced; supplier and finance product sync are reserved"
-		return result, nil
 	default:
 		return nil, ecode.ErrBadRequest.WithMessagef("unsupported vector sync target %q", req.Target)
+	}
+	completedAt := time.Now()
+	if result == nil {
+		result = &dto.VectorSyncResponse{Target: target}
+	}
+	result.StartedAt = startedAt
+	result.CompletedAt = completedAt
+	result.DurationMs = completedAt.Sub(startedAt).Milliseconds()
+	if err != nil {
+		result.Status = "failed"
+		result.ErrorMessage = err.Error()
+		result.Message = "vector sync failed"
+		cache.SetJSON(ctx, vectorSyncStatusKey(target), result, cache.VectorSyncStatusTTL)
+		return nil, err
+	}
+	result.Status = "succeeded"
+	cache.SetJSON(ctx, vectorSyncStatusKey(target), result, cache.VectorSyncStatusTTL)
+	return result, nil
+}
+
+func (s *ProcurementService) GetVectorSyncStatus(ctx context.Context, target string) *dto.VectorSyncResponse {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		target = "products"
+	}
+	if status := readVectorSyncStatus(ctx, target); status != nil {
+		return status
+	}
+	return &dto.VectorSyncResponse{
+		Target:  target,
+		Status:  "unknown",
+		Message: "no vector sync status has been recorded",
 	}
 }
 
@@ -49,9 +103,22 @@ func reservedVectorSync(target string) *dto.VectorSyncResponse {
 		Target:          target,
 		Synced:          0,
 		LastID:          0,
+		Status:          "succeeded",
 		ReservedTargets: []string{target},
 		Message:         "reserved target; no-op in this version",
 	}
+}
+
+func readVectorSyncStatus(ctx context.Context, target string) *dto.VectorSyncResponse {
+	var status dto.VectorSyncResponse
+	if cache.GetJSON(ctx, vectorSyncStatusKey(target), &status) {
+		return &status
+	}
+	return nil
+}
+
+func vectorSyncStatusKey(target string) string {
+	return "ai:vector-sync:status:" + cache.HashString(target)
 }
 
 func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.VectorSyncRequest) (*dto.VectorSyncResponse, error) {
@@ -137,6 +204,7 @@ func (s *ProcurementService) syncProductVectors(ctx context.Context, req *dto.Ve
 		Synced:              synced,
 		LastID:              watermark.ProductID,
 		LastSourceUpdatedAt: watermark.SourceUpdatedAt,
+		Status:              "succeeded",
 		Message:             fmt.Sprintf("product vector incremental sync complete count=%d", synced),
 	}, nil
 }
