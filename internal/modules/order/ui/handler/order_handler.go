@@ -291,7 +291,7 @@ func (h *OrderHandler) SignContract(c *gin.Context) {
 		response.BadRequest(c, "无效的订单ID")
 		return
 	}
-	result, svcErr := h.orderService.SignContract(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	result, svcErr := h.orderService.SignContract(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, c.GetHeader("X-Trade-Role"))
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return
