@@ -43,6 +43,47 @@ const (
 	OrderStatusPendingLogisticsRebid    OrderStatus = 24 // 待重新发起物流
 )
 
+var validStatusTransitions = map[OrderStatus][]OrderStatus{
+	OrderStatusDraft:                    {OrderStatusPendingWarehouseConfirm, OrderStatusPendingConfirm, OrderStatusCancelled},
+	OrderStatusPendingConfirm:           {OrderStatusPendingContract, OrderStatusCancelled},
+	OrderStatusPendingWarehouseConfirm:  {OrderStatusPendingSellerConfirm, OrderStatusPendingWarehouseReselect, OrderStatusCancelled},
+	OrderStatusPendingWarehouseReselect: {OrderStatusPendingWarehouseConfirm, OrderStatusCancelled},
+	OrderStatusPendingSellerConfirm:     {OrderStatusPendingBuyerConfirm, OrderStatusCancelled},
+	OrderStatusPendingBuyerConfirm:      {OrderStatusPendingContract, OrderStatusCancelled},
+	OrderStatusPendingContract:          {OrderStatusPendingPayment, OrderStatusCancelled},
+	OrderStatusPendingPayment:           {OrderStatusPaid, OrderStatusFinancingReview, OrderStatusCancelled},
+	OrderStatusFinancingReview:          {OrderStatusPendingFinancingContract, OrderStatusCancelled},
+	OrderStatusPendingFinancingContract: {OrderStatusPaid, OrderStatusCancelled},
+	OrderStatusPaid:                     {OrderStatusPendingDelivery, OrderStatusLogisticsBidding, OrderStatusPendingLogisticsRebid},
+	OrderStatusPendingDelivery:          {OrderStatusLogisticsBidding, OrderStatusPendingLogisticsRebid},
+	OrderStatusLogisticsBidding:         {OrderStatusPendingLogisticsConfirm, OrderStatusPendingLogisticsRebid},
+	OrderStatusPendingLogisticsConfirm:  {OrderStatusShipping, OrderStatusPendingDelivery},
+	OrderStatusPendingLogisticsRebid:    {OrderStatusLogisticsBidding, OrderStatusCancelled},
+	OrderStatusShipping:                 {OrderStatusDelivered, OrderStatusReceived},
+	OrderStatusDelivering:               {OrderStatusDelivered, OrderStatusReceived},
+	OrderStatusDelivered:                {OrderStatusReceived},
+	OrderStatusReceived:                 {OrderStatusReconciled},
+	OrderStatusReconciled:               {OrderStatusArchived},
+	OrderStatusFrozen:                   {OrderStatusCancelled},
+	OrderStatusException:                {OrderStatusCancelled},
+}
+
+func ValidateStatusTransition(from, to OrderStatus) bool {
+	if to == OrderStatusCancelled || to == OrderStatusFrozen || to == OrderStatusException {
+		return true
+	}
+	allowed, ok := validStatusTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == to {
+			return true
+		}
+	}
+	return false
+}
+
 // OrderItem 订单项
 type OrderItem struct {
 	ProductID   uint64  `json:"product_id"`   // 商品ID

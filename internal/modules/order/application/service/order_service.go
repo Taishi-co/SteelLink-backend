@@ -616,10 +616,10 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	if order.DeliveryInfo.WarehouseEnterpriseID != warehouseEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单仓库条件")
 	}
-	if order.Status != orderEntity.OrderStatusPendingWarehouseConfirm {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可仓库确认")
-	}
 	if req != nil && !req.Confirmed {
+		if err := validateTransition(order, orderEntity.OrderStatusPendingWarehouseReselect); err != nil {
+			return nil, err
+		}
 		fromStatus := order.Status
 		order.Status = orderEntity.OrderStatusPendingWarehouseReselect
 		order.UpdatedBy = operatorID
@@ -646,6 +646,9 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	}
 	fromStatus := order.Status
 	db := database.GetDB()
+	if err := validateTransition(order, orderEntity.OrderStatusPendingSellerConfirm); err != nil {
+		return nil, err
+	}
 	order.Status = orderEntity.OrderStatusPendingSellerConfirm
 	order.UpdatedBy = operatorID
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -675,8 +678,8 @@ func (s *OrderService) ReselectWarehouse(ctx context.Context, id, buyerEnterpris
 	if order.BuyerID != buyerEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权为该订单重新选择仓库")
 	}
-	if order.Status != orderEntity.OrderStatusPendingWarehouseReselect {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可重新选择仓库")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingWarehouseConfirm); err != nil {
+		return nil, err
 	}
 	var warehouse offerEntity.WarehouseService
 	db := database.GetDB()
@@ -728,8 +731,8 @@ func (s *OrderService) SellerConfirm(ctx context.Context, id, sellerEnterpriseID
 	if !isOrderSeller(order, sellerEnterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单")
 	}
-	if order.Status != orderEntity.OrderStatusPendingSellerConfirm && order.Status != orderEntity.OrderStatusPendingConfirm {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态无需卖方确认")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingBuyerConfirm); err != nil {
+		return nil, err
 	}
 	fromStatus := order.Status
 	order.Status = orderEntity.OrderStatusPendingBuyerConfirm
@@ -761,8 +764,8 @@ func (s *OrderService) BuyerConfirm(ctx context.Context, id, buyerEnterpriseID, 
 	if order.BuyerID != buyerEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权最终确认该订单")
 	}
-	if order.Status != orderEntity.OrderStatusPendingBuyerConfirm {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可买方最终确认")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingContract); err != nil {
+		return nil, err
 	}
 	if err := s.ensureContract(ctx, order); err != nil {
 		return nil, err
@@ -797,8 +800,8 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if order.BuyerID != enterpriseID && !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("无权签署该订单合同")
 	}
-	if order.Status != orderEntity.OrderStatusPendingContract {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署合同")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingPayment); err != nil {
+		return nil, err
 	}
 	if err := s.ensureContract(ctx, order); err != nil {
 		return nil, err
@@ -981,8 +984,8 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 	if order.BuyerID != enterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权上传支付凭证")
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可上传支付凭证")
+	if err := validateTransition(order, orderEntity.OrderStatusPaid); err != nil {
+		return nil, err
 	}
 	if !isHTTPURL(req.VoucherURL) {
 		return nil, ecode.ErrBadRequest.WithMessage("支付凭证地址必须是有效的 HTTP/HTTPS URL")
@@ -1074,8 +1077,8 @@ func (s *OrderService) CreateFinancingRequest(ctx context.Context, id, buyerEnte
 	if order.BuyerID != buyerEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权申请该订单托盘融资")
 	}
-	if order.Status != orderEntity.OrderStatusPendingPayment {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可申请托盘融资")
+	if err := validateTransition(order, orderEntity.OrderStatusFinancingReview); err != nil {
+		return nil, err
 	}
 	requestedAmount := req.RequestedAmount
 	if requestedAmount <= 0 {
@@ -1474,8 +1477,8 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 		return nil, ecode.ErrForbidden.WithMessage("无权确认收款")
 	}
 	currentStatus := order.Status
-	if currentStatus != orderEntity.OrderStatusPendingPayment && currentStatus != orderEntity.OrderStatusPaid {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收款")
+	if err := validateTransition(order, orderEntity.OrderStatusPendingDelivery); err != nil {
+		return nil, err
 	}
 	if order.PaymentInfo == nil || order.PaymentInfo.VoucherURL == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("买家尚未上传支付凭证")
@@ -2630,6 +2633,19 @@ func checkOrderFrozenOrException(order *orderEntity.Order) error {
 	}
 	if order.Status == orderEntity.OrderStatusCancelled {
 		return ecode.ErrBadRequest.WithMessage("订单已取消，不可继续履约操作")
+	}
+	return nil
+}
+
+func validateTransition(order *orderEntity.Order, target orderEntity.OrderStatus) error {
+	if order == nil {
+		return ecode.ErrBadRequest.WithMessage("订单不存在")
+	}
+	if err := checkOrderFrozenOrException(order); err != nil {
+		return err
+	}
+	if !orderEntity.ValidateStatusTransition(order.Status, target) {
+		return ecode.ErrBadRequest.WithMessagef("订单当前状态[%d]不可流转到[%d]", order.Status, target)
 	}
 	return nil
 }
