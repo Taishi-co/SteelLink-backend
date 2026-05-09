@@ -720,6 +720,68 @@ func (h *OrderHandler) CreateLogisticsQuote(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OrderHandler) CloseLogisticsBidding(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.CloseLogisticsBidding(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ListLogisticsQuotes(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.ListLogisticsQuotes(c.Request.Context(), id, claims.EnterpriseID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"list": result})
+}
+
+func (h *OrderHandler) SelectLogisticsQuote(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.ConfirmLogisticsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.SelectLogisticsQuote(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) ConfirmLogisticsQuote(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
