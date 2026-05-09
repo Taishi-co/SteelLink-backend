@@ -411,7 +411,7 @@ func (s *ProductService) UpdateDisplay(ctx context.Context, id uint64, req *dto.
 }
 
 // UpdateStatus 更新商品审核/上下架状态
-func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int, operatorID uint64) error {
+func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int, auditRemark string, operatorID uint64) error {
 	product, err := s.productRepo.FindByID(ctx, id)
 	if err != nil {
 		return ecode.ErrDatabase
@@ -419,8 +419,14 @@ func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int
 	if product == nil {
 		return ecode.ErrNotFound.WithMessage("商品不存在")
 	}
+	productStatus := entity.ProductStatus(status)
+	switch productStatus {
+	case entity.ProductStatusPending, entity.ProductStatusOnSale, entity.ProductStatusOffSale, entity.ProductStatusRejected:
+	default:
+		return ecode.ErrBadRequest.WithMessage("商品状态无效")
+	}
 
-	if err := s.productRepo.UpdateStatus(ctx, id, entity.ProductStatus(status), operatorID); err != nil {
+	if err := s.productRepo.UpdateStatus(ctx, id, productStatus, auditRemark, operatorID); err != nil {
 		return ecode.ErrDatabase.WithMessage("更新商品状态失败")
 	}
 	invalidateProductCache(ctx)

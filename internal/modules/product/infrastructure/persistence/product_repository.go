@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
@@ -133,9 +134,17 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 	return products, total, nil
 }
 
-func (r *productRepository) UpdateStatus(ctx context.Context, id uint64, status entity.ProductStatus, updatedBy uint64) error {
-	return r.db.WithContext(ctx).Model(&entity.Product{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":     status,
-		"updated_by": updatedBy,
-	}).Error
+func (r *productRepository) UpdateStatus(ctx context.Context, id uint64, status entity.ProductStatus, auditRemark string, updatedBy uint64) error {
+	updates := map[string]interface{}{
+		"status":       status,
+		"audit_remark": auditRemark,
+		"updated_by":   updatedBy,
+	}
+	if status == entity.ProductStatusOnSale {
+		now := time.Now()
+		updates["approved_at"] = &now
+	} else if status == entity.ProductStatusPending || status == entity.ProductStatusRejected {
+		updates["approved_at"] = nil
+	}
+	return r.db.WithContext(ctx).Model(&entity.Product{}).Where("id = ?", id).Updates(updates).Error
 }

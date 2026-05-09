@@ -52,6 +52,12 @@ type FinanceServiceRequest struct {
 	Description        string   `json:"description"`
 }
 
+type AuditRequest struct {
+	Status           int    `json:"status" binding:"required,oneof=2 3 4"`
+	AuditRemark      string `json:"audit_remark" binding:"omitempty,max=500"`
+	AuditRemarkCamel string `json:"auditRemark" binding:"omitempty,max=500"`
+}
+
 type ListRequest struct {
 	Page         int    `form:"page"`
 	PageSize     int    `form:"page_size"`

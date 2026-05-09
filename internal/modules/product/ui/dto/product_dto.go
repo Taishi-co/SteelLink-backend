@@ -162,5 +162,7 @@ type ProductListResponse struct {
 }
 
 type UpdateProductStatusRequest struct {
-	Status int `json:"status" binding:"required,oneof=1 2 3 4"`
+	Status           int    `json:"status" binding:"required,oneof=1 2 3 4"`
+	AuditRemark      string `json:"audit_remark" binding:"omitempty,max=255"`
+	AuditRemarkCamel string `json:"auditRemark" binding:"omitempty,max=255"`
 }

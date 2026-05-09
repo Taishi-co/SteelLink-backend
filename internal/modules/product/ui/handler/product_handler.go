@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/application/service"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/ui/dto"
@@ -270,7 +271,11 @@ func (h *ProductHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.productService.UpdateStatus(c.Request.Context(), id, req.Status, userID); err != nil {
+	auditRemark := strings.TrimSpace(req.AuditRemark)
+	if auditRemark == "" {
+		auditRemark = strings.TrimSpace(req.AuditRemarkCamel)
+	}
+	if err := h.productService.UpdateStatus(c.Request.Context(), id, req.Status, auditRemark, userID); err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return
 	}
