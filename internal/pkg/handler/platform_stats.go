@@ -4,6 +4,7 @@ import (
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	userEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 	"github.com/Taishi-co/SteelLink-backend/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,13 @@ type PlatformStatsResponse struct {
 
 // PlatformStats returns public aggregate metrics for the buyer home page.
 func PlatformStats(c *gin.Context) {
+	const key = "platform:stats"
+	var cached PlatformStatsResponse
+	if cache.GetJSON(c.Request.Context(), key, &cached) {
+		response.Success(c, cached)
+		return
+	}
+
 	db := database.GetDB().WithContext(c.Request.Context())
 
 	var stats PlatformStatsResponse
@@ -74,5 +82,6 @@ func PlatformStats(c *gin.Context) {
 		return
 	}
 
+	cache.SetJSON(c.Request.Context(), key, stats, cache.PlatformStatsTTL)
 	response.Success(c, stats)
 }

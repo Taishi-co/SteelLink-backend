@@ -221,6 +221,15 @@ func (h *ProcurementHandler) SyncVectors(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *ProcurementHandler) VectorSyncStatus(c *gin.Context) {
+	if !validateVectorSyncToken(c) {
+		response.Unauthorized(c, "无效的向量同步令牌")
+		return
+	}
+	result := h.svc.GetVectorSyncStatus(c.Request.Context(), c.Query("target"))
+	response.Success(c, result)
+}
+
 func validateVectorSyncToken(c *gin.Context) bool {
 	expected := os.Getenv("AI_PROCUREMENT_VECTOR_SYNC_TOKEN")
 	if expected == "" {
