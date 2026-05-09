@@ -66,15 +66,7 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 		db = db.Where("steel_mill = ?", query.SteelMill)
 	}
 	if query.Status != nil {
-		if *query.Status == int(entity.ProductStatusOnSale) {
-			db = db.Where("(status = ? OR (approved_at IS NOT NULL AND status NOT IN (?, ?)))",
-				entity.ProductStatusOnSale,
-				entity.ProductStatusOffSale,
-				entity.ProductStatusRejected,
-			)
-		} else {
-			db = db.Where("status = ?", *query.Status)
-		}
+		db = db.Where("status = ?", *query.Status)
 	}
 	if query.EnterpriseID > 0 {
 		db = db.Where("enterprise_id = ?", query.EnterpriseID)
