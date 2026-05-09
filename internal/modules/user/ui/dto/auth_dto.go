@@ -27,6 +27,19 @@ type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+type SwitchSessionRequest struct {
+	Target string `json:"target" binding:"required,oneof=buyer seller"`
+}
+
+type SwitchSessionResponse struct {
+	SwitchToken string `json:"switch_token"`
+}
+
+type ConsumeSwitchSessionRequest struct {
+	SwitchToken string `json:"switch_token" binding:"required"`
+	Target      string `json:"target" binding:"required,oneof=buyer seller"`
+}
+
 // SendSmsRequest 发送验证码请求
 type SendSmsRequest struct {
 	Phone string `json:"phone" binding:"required,len=11"`

@@ -26,6 +26,7 @@ const (
 	PurposePaymentVoucher       Purpose = "payment_voucher"
 	PurposeTitleVoucher         Purpose = "title_voucher"
 	PurposeReceiptVoucher       Purpose = "receipt_voucher"
+	PurposeTitleVoucher         Purpose = "title_voucher"
 	PurposeIdentityCard         Purpose = "identity_card"
 	PurposeEnterpriseLicense    Purpose = "enterprise_license"
 	PurposeEnterpriseServiceDoc Purpose = "enterprise_service_document"
@@ -144,6 +145,10 @@ func (c *Client) target(purpose Purpose) (bucket, baseURL, prefix string, err er
 		bucket = c.cfg.PrivateBucket
 		baseURL = c.cfg.PrivateBaseURL
 		prefix = "orders/receipt-vouchers"
+	case PurposeTitleVoucher:
+		bucket = c.cfg.PrivateBucket
+		baseURL = c.cfg.PrivateBaseURL
+		prefix = "orders/title-vouchers"
 	case PurposeIdentityCard:
 		bucket = c.cfg.PrivateBucket
 		baseURL = c.cfg.PrivateBaseURL

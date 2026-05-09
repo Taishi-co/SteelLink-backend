@@ -27,6 +27,8 @@ func RegisterRoutes(r *gin.RouterGroup) {
 			Limit:  60,
 			Window: 10 * time.Minute,
 		}), authHandler.RefreshToken)
+		auth.POST("/switch-session", middleware.AuthRequired(), authHandler.CreateSwitchSession)
+		auth.POST("/switch-session/consume", authHandler.ConsumeSwitchSession)
 		auth.POST("/sms/send", middleware.RedisRateLimit(middleware.RateLimitConfig{
 			Name:   "sms-send",
 			Limit:  10,
