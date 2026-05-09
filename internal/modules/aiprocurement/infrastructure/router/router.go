@@ -30,11 +30,11 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		group.POST("/confirm-instruction", procurementHandler.ConfirmInstruction)
 		group.POST("/match-products", aiRateLimit, procurementHandler.MatchProducts)
 		group.POST("/match-logistics-warehouse", aiRateLimit, procurementHandler.MatchLogisticsWarehouse)
-		group.POST("/generate-order", procurementHandler.GenerateOrder)
-		group.POST("", procurementHandler.Create)
+		group.POST("/generate-order", middleware.RedisIdempotency("ai-procurement-generate-order"), procurementHandler.GenerateOrder)
+		group.POST("", middleware.RedisIdempotency("ai-procurement-create"), procurementHandler.Create)
 		group.GET("/mine", procurementHandler.ListMine)
 		group.GET("/:id", procurementHandler.GetByID)
 		group.POST("/:id/match-finance", procurementHandler.MatchFinance)
-		group.POST("/:id/submit-review", procurementHandler.SubmitReview)
+		group.POST("/:id/submit-review", middleware.RedisIdempotency("ai-procurement-submit-review"), procurementHandler.SubmitReview)
 	}
 }

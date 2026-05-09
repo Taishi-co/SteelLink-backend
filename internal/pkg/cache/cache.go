@@ -20,7 +20,10 @@ const (
 	ServiceOfferDetailTTL = 5 * time.Minute
 	MarketStatsTTL        = 45 * time.Second
 	AIProcurementTTL      = 20 * time.Minute
+	AIProcurementMatchTTL = 10 * time.Minute
 	PlatformStatsTTL      = 60 * time.Second
+	DashboardStatsTTL     = 60 * time.Second
+	IdempotencyKeyTTL     = 5 * time.Minute
 	VectorSyncLockTTL     = 30 * time.Minute
 	VectorSyncStatusTTL   = 24 * time.Hour
 )
