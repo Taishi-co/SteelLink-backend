@@ -32,6 +32,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("/:id/warehouse-confirm", warehouseService, orderHandler.WarehouseConfirm)
 		orders.POST("/:id/warehouse-check", warehouseService, orderHandler.WarehouseConfirm)
 		orders.POST("/:id/warehouse-selection", buyerService, orderHandler.ReselectWarehouse)
+		orders.POST("/:id/dest-warehouse", buyerService, orderHandler.SelectDestWarehouse)
 		orders.POST("/:id/seller-confirm", sellerService, orderHandler.SellerConfirm)
 		orders.POST("/:id/buyer-confirm", buyerService, orderHandler.BuyerConfirm)
 		orders.POST("/:id/sign-contract", buyerOrSellerService, orderHandler.SignContract)

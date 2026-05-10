@@ -12,6 +12,7 @@ type CreateOrderRequest struct {
 	ContactName         string                   `json:"contact_name"`
 	ContactPhone        string                   `json:"contact_phone"`
 	WarehouseName       string                   `json:"warehouse_name"`
+	DestWarehouseServiceID uint64                 `json:"dest_warehouse_service_id"`
 	DeliveryAddress     string                   `json:"delivery_address"`
 	DeliveryMethod      string                   `json:"delivery_method"`
 	PaymentMethod       string                   `json:"payment_method"`
@@ -86,6 +87,11 @@ type WarehouseConfirmRequest struct {
 type WarehouseReselectRequest struct {
 	WarehouseServiceID uint64 `json:"warehouse_service_id" binding:"required"`
 	ConfirmNote        string `json:"confirm_note"`
+}
+
+type DestWarehouseSelectRequest struct {
+	DestWarehouseServiceID uint64 `json:"dest_warehouse_service_id" binding:"required"`
+	DestConfirmNote        string `json:"dest_confirm_note"`
 }
 
 type SellerConfirmRequest struct {

@@ -187,6 +187,21 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		return nil, ecode.ErrBadRequest.WithMessage("商品未绑定仓储方，无法进入仓库确认")
 	}
 
+	db := database.GetDB()
+	if req.DestWarehouseServiceID > 0 {
+		var destWarehouse offerEntity.WarehouseService
+		if err := db.WithContext(ctx).Where("id = ? AND status = ?", req.DestWarehouseServiceID, offerEntity.OfferStatusApproved).First(&destWarehouse).Error; err != nil {
+			return nil, ecode.ErrBadRequest.WithMessage("目的地仓储资源不存在或未审核通过")
+		}
+		initialDeliveryInfo.DestWarehouseServiceID = destWarehouse.ID
+		initialDeliveryInfo.DestWarehouseEnterpriseID = destWarehouse.EnterpriseID
+		initialDeliveryInfo.DestWarehouseName = destWarehouse.WarehouseName
+		initialDeliveryInfo.DestWarehouseProvince = destWarehouse.Province
+		initialDeliveryInfo.DestWarehouseCity = destWarehouse.City
+		initialDeliveryInfo.DestWarehouseDistrict = destWarehouse.District
+		initialDeliveryInfo.DestWarehouseAddress = destWarehouse.Address
+	}
+
 	sellerEnterprise, err := s.enterpriseRepo.FindByID(ctx, sellerEnterpriseID)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -235,7 +250,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		TotalAmount:        totalAmount,
 		TaxTotalAmount:     taxTotalAmount,
 		Currency:           currency,
-		Status:             orderEntity.OrderStatusPendingWarehouseConfirm,
+		Status:             orderEntity.OrderStatusPendingDestWarehouse,
 		DeliveryInfo:       initialDeliveryInfo,
 		Remark: orderEntity.Remark{
 			"source":                 strings.TrimSpace(req.Source),
@@ -253,7 +268,6 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		UpdatedBy: userID,
 	}
 
-	db := database.GetDB()
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, productItem := range products {
 			if !productItem.Product.LockStock(productItem.Quantity) {
@@ -560,6 +574,8 @@ func (s *OrderService) Cancel(ctx context.Context, id, enterpriseID, operatorID 
 	if order.Status != orderEntity.OrderStatusPendingPayment &&
 		order.Status != orderEntity.OrderStatusPendingConfirm &&
 		order.Status != orderEntity.OrderStatusPendingWarehouseConfirm &&
+		order.Status != orderEntity.OrderStatusPendingWarehouseSelect &&
+		order.Status != orderEntity.OrderStatusPendingWarehouseReselect &&
 		order.Status != orderEntity.OrderStatusPendingSellerConfirm &&
 		order.Status != orderEntity.OrderStatusPendingBuyerConfirm &&
 		order.Status != orderEntity.OrderStatusPendingContract {
@@ -731,10 +747,10 @@ func (s *OrderService) ReselectWarehouse(ctx context.Context, id, buyerEnterpris
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
 	if order.BuyerID != buyerEnterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("无权为该订单重新选择仓库")
+		return nil, ecode.ErrForbidden.WithMessage("无权为该订单选择仓库")
 	}
-	if order.Status != orderEntity.OrderStatusPendingWarehouseReselect {
-		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可重新选择仓库")
+	if order.Status != orderEntity.OrderStatusPendingWarehouseReselect && order.Status != orderEntity.OrderStatusPendingWarehouseSelect {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可选择仓库")
 	}
 	var warehouse offerEntity.WarehouseService
 	db := database.GetDB()
@@ -771,6 +787,56 @@ func (s *OrderService) ReselectWarehouse(ctx context.Context, id, buyerEnterpris
 		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("重新选择仓库失败")
+	}
+	return toOrderInfo(order, nil), nil
+}
+
+func (s *OrderService) SelectDestWarehouse(ctx context.Context, id, buyerEnterpriseID, operatorID uint64, req *dto.DestWarehouseSelectRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.BuyerID != buyerEnterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权为该订单选择目的地仓库")
+	}
+	if order.Status != orderEntity.OrderStatusPendingDestWarehouse {
+		return nil, ecode.ErrBadRequest.WithMessage("订单状态不允许选择目的地仓库")
+	}
+	if order.DeliveryInfo == nil || order.DeliveryInfo.WarehouseEnterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("订单未绑定提货仓库，无法选择目的地仓库")
+	}
+	if order.DeliveryInfo.DestWarehouseEnterpriseID != 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("订单已选择目的地仓库，如需更改请联系管理员")
+	}
+	var warehouse offerEntity.WarehouseService
+	db := database.GetDB()
+	if err := db.WithContext(ctx).Where("id = ? AND status = ?", req.DestWarehouseServiceID, offerEntity.OfferStatusApproved).First(&warehouse).Error; err != nil {
+		return nil, ecode.ErrBadRequest.WithMessage("目的地仓储资源不存在或未审核通过")
+	}
+	order.DeliveryInfo.DestWarehouseServiceID = warehouse.ID
+	order.DeliveryInfo.DestWarehouseEnterpriseID = warehouse.EnterpriseID
+	order.DeliveryInfo.DestWarehouseName = warehouse.WarehouseName
+	order.DeliveryInfo.DestWarehouseProvince = warehouse.Province
+	order.DeliveryInfo.DestWarehouseCity = warehouse.City
+	order.DeliveryInfo.DestWarehouseDistrict = warehouse.District
+	order.DeliveryInfo.DestWarehouseAddress = warehouse.Address
+	order.Status = orderEntity.OrderStatusPendingWarehouseConfirm
+	order.UpdatedBy = operatorID
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "dest_warehouse_selected", operatorID, buyerEnterpriseID, "procurement", orderEntity.OrderStatusPendingDestWarehouse, orderEntity.OrderStatusPendingWarehouseConfirm, orderEntity.OrderEventPayload{
+			"dest_warehouse_service_id":    warehouse.ID,
+			"dest_warehouse_enterprise_id": warehouse.EnterpriseID,
+			"dest_warehouse_name":         warehouse.WarehouseName,
+			"dest_confirm_note":           strings.TrimSpace(req.DestConfirmNote),
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("选择目的地仓库失败")
 	}
 	return toOrderInfo(order, nil), nil
 }
@@ -2615,6 +2681,18 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 			Time:        t,
 			Description: desc,
 		})
+	}
+
+	destWarehouseReached := orderStatusReached(status, orderEntity.OrderStatusPendingWarehouseConfirm)
+	if status == orderEntity.OrderStatusPendingDestWarehouse {
+		items = append(items, dto.TimelineItem{
+			Key:         "dest_warehouse_select",
+			Label:       "选择目的地仓储",
+			Status:      "current",
+			Description: "请选择物流送达的目的地仓库。",
+		})
+	} else {
+		addItem("dest_warehouse_select", "选择目的地仓储", "买家已选择目的地仓库。", destWarehouseReached, "dest_warehouse_selected")
 	}
 
 	warehouseReached := orderStatusReached(status, orderEntity.OrderStatusPendingSellerConfirm)

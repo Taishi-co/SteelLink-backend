@@ -159,6 +159,7 @@ func main() {
 	}
 
 	ginRouter := gin.New()
+	ginRouter.MaxMultipartMemory = 100 << 20 // 100MB
 	ginRouter.Use(
 		middleware.Recovery(),
 		middleware.Logger(),
