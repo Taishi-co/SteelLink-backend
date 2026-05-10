@@ -1205,6 +1205,23 @@ func (s *OrderService) CreateFinancingRequest(ctx context.Context, id, buyerEnte
 	if financeService.MaxAmount > 0 && requestedAmount > financeService.MaxAmount {
 		return nil, ecode.ErrBadRequest.WithMessage("申请金额超过金融服务产品最高额度")
 	}
+	if len(financeService.SupportedScenarios) > 0 {
+		matched := false
+		for _, item := range order.Items {
+			for _, scenario := range financeService.SupportedScenarios {
+				if strings.Contains(item.Category, scenario) || strings.Contains(scenario, item.Category) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if !matched {
+			return nil, ecode.ErrBadRequest.WithMessage("该融资产品不适用于当前订单商品品类")
+		}
+	}
 	financing := &orderEntity.OrderFinancingRequest{
 		OrderID:             order.ID,
 		OrderNo:             order.OrderNo,
@@ -1269,8 +1286,12 @@ func (s *OrderService) SubmitRiskResult(ctx context.Context, id, fundingEnterpri
 				if product == nil {
 					return ecode.ErrBadRequest.WithMessage("订单商品不存在，无法终止融资订单")
 				}
-				if !product.UnlockStock(item.Quantity) {
-					return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法终止融资订单")
+				if product.LockedQty >= item.Quantity {
+					if !product.UnlockStock(item.Quantity) {
+						return ecode.ErrBadRequest.WithMessage("订单锁定库存异常，无法终止融资订单")
+					}
+				} else {
+					product.ReturnStock(item.Quantity)
 				}
 				product.UpdatedBy = operatorID
 				if err := tx.Save(product).Error; err != nil {
@@ -1465,6 +1486,22 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	order.Status = orderEntity.OrderStatusPaid
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range order.Items {
+			product, findErr := s.productRepo.FindByID(ctx, item.ProductID)
+			if findErr != nil {
+				return findErr
+			}
+			if product == nil {
+				return ecode.ErrBadRequest.WithMessage("订单商品不存在")
+			}
+			if !product.DeductStock(item.Quantity) {
+				return ecode.ErrBadRequest.WithMessage("订单库存扣减异常")
+			}
+			product.UpdatedBy = operatorID
+			if saveErr := tx.Save(product).Error; saveErr != nil {
+				return saveErr
+			}
+		}
 		if err := tx.Save(financing).Error; err != nil {
 			return err
 		}
@@ -1498,17 +1535,23 @@ func (s *OrderService) RecordPledge(ctx context.Context, id, fundingEnterpriseID
 		return nil, ecode.ErrBadRequest.WithMessage("货权质押凭证URL必须是有效的HTTP/HTTPS地址")
 	}
 	now := time.Now()
+	fromStatus := order.Status
 	financing.Status = orderEntity.FinancingRequestStatusPledged
 	financing.PledgeVoucherURL = strings.TrimSpace(req.PledgeVoucherURL)
 	financing.PledgeRemark = strings.TrimSpace(req.PledgeRemark)
 	financing.ReleaseCondition = strings.TrimSpace(req.ReleaseCondition)
 	financing.PledgedAt = &now
 	financing.UpdatedBy = operatorID
+	order.Status = orderEntity.OrderStatusPendingDelivery
+	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(financing).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "ownership_pledge_recorded", operatorID, fundingEnterpriseID, "finance", order.Status, order.Status, orderEntity.OrderEventPayload{
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "ownership_pledge_recorded", operatorID, fundingEnterpriseID, "finance", fromStatus, order.Status, orderEntity.OrderEventPayload{
 			"pledge_voucher_url": financing.PledgeVoucherURL,
 			"release_condition":  financing.ReleaseCondition,
 		})
@@ -1986,10 +2029,10 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	}
 
 	deliveryInfo := &orderEntity.DeliveryInfo{
-		DriverName:  quote.DriverInfo,
-		PlateNumber: quote.VehicleInfo,
-		PickupCode:  pickupCode,
-		Address:     bidding.DestinationAddress,
+		DriverName:    quote.DriverInfo,
+		PlateNumber:   quote.VehicleInfo,
+		PickupCode:    pickupCode,
+		Address:       bidding.DestinationAddress,
 		EstimatedTime: quote.EstimatedDeliveryAt,
 	}
 	if existingDelivery != nil {
