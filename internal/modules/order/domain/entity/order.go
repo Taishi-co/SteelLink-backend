@@ -66,7 +66,7 @@ var validStatusTransitions = map[OrderStatus][]OrderStatus{
 	OrderStatusReceived:                 {OrderStatusReconciled},
 	OrderStatusReconciled:               {OrderStatusArchived},
 	OrderStatusArchived:                 {},
-	OrderStatusFinancingReview:          {OrderStatusPendingFinancingContract, OrderStatusCancelled},
+	OrderStatusFinancingReview:          {OrderStatusPendingFinancingContract, OrderStatusPendingPayment, OrderStatusCancelled},
 	OrderStatusPendingFinancingContract: {OrderStatusPaid, OrderStatusCancelled},
 	OrderStatusPendingLogisticsRebid:    {OrderStatusLogisticsBidding, OrderStatusCancelled},
 }

@@ -1354,14 +1354,33 @@ func (s *OrderService) BuyerConfirmFinancing(ctx context.Context, id, buyerEnter
 	if order.BuyerID != buyerEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单融资方案")
 	}
-	if !req.Confirmed {
-		return nil, ecode.ErrBadRequest.WithMessage("买方未确认融资金额和定价")
-	}
 	if financing.Status != orderEntity.FinancingRequestStatusRiskApproved {
 		return nil, ecode.ErrBadRequest.WithMessage("当前融资申请状态不可买方确认")
 	}
-	now := time.Now()
 	fromStatus := order.Status
+	if !req.Confirmed {
+		financing.Status = orderEntity.FinancingRequestStatusRiskRejected
+		financing.RiskResult = "buyer_declined"
+		financing.UpdatedBy = operatorID
+		order.Status = orderEntity.OrderStatusPendingPayment
+		order.UpdatedBy = operatorID
+		order.FinanceID = 0
+		if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(financing).Error; err != nil {
+				return err
+			}
+			if err := tx.Save(order).Error; err != nil {
+				return err
+			}
+			return createOrderEvent(tx, ctx, order, "financing_buyer_declined", operatorID, buyerEnterpriseID, "procurement", fromStatus, order.Status, orderEntity.OrderEventPayload{
+				"remark": strings.TrimSpace(req.Remark),
+			})
+		}); err != nil {
+			return nil, ecode.ErrDatabase.WithMessage("拒绝融资方案失败")
+		}
+		return toFinancingRequestInfo(financing), nil
+	}
+	now := time.Now()
 	financing.Status = orderEntity.FinancingRequestStatusBuyerConfirmed
 	financing.BuyerConfirmedAt = &now
 	financing.UpdatedBy = operatorID
