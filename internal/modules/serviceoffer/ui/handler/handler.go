@@ -503,6 +503,7 @@ func (h *Handler) AuditWarehouse(c *gin.Context) {
 	if !h.auditOffer(c, &item) {
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, warehouseToInfo(&item))
 }
 
@@ -511,6 +512,7 @@ func (h *Handler) AuditLogistics(c *gin.Context) {
 	if !h.auditOffer(c, &item) {
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, logisticsToInfo(&item))
 }
 
@@ -519,6 +521,7 @@ func (h *Handler) AuditFinance(c *gin.Context) {
 	if !h.auditOffer(c, &item) {
 		return
 	}
+	invalidateServiceOfferCache(c.Request.Context())
 	response.Success(c, financeToInfo(&item))
 }
 
