@@ -28,23 +28,25 @@ const (
 	OrderStatusFrozen          OrderStatus = 10 // 已冻结
 	OrderStatusException       OrderStatus = 11 // 异常
 
-	OrderStatusPendingWarehouseConfirm  OrderStatus = 12 // 待仓库确认
-	OrderStatusPendingSellerConfirm     OrderStatus = 13 // 待卖方确认
-	OrderStatusPendingBuyerConfirm      OrderStatus = 14 // 待买方最终确认
-	OrderStatusLogisticsBidding         OrderStatus = 15 // 物流竞价中
-	OrderStatusPendingLogisticsConfirm  OrderStatus = 16 // 待确认物流
-	OrderStatusShipping                 OrderStatus = 17 // 运输中
-	OrderStatusReceived                 OrderStatus = 18 // 已收货
-	OrderStatusReconciled               OrderStatus = 19 // 已对账
-	OrderStatusArchived                 OrderStatus = 20 // 已归档
-	OrderStatusFinancingReview          OrderStatus = 21 // 托盘融资审批中
-	OrderStatusPendingFinancingContract OrderStatus = 22 // 待融资合同
-	OrderStatusPendingWarehouseReselect OrderStatus = 23 // 待重新选仓
-	OrderStatusPendingLogisticsRebid    OrderStatus = 24 // 待重新发起物流
+	OrderStatusPendingDestWarehouse     OrderStatus = 12 // 待选择目的地仓储
+	OrderStatusPendingWarehouseConfirm  OrderStatus = 13 // 待仓库确认
+	OrderStatusPendingSellerConfirm     OrderStatus = 14 // 待卖方确认
+	OrderStatusPendingBuyerConfirm      OrderStatus = 15 // 待买方最终确认
+	OrderStatusLogisticsBidding         OrderStatus = 16 // 物流竞价中
+	OrderStatusPendingLogisticsConfirm  OrderStatus = 17 // 待确认物流
+	OrderStatusShipping                 OrderStatus = 18 // 运输中
+	OrderStatusReceived                 OrderStatus = 19 // 已收货
+	OrderStatusReconciled               OrderStatus = 20 // 已对账
+	OrderStatusArchived                 OrderStatus = 21 // 已归档
+	OrderStatusFinancingReview          OrderStatus = 22 // 托盘融资审批中
+	OrderStatusPendingFinancingContract OrderStatus = 23 // 待融资合同
+	OrderStatusPendingWarehouseReselect OrderStatus = 24 // 待重新选仓
+	OrderStatusPendingLogisticsRebid    OrderStatus = 25 // 待重新发起物流
+	OrderStatusPendingWarehouseSelect   OrderStatus = 26 // 待选择仓库
 )
 
 var validStatusTransitions = map[OrderStatus][]OrderStatus{
-	OrderStatusDraft:                    {OrderStatusPendingWarehouseConfirm, OrderStatusPendingConfirm, OrderStatusCancelled},
+	OrderStatusDraft:                    {OrderStatusPendingWarehouseConfirm, OrderStatusPendingWarehouseSelect, OrderStatusPendingConfirm, OrderStatusCancelled},
 	OrderStatusPendingConfirm:           {OrderStatusPendingContract, OrderStatusCancelled},
 	OrderStatusPendingContract:          {OrderStatusPendingPayment, OrderStatusCancelled},
 	OrderStatusPendingPayment:           {OrderStatusPaid, OrderStatusFinancingReview, OrderStatusCancelled},
@@ -58,6 +60,7 @@ var validStatusTransitions = map[OrderStatus][]OrderStatus{
 	OrderStatusException:                {OrderStatusCancelled},
 	OrderStatusPendingWarehouseConfirm:  {OrderStatusPendingSellerConfirm, OrderStatusPendingWarehouseReselect, OrderStatusCancelled},
 	OrderStatusPendingWarehouseReselect: {OrderStatusPendingWarehouseConfirm, OrderStatusCancelled},
+	OrderStatusPendingWarehouseSelect:   {OrderStatusPendingWarehouseConfirm, OrderStatusCancelled},
 	OrderStatusPendingSellerConfirm:     {OrderStatusPendingBuyerConfirm, OrderStatusCancelled},
 	OrderStatusPendingBuyerConfirm:      {OrderStatusPendingContract, OrderStatusCancelled},
 	OrderStatusLogisticsBidding:         {OrderStatusPendingLogisticsConfirm, OrderStatusPendingLogisticsRebid},
@@ -142,22 +145,31 @@ func (items *OrderItems) Scan(value interface{}) error {
 
 // DeliveryInfo 配送信息
 type DeliveryInfo struct {
-	DriverName            string `json:"driver_name"`             // 司机姓名
-	DriverIdCard          string `json:"driver_id_card"`          // 司机身份证
-	DriverPhone           string `json:"driver_phone"`            // 司机电话
-	PlateNumber           string `json:"plate_number"`            // 车牌号
-	PickupCode            string `json:"pickup_code"`             // 提货码
-	WarehouseID           uint64 `json:"warehouse_id"`            // 仓库ID
-	WarehouseServiceID    uint64 `json:"warehouse_service_id"`    // 仓储资源ID
-	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"` // 仓储方企业ID
-	WarehouseName         string `json:"warehouse_name"`          // 仓库名称
-	WarehouseCode         string `json:"warehouse_code"`          // 仓库代码
-	WarehouseProvince     string `json:"warehouse_province"`      // 仓库省份
-	WarehouseCity         string `json:"warehouse_city"`          // 仓库城市
-	WarehouseDistrict     string `json:"warehouse_district"`      // 仓库区县
-	WarehouseAddress      string `json:"warehouse_address"`       // 仓库地址
-	Address               string `json:"address"`                 // 收货地址
-	EstimatedTime         string `json:"estimated_time"`          // 预计送达时间
+	DriverName            string `json:"driver_name"`              // 司机姓名
+	DriverIdCard          string `json:"driver_id_card"`           // 司机身份证
+	DriverPhone           string `json:"driver_phone"`             // 司机电话
+	PlateNumber           string `json:"plate_number"`             // 车牌号
+	PickupCode            string `json:"pickup_code"`              // 提货码
+	WarehouseID           uint64 `json:"warehouse_id"`             // 提货仓库ID
+	WarehouseServiceID    uint64 `json:"warehouse_service_id"`     // 提货仓储资源ID
+	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"`  // 提货仓储方企业ID
+	WarehouseName         string `json:"warehouse_name"`           // 提货仓库名称
+	WarehouseCode         string `json:"warehouse_code"`           // 提货仓库代码
+	WarehouseProvince     string `json:"warehouse_province"`       // 提货仓库省份
+	WarehouseCity         string `json:"warehouse_city"`           // 提货仓库城市
+	WarehouseDistrict     string `json:"warehouse_district"`       // 提货仓库区县
+	WarehouseAddress      string `json:"warehouse_address"`        // 提货仓库地址
+	DestWarehouseID           uint64 `json:"dest_warehouse_id"`            // 目的地仓库ID
+	DestWarehouseServiceID    uint64 `json:"dest_warehouse_service_id"`    // 目的地仓储资源ID
+	DestWarehouseEnterpriseID uint64 `json:"dest_warehouse_enterprise_id"` // 目的地仓储方企业ID
+	DestWarehouseName         string `json:"dest_warehouse_name"`         // 目的地仓库名称
+	DestWarehouseCode         string `json:"dest_warehouse_code"`         // 目的地仓库代码
+	DestWarehouseProvince     string `json:"dest_warehouse_province"`     // 目的地仓库省份
+	DestWarehouseCity         string `json:"dest_warehouse_city"`         // 目的地仓库城市
+	DestWarehouseDistrict     string `json:"dest_warehouse_district"`     // 目的地仓库区县
+	DestWarehouseAddress      string `json:"dest_warehouse_address"`      // 目的地仓库地址
+	Address               string `json:"address"`                // 收货地址
+	EstimatedTime         string `json:"estimated_time"`         // 预计送达时间
 }
 
 // Value 实现driver.Valuer接口
