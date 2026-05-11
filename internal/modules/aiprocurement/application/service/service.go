@@ -1207,21 +1207,22 @@ func buildAILogisticsOrder(plan aiOrderPlan, form dto.OrderForm, userID, enterpr
 		destination = strings.TrimSpace(form.DeliveryAddress)
 	}
 	return &serviceFulfillmentEntity.LogisticsOrder{
-		LogisticsNo:        generateAILogisticsNo(idx),
-		OrderID:            plan.OrderInfo.ID,
-		OrderNo:            plan.OrderInfo.OrderNo,
-		BuyerEnterpriseID:  enterpriseID,
-		LogisticsServiceID: logisticsServiceID,
-		WarehouseServiceID: uintFromMap(first.Warehouse, "warehouse_service_id"),
-		Origin:             origin,
-		Destination:        destination,
-		CargoName:          aiLogisticsCargoName(plan.Products),
-		Weight:             totalSelectedQuantity(plan.Products),
-		EstimatedPrice:     sumFreightEstimate(plan.Products),
-		Status:             serviceFulfillmentEntity.LogisticsOrderPending,
-		GuaranteeType:      "平台履约保障",
-		CreatedBy:          userID,
-		UpdatedBy:          userID,
+		LogisticsNo:             generateAILogisticsNo(idx),
+		OrderID:                 plan.OrderInfo.ID,
+		OrderNo:                 plan.OrderInfo.OrderNo,
+		BuyerEnterpriseID:       enterpriseID,
+		LogisticsServiceID:      logisticsServiceID,
+		WarehouseServiceID:      uintFromMap(first.Warehouse, "warehouse_service_id"),
+		Origin:                  origin,
+		Destination:             destination,
+		CargoName:               aiLogisticsCargoName(plan.Products),
+		Weight:                  totalSelectedQuantity(plan.Products),
+		EstimatedPrice:          sumFreightEstimate(plan.Products),
+		Status:                  serviceFulfillmentEntity.LogisticsOrderTaskCreated,
+		CurrentResponsibleParty: serviceFulfillmentEntity.ResponsibilityPartyLogistics,
+		GuaranteeType:           "平台履约保障",
+		CreatedBy:               userID,
+		UpdatedBy:               userID,
 	}, true
 }
 

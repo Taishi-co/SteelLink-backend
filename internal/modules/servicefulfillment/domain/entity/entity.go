@@ -25,15 +25,96 @@ const (
 type LogisticsOrderStatus string
 
 const (
+	LogisticsOrderTaskCreated       LogisticsOrderStatus = "task_created"
+	LogisticsOrderPickupScheduled   LogisticsOrderStatus = "pickup_scheduled"
+	LogisticsOrderArrivalSignedIn   LogisticsOrderStatus = "arrival_signed_in"
+	LogisticsOrderOutboundConfirmed LogisticsOrderStatus = "outbound_confirmed"
+	LogisticsOrderLoadingConfirmed  LogisticsOrderStatus = "loading_confirmed"
+	LogisticsOrderInTransit         LogisticsOrderStatus = "in_transit"
+	LogisticsOrderArrivalConfirmed  LogisticsOrderStatus = "arrival_confirmed"
+	LogisticsOrderReceiptSigned     LogisticsOrderStatus = "receipt_signed"
+	LogisticsOrderInboundCompleted  LogisticsOrderStatus = "inbound_completed"
+	LogisticsOrderCompleted         LogisticsOrderStatus = "completed"
+	LogisticsOrderCancelled         LogisticsOrderStatus = "cancelled"
+	LogisticsOrderException         LogisticsOrderStatus = "exception"
+
+	// Legacy statuses kept for backward compatibility with old rows and UI.
 	LogisticsOrderPending   LogisticsOrderStatus = "pending"
 	LogisticsOrderAccepted  LogisticsOrderStatus = "accepted"
 	LogisticsOrderPickedUp  LogisticsOrderStatus = "picked_up"
-	LogisticsOrderInTransit LogisticsOrderStatus = "in_transit"
 	LogisticsOrderDelivered LogisticsOrderStatus = "delivered"
-	LogisticsOrderCompleted LogisticsOrderStatus = "completed"
-	LogisticsOrderCancelled LogisticsOrderStatus = "cancelled"
-	LogisticsOrderException LogisticsOrderStatus = "exception"
 )
+
+type ResponsibilityParty string
+
+const (
+	ResponsibilityPartyUnknown   ResponsibilityParty = "unknown"
+	ResponsibilityPartyBuyer     ResponsibilityParty = "buyer"
+	ResponsibilityPartySeller    ResponsibilityParty = "seller"
+	ResponsibilityPartyWarehouse ResponsibilityParty = "warehouse"
+	ResponsibilityPartyLogistics ResponsibilityParty = "logistics"
+)
+
+func NormalizeLogisticsOrderStatus(status LogisticsOrderStatus) LogisticsOrderStatus {
+	switch status {
+	case LogisticsOrderPending:
+		return LogisticsOrderTaskCreated
+	case LogisticsOrderAccepted:
+		return LogisticsOrderPickupScheduled
+	case LogisticsOrderPickedUp:
+		return LogisticsOrderInTransit
+	case LogisticsOrderDelivered:
+		return LogisticsOrderArrivalConfirmed
+	default:
+		return status
+	}
+}
+
+func ResponsibilityForLogisticsStatus(status LogisticsOrderStatus) ResponsibilityParty {
+	switch NormalizeLogisticsOrderStatus(status) {
+	case LogisticsOrderTaskCreated, LogisticsOrderLoadingConfirmed, LogisticsOrderInTransit:
+		return ResponsibilityPartyLogistics
+	case LogisticsOrderPickupScheduled, LogisticsOrderArrivalSignedIn, LogisticsOrderOutboundConfirmed, LogisticsOrderInboundCompleted:
+		return ResponsibilityPartyWarehouse
+	case LogisticsOrderArrivalConfirmed, LogisticsOrderReceiptSigned, LogisticsOrderCompleted:
+		return ResponsibilityPartyBuyer
+	default:
+		return ResponsibilityPartyUnknown
+	}
+}
+
+func CanTransitionLogisticsOrderStatus(from, to LogisticsOrderStatus) bool {
+	from = NormalizeLogisticsOrderStatus(from)
+	to = NormalizeLogisticsOrderStatus(to)
+	if from == to {
+		return true
+	}
+	if to == LogisticsOrderCancelled || to == LogisticsOrderException {
+		return true
+	}
+	allowed := map[LogisticsOrderStatus][]LogisticsOrderStatus{
+		LogisticsOrderTaskCreated:       {LogisticsOrderPickupScheduled},
+		LogisticsOrderPickupScheduled:   {LogisticsOrderArrivalSignedIn},
+		LogisticsOrderArrivalSignedIn:   {LogisticsOrderOutboundConfirmed},
+		LogisticsOrderOutboundConfirmed: {LogisticsOrderLoadingConfirmed},
+		LogisticsOrderLoadingConfirmed:  {LogisticsOrderInTransit},
+		LogisticsOrderInTransit:         {LogisticsOrderArrivalConfirmed},
+		LogisticsOrderArrivalConfirmed:  {LogisticsOrderReceiptSigned},
+		LogisticsOrderReceiptSigned:     {LogisticsOrderInboundCompleted, LogisticsOrderCompleted},
+		LogisticsOrderInboundCompleted:  {LogisticsOrderCompleted},
+		LogisticsOrderCompleted:         {},
+	}
+	nextStatuses, ok := allowed[from]
+	if !ok {
+		return false
+	}
+	for _, next := range nextStatuses {
+		if next == to {
+			return true
+		}
+	}
+	return false
+}
 
 type GuaranteeStatus string
 
@@ -73,33 +154,42 @@ func (WarehouseInventoryMovement) TableName() string {
 }
 
 type LogisticsOrder struct {
-	ID                  uint64               `gorm:"primaryKey;autoIncrement" json:"id"`
-	LogisticsNo         string               `gorm:"type:varchar(64);uniqueIndex;not null;comment:物流委托单号" json:"logistics_no"`
-	OrderID             uint64               `gorm:"index;comment:交易订单ID" json:"order_id"`
-	OrderNo             string               `gorm:"type:varchar(64);index;comment:交易订单号" json:"order_no"`
-	BuyerEnterpriseID   uint64               `gorm:"index;not null;comment:发单企业ID" json:"buyer_enterprise_id"`
-	LogisticsServiceID  uint64               `gorm:"index;not null;comment:物流服务ID" json:"logistics_service_id"`
-	CarrierEnterpriseID uint64               `gorm:"index;comment:承运企业ID" json:"carrier_enterprise_id"`
-	WarehouseServiceID  uint64               `gorm:"index;comment:提货仓库服务ID" json:"warehouse_service_id"`
-	Origin              string               `gorm:"type:varchar(255);not null;comment:提货点" json:"origin"`
-	Destination         string               `gorm:"type:varchar(255);not null;comment:目的地" json:"destination"`
-	CargoName           string               `gorm:"type:varchar(200);comment:货物名称" json:"cargo_name"`
-	Weight              float64              `gorm:"type:decimal(12,2);not null;comment:重量吨" json:"weight"`
-	VehicleType         string               `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
-	EstimatedPrice      float64              `gorm:"type:decimal(12,2);comment:估算价格" json:"estimated_price"`
-	FinalPrice          float64              `gorm:"type:decimal(12,2);comment:最终价格" json:"final_price"`
-	Status              LogisticsOrderStatus `gorm:"type:varchar(32);index;not null;default:pending;comment:状态" json:"status"`
-	DriverName          string               `gorm:"type:varchar(100);comment:司机姓名" json:"driver_name"`
-	DriverPhone         string               `gorm:"type:varchar(50);comment:司机电话" json:"driver_phone"`
-	PlateNumber         string               `gorm:"type:varchar(50);comment:车牌号" json:"plate_number"`
-	GuaranteeType       string               `gorm:"type:varchar(100);comment:保障方式" json:"guarantee_type"`
-	AcceptedBy          uint64               `gorm:"comment:接单人" json:"accepted_by"`
-	AcceptedAt          *time.Time           `gorm:"comment:接单时间" json:"accepted_at"`
-	CreatedBy           uint64               `gorm:"comment:创建者" json:"created_by"`
-	UpdatedBy           uint64               `gorm:"comment:更新者" json:"updated_by"`
-	CreatedAt           time.Time            `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt           time.Time            `gorm:"autoUpdateTime" json:"updated_at"`
-	DeletedAt           gorm.DeletedAt       `gorm:"index" json:"-"`
+	ID                      uint64               `gorm:"primaryKey;autoIncrement" json:"id"`
+	LogisticsNo             string               `gorm:"type:varchar(64);uniqueIndex;not null;comment:物流委托单号" json:"logistics_no"`
+	OrderID                 uint64               `gorm:"index;comment:交易订单ID" json:"order_id"`
+	OrderNo                 string               `gorm:"type:varchar(64);index;comment:交易订单号" json:"order_no"`
+	BuyerEnterpriseID       uint64               `gorm:"index;not null;comment:发单企业ID" json:"buyer_enterprise_id"`
+	LogisticsServiceID      uint64               `gorm:"index;not null;comment:物流服务ID" json:"logistics_service_id"`
+	CarrierEnterpriseID     uint64               `gorm:"index;comment:承运企业ID" json:"carrier_enterprise_id"`
+	WarehouseServiceID      uint64               `gorm:"index;comment:提货仓库服务ID" json:"warehouse_service_id"`
+	Origin                  string               `gorm:"type:varchar(255);not null;comment:提货点" json:"origin"`
+	Destination             string               `gorm:"type:varchar(255);not null;comment:目的地" json:"destination"`
+	CargoName               string               `gorm:"type:varchar(200);comment:货物名称" json:"cargo_name"`
+	Weight                  float64              `gorm:"type:decimal(12,2);not null;comment:重量吨" json:"weight"`
+	VehicleType             string               `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
+	EstimatedPrice          float64              `gorm:"type:decimal(12,2);comment:估算价格" json:"estimated_price"`
+	FinalPrice              float64              `gorm:"type:decimal(12,2);comment:最终价格" json:"final_price"`
+	Status                  LogisticsOrderStatus `gorm:"type:varchar(32);index;not null;default:task_created;comment:状态" json:"status"`
+	CurrentResponsibleParty ResponsibilityParty  `gorm:"type:varchar(32);index;not null;default:logistics;comment:当前责任主体" json:"current_responsible_party"`
+	HandoverNote            string               `gorm:"type:varchar(500);comment:交接说明" json:"handover_note"`
+	DriverName              string               `gorm:"type:varchar(100);comment:司机姓名" json:"driver_name"`
+	DriverPhone             string               `gorm:"type:varchar(50);comment:司机电话" json:"driver_phone"`
+	PlateNumber             string               `gorm:"type:varchar(50);comment:车牌号" json:"plate_number"`
+	GuaranteeType           string               `gorm:"type:varchar(100);comment:保障方式" json:"guarantee_type"`
+	AcceptedBy              uint64               `gorm:"comment:接单人" json:"accepted_by"`
+	AcceptedAt              *time.Time           `gorm:"comment:接单时间" json:"accepted_at"`
+	PickupAppointmentAt     *time.Time           `gorm:"comment:提货预约时间" json:"pickup_appointment_at"`
+	ArrivalSignedInAt       *time.Time           `gorm:"comment:到场签到时间" json:"arrival_signed_in_at"`
+	OutboundConfirmedAt     *time.Time           `gorm:"comment:出库确认时间" json:"outbound_confirmed_at"`
+	LoadingConfirmedAt      *time.Time           `gorm:"comment:装货确认时间" json:"loading_confirmed_at"`
+	ArrivalConfirmedAt      *time.Time           `gorm:"comment:到货确认时间" json:"arrival_confirmed_at"`
+	ReceiptSignedAt         *time.Time           `gorm:"comment:验收签收时间" json:"receipt_signed_at"`
+	InboundCompletedAt      *time.Time           `gorm:"comment:入库完成时间" json:"inbound_completed_at"`
+	CreatedBy               uint64               `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy               uint64               `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt               time.Time            `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt               time.Time            `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt               gorm.DeletedAt       `gorm:"index" json:"-"`
 }
 
 func (LogisticsOrder) TableName() string {

@@ -322,22 +322,23 @@ func (h *Handler) CreateLogisticsOrder(c *gin.Context) {
 	}
 	unitPrice := parseUnitPrice(service.PriceRule)
 	item := entity.LogisticsOrder{
-		LogisticsNo:        "LG" + time.Now().Format("20060102150405") + randomDigits(4),
-		OrderID:            req.OrderID,
-		OrderNo:            req.OrderNo,
-		BuyerEnterpriseID:  claims.EnterpriseID,
-		LogisticsServiceID: req.LogisticsServiceID,
-		WarehouseServiceID: req.WarehouseServiceID,
-		Origin:             req.Origin,
-		Destination:        req.Destination,
-		CargoName:          req.CargoName,
-		Weight:             req.Weight,
-		VehicleType:        req.VehicleType,
-		EstimatedPrice:     unitPrice * req.Weight,
-		Status:             entity.LogisticsOrderPending,
-		GuaranteeType:      req.GuaranteeType,
-		CreatedBy:          claims.UserID,
-		UpdatedBy:          claims.UserID,
+		LogisticsNo:             "LG" + time.Now().Format("20060102150405") + randomDigits(4),
+		OrderID:                 req.OrderID,
+		OrderNo:                 req.OrderNo,
+		BuyerEnterpriseID:       claims.EnterpriseID,
+		LogisticsServiceID:      req.LogisticsServiceID,
+		WarehouseServiceID:      req.WarehouseServiceID,
+		Origin:                  req.Origin,
+		Destination:             req.Destination,
+		CargoName:               req.CargoName,
+		Weight:                  req.Weight,
+		VehicleType:             req.VehicleType,
+		EstimatedPrice:          unitPrice * req.Weight,
+		Status:                  entity.LogisticsOrderTaskCreated,
+		CurrentResponsibleParty: entity.ResponsibilityPartyLogistics,
+		GuaranteeType:           req.GuaranteeType,
+		CreatedBy:               claims.UserID,
+		UpdatedBy:               claims.UserID,
 	}
 	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("创建物流委托失败"))
@@ -418,11 +419,25 @@ func (h *Handler) AcceptLogisticsOrder(c *gin.Context) {
 	if item.FinalPrice == 0 {
 		item.FinalPrice = item.EstimatedPrice
 	}
-	item.Status = entity.LogisticsOrderAccepted
+	item.Status = entity.LogisticsOrderPickupScheduled
+	item.CurrentResponsibleParty = entity.ResponsibilityPartyWarehouse
 	item.AcceptedBy = claims.UserID
 	item.AcceptedAt = &now
+	item.PickupAppointmentAt = &now
 	item.UpdatedBy = claims.UserID
-	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&item).Error; err != nil {
+			return err
+		}
+		event := entity.LogisticsTrackingEvent{
+			LogisticsOrderID: item.ID,
+			EventType:        string(item.Status),
+			Description:      buildLogisticsStatusDescription(item.Status, ""),
+			OccurredAt:       now,
+			CreatedBy:        claims.UserID,
+		}
+		return tx.Create(&event).Error
+	}); err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("物流接单失败"))
 		return
 	}
@@ -442,9 +457,33 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 		response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
 		return
 	}
-	item.Status = entity.LogisticsOrderStatus(req.Status)
+	currentStatus := entity.NormalizeLogisticsOrderStatus(item.Status)
+	targetStatus := entity.NormalizeLogisticsOrderStatus(entity.LogisticsOrderStatus(req.Status))
+	if !entity.CanTransitionLogisticsOrderStatus(currentStatus, targetStatus) {
+		response.BadRequest(c, "当前物流状态不可推进到目标节点")
+		return
+	}
+	now := time.Now()
+	item.Status = targetStatus
+	item.CurrentResponsibleParty = entity.ResponsibilityForLogisticsStatus(targetStatus)
+	if strings.TrimSpace(req.Remark) != "" {
+		item.HandoverNote = strings.TrimSpace(req.Remark)
+	}
+	applyLogisticsStatusTimestamp(&item, targetStatus, now)
 	item.UpdatedBy = claims.UserID
-	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&item).Error; err != nil {
+			return err
+		}
+		event := entity.LogisticsTrackingEvent{
+			LogisticsOrderID: item.ID,
+			EventType:        string(targetStatus),
+			Description:      buildLogisticsStatusDescription(targetStatus, req.Remark),
+			OccurredAt:       now,
+			CreatedBy:        claims.UserID,
+		}
+		return tx.Create(&event).Error
+	}); err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新物流状态失败"))
 		return
 	}
@@ -604,9 +643,14 @@ func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.Logistics
 		CarrierEnterpriseID: item.CarrierEnterpriseID, WarehouseServiceID: item.WarehouseServiceID,
 		Origin: item.Origin, Destination: item.Destination, CargoName: item.CargoName, Weight: item.Weight,
 		VehicleType: item.VehicleType, EstimatedPrice: item.EstimatedPrice, FinalPrice: item.FinalPrice,
-		Status: string(item.Status), DriverName: item.DriverName, DriverPhone: item.DriverPhone,
+		Status: string(entity.NormalizeLogisticsOrderStatus(item.Status)), CurrentResponsibleParty: string(entity.ResponsibilityForLogisticsStatus(item.Status)),
+		HandoverNote: item.HandoverNote, DriverName: item.DriverName, DriverPhone: item.DriverPhone,
 		PlateNumber: item.PlateNumber, GuaranteeType: item.GuaranteeType, AcceptedAt: item.AcceptedAt,
-		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, TrackingEvents: eventInfos,
+		PickupAppointmentAt: item.PickupAppointmentAt, ArrivalSignedInAt: item.ArrivalSignedInAt,
+		OutboundConfirmedAt: item.OutboundConfirmedAt, LoadingConfirmedAt: item.LoadingConfirmedAt,
+		ArrivalConfirmedAt: item.ArrivalConfirmedAt, ReceiptSignedAt: item.ReceiptSignedAt,
+		InboundCompletedAt: item.InboundCompletedAt,
+		CreatedAt:          item.CreatedAt, UpdatedAt: item.UpdatedAt, TrackingEvents: eventInfos,
 	}
 }
 
@@ -624,6 +668,61 @@ func guaranteeToInfo(item *entity.FulfillmentGuarantee) dto.GuaranteeInfo {
 		CoverageAmount: item.CoverageAmount, Description: item.Description, Resolution: item.Resolution,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func applyLogisticsStatusTimestamp(item *entity.LogisticsOrder, status entity.LogisticsOrderStatus, now time.Time) {
+	switch entity.NormalizeLogisticsOrderStatus(status) {
+	case entity.LogisticsOrderPickupScheduled:
+		if item.PickupAppointmentAt == nil {
+			item.PickupAppointmentAt = &now
+		}
+	case entity.LogisticsOrderArrivalSignedIn:
+		if item.ArrivalSignedInAt == nil {
+			item.ArrivalSignedInAt = &now
+		}
+	case entity.LogisticsOrderOutboundConfirmed:
+		if item.OutboundConfirmedAt == nil {
+			item.OutboundConfirmedAt = &now
+		}
+	case entity.LogisticsOrderLoadingConfirmed:
+		if item.LoadingConfirmedAt == nil {
+			item.LoadingConfirmedAt = &now
+		}
+	case entity.LogisticsOrderArrivalConfirmed:
+		if item.ArrivalConfirmedAt == nil {
+			item.ArrivalConfirmedAt = &now
+		}
+	case entity.LogisticsOrderReceiptSigned:
+		if item.ReceiptSignedAt == nil {
+			item.ReceiptSignedAt = &now
+		}
+	case entity.LogisticsOrderInboundCompleted:
+		if item.InboundCompletedAt == nil {
+			item.InboundCompletedAt = &now
+		}
+	}
+}
+
+func buildLogisticsStatusDescription(status entity.LogisticsOrderStatus, remark string) string {
+	label := map[entity.LogisticsOrderStatus]string{
+		entity.LogisticsOrderTaskCreated:       "已创建运输任务",
+		entity.LogisticsOrderPickupScheduled:   "已完成提货预约",
+		entity.LogisticsOrderArrivalSignedIn:   "承运车辆已到场签到",
+		entity.LogisticsOrderOutboundConfirmed: "仓储方已确认出库",
+		entity.LogisticsOrderLoadingConfirmed:  "物流方已确认装货",
+		entity.LogisticsOrderInTransit:         "货物运输中",
+		entity.LogisticsOrderArrivalConfirmed:  "货物已到货确认",
+		entity.LogisticsOrderReceiptSigned:     "买方已完成验收签收",
+		entity.LogisticsOrderInboundCompleted:  "目的地仓储已完成入库",
+		entity.LogisticsOrderCompleted:         "物流履约已完成",
+		entity.LogisticsOrderCancelled:         "物流履约已取消",
+		entity.LogisticsOrderException:         "物流履约出现异常",
+	}
+	description := label[entity.NormalizeLogisticsOrderStatus(status)]
+	if strings.TrimSpace(remark) == "" {
+		return description
+	}
+	return description + "：" + strings.TrimSpace(remark)
 }
 
 func parseUnitPrice(priceRule string) float64 {
