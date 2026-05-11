@@ -20,6 +20,7 @@ import (
 	productEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	productRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	productPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
+	fulfillmentEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/servicefulfillment/domain/entity"
 	offerEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	userEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/entity"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
@@ -829,11 +830,17 @@ func (s *OrderService) SelectDestWarehouse(ctx context.Context, id, buyerEnterpr
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
+		if err := ensureWarehouseMovementTx(tx, order, fulfillmentEntity.WarehouseMovementOutbound, order.DeliveryInfo.WarehouseServiceID, order.DeliveryInfo.WarehouseEnterpriseID, operatorID, "", "主仓待确认出库安排"); err != nil {
+			return err
+		}
+		if err := ensureWarehouseMovementTx(tx, order, fulfillmentEntity.WarehouseMovementInbound, order.DeliveryInfo.DestWarehouseServiceID, order.DeliveryInfo.DestWarehouseEnterpriseID, operatorID, "", "目的仓待确认入库安排"); err != nil {
+			return err
+		}
 		return createOrderEvent(tx, ctx, order, "dest_warehouse_selected", operatorID, buyerEnterpriseID, "procurement", orderEntity.OrderStatusPendingDestWarehouse, orderEntity.OrderStatusPendingWarehouseConfirm, orderEntity.OrderEventPayload{
 			"dest_warehouse_service_id":    warehouse.ID,
 			"dest_warehouse_enterprise_id": warehouse.EnterpriseID,
-			"dest_warehouse_name":         warehouse.WarehouseName,
-			"dest_confirm_note":           strings.TrimSpace(req.DestConfirmNote),
+			"dest_warehouse_name":          warehouse.WarehouseName,
+			"dest_confirm_note":            strings.TrimSpace(req.DestConfirmNote),
 		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("选择目的地仓库失败")
@@ -1109,7 +1116,14 @@ func (s *OrderService) ListByLogistics(ctx context.Context, logisticsEnterpriseI
 	db := database.GetDB().WithContext(ctx)
 	var orders []*orderEntity.Order
 	if status != nil && *status == int(orderEntity.OrderStatusLogisticsBidding) {
-		if err := db.Where("status = ?", *status).Order("id desc").Find(&orders).Error; err != nil {
+		quotedOrderIDs := make([]uint64, 0)
+		db.Model(&orderEntity.LogisticsBidQuote{}).
+			Where("logistics_enterprise_id = ?", logisticsEnterpriseID).
+			Pluck("order_id", &quotedOrderIDs)
+		if len(quotedOrderIDs) == 0 {
+			return []*dto.OrderInfo{}, nil
+		}
+		if err := db.Where("id IN ?", quotedOrderIDs).Order("id desc").Find(&orders).Error; err != nil {
 			return nil, ecode.ErrDatabase.WithMessage("查询物流竞价订单失败")
 		}
 	} else {
@@ -1904,6 +1918,9 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 			if err := tx.Save(&task).Error; err != nil {
 				return err
 			}
+			if err := ensureLogisticsOrderSyncTx(tx, order, nil, nil, &task, operatorID); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
@@ -2149,19 +2166,23 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 		if err := tx.Save(&bidding).Error; err != nil {
 			return err
 		}
+		var task orderEntity.ShipmentTask
 		if order.Status == orderEntity.OrderStatusShipping {
-			task := &orderEntity.ShipmentTask{
+			task = orderEntity.ShipmentTask{
 				OrderID:               order.ID,
 				OrderNo:               order.OrderNo,
 				LogisticsEnterpriseID: quote.LogisticsEnterpriseID,
 				LogisticsQuoteID:      quote.ID,
 				Status:                orderEntity.ShipmentStatusPendingPickup,
 			}
-			if err := tx.Where("order_id = ?", order.ID).Assign(task).FirstOrCreate(task).Error; err != nil {
+			if err := tx.Where("order_id = ?", order.ID).Assign(task).FirstOrCreate(&task).Error; err != nil {
 				return err
 			}
 		}
 		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		if err := ensureLogisticsOrderSyncTx(tx, order, &bidding, &quote, &task, operatorID); err != nil {
 			return err
 		}
 		if err := createOrderEvent(tx, ctx, order, "logistics_quote_confirmed", operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
@@ -2339,6 +2360,9 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 			return err
 		}
 		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		if err := ensureLogisticsOrderSyncTx(tx, order, nil, nil, &task, operatorID); err != nil {
 			return err
 		}
 		if err := createOrderEvent(tx, ctx, order, eventType, operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
