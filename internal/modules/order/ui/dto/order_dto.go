@@ -188,6 +188,14 @@ type ShipmentProgressRequest struct {
 	Remark     string `json:"remark"`
 }
 
+type SignLogisticsContractRequest struct {
+	ContractURL string `json:"contract_url"`
+}
+
+type PayLogisticsSettlementRequest struct {
+	VoucherURL string `json:"voucher_url" binding:"required"`
+}
+
 type SetDeliveryInfoRequest struct {
 	DriverName         string `json:"driver_name" binding:"required"`
 	DriverPhone        string `json:"driver_phone" binding:"required"`
@@ -253,8 +261,10 @@ type OrderInfo struct {
 	FinancingInfo    *FinancingRequestInfo  `json:"financing_info,omitempty"`
 	LogisticsBidding *LogisticsBiddingInfo  `json:"logistics_bidding,omitempty"`
 	LogisticsQuotes  []LogisticsQuoteInfo   `json:"logistics_quotes,omitempty"`
-	ShipmentTask     *ShipmentTaskInfo      `json:"shipment_task,omitempty"`
-	PledgeEvents     []PledgeEventInfo      `json:"pledge_events,omitempty"`
+	ShipmentTask         *ShipmentTaskInfo         `json:"shipment_task,omitempty"`
+	LogisticsContractDTO *LogisticsContractInfo    `json:"logistics_contract,omitempty"`
+	LogisticsSettlement  *LogisticsSettlementInfo  `json:"logistics_settlement,omitempty"`
+	PledgeEvents         []PledgeEventInfo         `json:"pledge_events,omitempty"`
 }
 
 type OrderListResponse struct {
@@ -411,12 +421,53 @@ type ShipmentTaskInfo struct {
 	Status                string     `json:"status"`
 	PickupVoucher         string     `json:"pickup_voucher"`
 	DeliveryVoucher       string     `json:"delivery_voucher"`
-	SignatureVoucher      string     `json:"signature_voucher"`
+	SignatureVoucher       string     `json:"signature_voucher"`
 	PickedUpAt            *time.Time `json:"picked_up_at,omitempty"`
 	DeliveredAt           *time.Time `json:"delivered_at,omitempty"`
 	SignedAt              *time.Time `json:"signed_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
+}
+
+type LogisticsContractInfo struct {
+	ID                    uint64     `json:"id"`
+	ContractNo            string     `json:"contract_no"`
+	OrderID               uint64     `json:"order_id"`
+	BiddingID             uint64     `json:"bidding_id"`
+	QuoteID               uint64     `json:"quote_id"`
+	BuyerEnterpriseID     uint64     `json:"buyer_enterprise_id"`
+	LogisticsEnterpriseID uint64     `json:"logistics_enterprise_id"`
+	SellerEnterpriseID    uint64     `json:"seller_enterprise_id"`
+	ContractURL           string     `json:"contract_url"`
+	FreightAmount         float64    `json:"freight_amount"`
+	CommissionRate        float64    `json:"commission_rate"`
+	PickupWarehouseID     uint64     `json:"pickup_warehouse_id"`
+	PickupWarehouseName   string     `json:"pickup_warehouse_name"`
+	DestinationAddress    string     `json:"destination_address"`
+	IsFinancingOrder      bool       `json:"is_financing_order"`
+	Status                string     `json:"status"`
+	BuyerSignedAt         *time.Time `json:"buyer_signed_at,omitempty"`
+	LogisticsSignedAt     *time.Time `json:"logistics_signed_at,omitempty"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+}
+
+type LogisticsSettlementInfo struct {
+	ID                   uint64     `json:"id"`
+	SettlementNo         string     `json:"settlement_no"`
+	LogisticsContractID  uint64     `json:"logistics_contract_id"`
+	OrderID              uint64     `json:"order_id"`
+	PayerEnterpriseID    uint64     `json:"payer_enterprise_id"`
+	PayeeEnterpriseID    uint64     `json:"payee_enterprise_id"`
+	FreightAmount        float64    `json:"freight_amount"`
+	PlatformCommission   float64    `json:"platform_commission"`
+	NetPayable           float64    `json:"net_payable"`
+	PaymentVoucherURL    string     `json:"payment_voucher_url"`
+	CommissionVoucherURL string     `json:"commission_voucher_url"`
+	Status               string     `json:"status"`
+	PaidAt               *time.Time `json:"paid_at,omitempty"`
+	CommissionPaidAt     *time.Time `json:"commission_paid_at,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
 }
 
 type PledgeEventInfo struct {

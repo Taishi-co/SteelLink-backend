@@ -12,6 +12,8 @@ func AutoMigrate() error {
 		&entity.LogisticsBidding{},
 		&entity.LogisticsBidQuote{},
 		&entity.ShipmentTask{},
+		&entity.LogisticsContract{},
+		&entity.LogisticsSettlement{},
 		&entity.OrderFinancingRequest{},
 		&entity.PledgeReleaseEvent{},
 	)
