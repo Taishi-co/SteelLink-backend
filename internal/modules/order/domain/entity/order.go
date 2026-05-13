@@ -145,33 +145,51 @@ func (items *OrderItems) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, items)
 }
 
+type StringList []string
+
+func (s StringList) Value() (driver.Value, error) {
+	return json.Marshal(s)
+}
+
+func (s *StringList) Scan(value interface{}) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, s)
+}
+
 // DeliveryInfo 配送信息
 type DeliveryInfo struct {
-	DriverName            string `json:"driver_name"`              // 司机姓名
-	DriverIdCard          string `json:"driver_id_card"`           // 司机身份证
-	DriverPhone           string `json:"driver_phone"`             // 司机电话
-	PlateNumber           string `json:"plate_number"`             // 车牌号
-	PickupCode            string `json:"pickup_code"`              // 提货码
-	WarehouseID           uint64 `json:"warehouse_id"`             // 提货仓库ID
-	WarehouseServiceID    uint64 `json:"warehouse_service_id"`     // 提货仓储资源ID
-	WarehouseEnterpriseID uint64 `json:"warehouse_enterprise_id"`  // 提货仓储方企业ID
-	WarehouseName         string `json:"warehouse_name"`           // 提货仓库名称
-	WarehouseCode         string `json:"warehouse_code"`           // 提货仓库代码
-	WarehouseProvince     string `json:"warehouse_province"`       // 提货仓库省份
-	WarehouseCity         string `json:"warehouse_city"`           // 提货仓库城市
-	WarehouseDistrict     string `json:"warehouse_district"`       // 提货仓库区县
-	WarehouseAddress      string `json:"warehouse_address"`        // 提货仓库地址
+	DriverName                string `json:"driver_name"`                  // 司机姓名
+	DriverIdCard              string `json:"driver_id_card"`               // 司机身份证
+	DriverPhone               string `json:"driver_phone"`                 // 司机电话
+	PlateNumber               string `json:"plate_number"`                 // 车牌号
+	PickupCode                string `json:"pickup_code"`                  // 提货码
+	WarehouseID               uint64 `json:"warehouse_id"`                 // 提货仓库ID
+	WarehouseServiceID        uint64 `json:"warehouse_service_id"`         // 提货仓储资源ID
+	WarehouseEnterpriseID     uint64 `json:"warehouse_enterprise_id"`      // 提货仓储方企业ID
+	WarehouseName             string `json:"warehouse_name"`               // 提货仓库名称
+	WarehouseCode             string `json:"warehouse_code"`               // 提货仓库代码
+	WarehouseProvince         string `json:"warehouse_province"`           // 提货仓库省份
+	WarehouseCity             string `json:"warehouse_city"`               // 提货仓库城市
+	WarehouseDistrict         string `json:"warehouse_district"`           // 提货仓库区县
+	WarehouseAddress          string `json:"warehouse_address"`            // 提货仓库地址
 	DestWarehouseID           uint64 `json:"dest_warehouse_id"`            // 目的地仓库ID
 	DestWarehouseServiceID    uint64 `json:"dest_warehouse_service_id"`    // 目的地仓储资源ID
 	DestWarehouseEnterpriseID uint64 `json:"dest_warehouse_enterprise_id"` // 目的地仓储方企业ID
-	DestWarehouseName         string `json:"dest_warehouse_name"`         // 目的地仓库名称
-	DestWarehouseCode         string `json:"dest_warehouse_code"`         // 目的地仓库代码
-	DestWarehouseProvince     string `json:"dest_warehouse_province"`     // 目的地仓库省份
-	DestWarehouseCity         string `json:"dest_warehouse_city"`         // 目的地仓库城市
-	DestWarehouseDistrict     string `json:"dest_warehouse_district"`     // 目的地仓库区县
-	DestWarehouseAddress      string `json:"dest_warehouse_address"`      // 目的地仓库地址
-	Address               string `json:"address"`                // 收货地址
-	EstimatedTime         string `json:"estimated_time"`         // 预计送达时间
+	DestWarehouseName         string `json:"dest_warehouse_name"`          // 目的地仓库名称
+	DestWarehouseCode         string `json:"dest_warehouse_code"`          // 目的地仓库代码
+	DestWarehouseProvince     string `json:"dest_warehouse_province"`      // 目的地仓库省份
+	DestWarehouseCity         string `json:"dest_warehouse_city"`          // 目的地仓库城市
+	DestWarehouseDistrict     string `json:"dest_warehouse_district"`      // 目的地仓库区县
+	DestWarehouseAddress      string `json:"dest_warehouse_address"`       // 目的地仓库地址
+	Address                   string `json:"address"`                      // 收货地址
+	EstimatedTime             string `json:"estimated_time"`               // 预计送达时间
 }
 
 // Value 实现driver.Valuer接口
@@ -612,6 +630,90 @@ type PledgeReleaseEvent struct {
 
 func (PledgeReleaseEvent) TableName() string {
 	return "pledge_release_events"
+}
+
+type BreachParty string
+
+const (
+	BreachPartyBuyer  BreachParty = "buyer"
+	BreachPartySeller BreachParty = "seller"
+)
+
+type BreachRecordStatus string
+
+const (
+	BreachRecordStatusSubmitted   BreachRecordStatus = "submitted"
+	BreachRecordStatusUnderReview BreachRecordStatus = "under_review"
+	BreachRecordStatusMediating   BreachRecordStatus = "mediating"
+	BreachRecordStatusLitigating  BreachRecordStatus = "litigating"
+	BreachRecordStatusResolved    BreachRecordStatus = "resolved"
+	BreachRecordStatusDismissed   BreachRecordStatus = "dismissed"
+)
+
+type BreachRecord struct {
+	ID                   uint64             `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID              uint64             `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo              string             `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	ReporterEnterpriseID uint64             `gorm:"index;not null;comment:举报方企业ID" json:"reporter_enterprise_id"`
+	BreachParty          BreachParty        `gorm:"type:varchar(32);index;not null;comment:违约方 buyer/seller" json:"breach_party"`
+	BreachEnterpriseID   uint64             `gorm:"index;not null;comment:违约方企业ID" json:"breach_enterprise_id"`
+	BreachType           string             `gorm:"type:varchar(64);not null;comment:违约类型" json:"breach_type"`
+	Description          string             `gorm:"type:text;not null;comment:违约描述" json:"description"`
+	EvidenceURLs         StringList         `gorm:"type:json;comment:证据文件URL列表" json:"evidence_urls"`
+	Status               BreachRecordStatus `gorm:"type:varchar(32);index;not null;default:submitted;comment:状态" json:"status"`
+	MediationResult      string             `gorm:"type:text;comment:协调结果" json:"mediation_result"`
+	MediatedBy           uint64             `gorm:"comment:协调人" json:"mediated_by"`
+	MediatedAt           *time.Time         `gorm:"comment:协调时间" json:"mediated_at"`
+	ResolutionResult     string             `gorm:"type:text;comment:处理结果" json:"resolution_result"`
+	ResolvedBy           uint64             `gorm:"comment:处理人" json:"resolved_by"`
+	ResolvedAt           *time.Time         `gorm:"comment:处理时间" json:"resolved_at"`
+	CreatedBy            uint64             `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt            time.Time          `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedBy            uint64             `gorm:"comment:修改者" json:"updated_by"`
+	UpdatedAt            time.Time          `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt            gorm.DeletedAt     `gorm:"index;comment:删除时间" json:"-"`
+}
+
+func (BreachRecord) TableName() string {
+	return "breach_records"
+}
+
+type LitigationStatus string
+
+const (
+	LitigationStatusFiled      LitigationStatus = "filed"
+	LitigationStatusAccepted   LitigationStatus = "accepted"
+	LitigationStatusInProgress LitigationStatus = "in_progress"
+	LitigationStatusJudged     LitigationStatus = "judged"
+	LitigationStatusClosed     LitigationStatus = "closed"
+)
+
+type LitigationRecord struct {
+	ID                    uint64           `gorm:"primaryKey;autoIncrement" json:"id"`
+	BreachRecordID        uint64           `gorm:"index;not null;comment:违约记录ID" json:"breach_record_id"`
+	OrderID               uint64           `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo               string           `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	PlaintiffEnterpriseID uint64           `gorm:"index;not null;comment:原告企业ID" json:"plaintiff_enterprise_id"`
+	DefendantEnterpriseID uint64           `gorm:"index;not null;comment:被告企业ID" json:"defendant_enterprise_id"`
+	CaseNo                string           `gorm:"type:varchar(64);comment:案件编号" json:"case_no"`
+	Court                 string           `gorm:"type:varchar(200);comment:受理法院" json:"court"`
+	ClaimAmount           float64          `gorm:"type:decimal(14,2);comment:诉讼金额" json:"claim_amount"`
+	Description           string           `gorm:"type:text;not null;comment:诉讼描述" json:"description"`
+	EvidenceURLs          StringList       `gorm:"type:json;comment:诉讼证据URL列表" json:"evidence_urls"`
+	Status                LitigationStatus `gorm:"type:varchar(32);index;not null;default:filed;comment:状态" json:"status"`
+	JudgmentResult        string           `gorm:"type:text;comment:判决结果" json:"judgment_result"`
+	JudgmentURL           string           `gorm:"type:varchar(500);comment:判决文书URL" json:"judgment_url"`
+	JudgedAt              *time.Time       `gorm:"comment:判决时间" json:"judged_at"`
+	ClosedAt              *time.Time       `gorm:"comment:结案时间" json:"closed_at"`
+	CreatedBy             uint64           `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt             time.Time        `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedBy             uint64           `gorm:"comment:修改者" json:"updated_by"`
+	UpdatedAt             time.Time        `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt   `gorm:"index;comment:删除时间" json:"-"`
+}
+
+func (LitigationRecord) TableName() string {
+	return "litigation_records"
 }
 
 // CanCancel 检查是否可以取消

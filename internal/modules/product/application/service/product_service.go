@@ -72,7 +72,9 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 		Status:                entity.ProductStatusPending,
 		EnterpriseID:          enterpriseID,
 		Images:                entity.StringList(req.Images),
-		QualityCert:           req.QualityCert,
+		QualityCert:           strings.TrimSpace(req.QualityCert),
+		TitleVoucherURL:       strings.TrimSpace(req.TitleVoucherURL),
+		TitleVoucherRemark:    strings.TrimSpace(req.TitleVoucherRemark),
 		Description:           req.Description,
 		DeliveryDays:          req.DeliveryDays,
 		QuoteValidity:         req.QuoteValidity,
@@ -154,7 +156,9 @@ func (s *ProductService) Update(ctx context.Context, id uint64, req *dto.CreateP
 	product.UnitPrice = req.UnitPrice
 	product.MinOrderQty = req.MinOrderQty
 	product.Images = entity.StringList(req.Images)
-	product.QualityCert = req.QualityCert
+	product.QualityCert = strings.TrimSpace(req.QualityCert)
+	product.TitleVoucherURL = strings.TrimSpace(req.TitleVoucherURL)
+	product.TitleVoucherRemark = strings.TrimSpace(req.TitleVoucherRemark)
 	product.Description = req.Description
 	product.DeliveryDays = req.DeliveryDays
 	product.QuoteValidity = req.QuoteValidity
@@ -546,6 +550,8 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		AuditRemark:           product.AuditRemark,
 		ApprovedAt:            product.ApprovedAt,
 		QualityCert:           product.QualityCert,
+		TitleVoucherURL:       product.TitleVoucherURL,
+		TitleVoucherRemark:    product.TitleVoucherRemark,
 		Images:                []string(product.Images),
 		Description:           product.Description,
 		DeliveryDays:          product.DeliveryDays,

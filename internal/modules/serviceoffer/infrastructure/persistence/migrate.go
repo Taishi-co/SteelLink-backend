@@ -6,5 +6,5 @@ import (
 )
 
 func AutoMigrate() error {
-	return database.GetDB().AutoMigrate(&entity.WarehouseService{}, &entity.LogisticsService{}, &entity.FinanceService{})
+	return database.GetDB().AutoMigrate(&entity.WarehouseService{}, &entity.LogisticsService{}, &entity.FinanceService{}, &entity.FinanceAuthorizedWarehouse{}, &entity.FinanceAuthorizedLogistics{})
 }

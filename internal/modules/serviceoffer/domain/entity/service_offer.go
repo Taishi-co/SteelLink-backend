@@ -91,30 +91,34 @@ func (WarehouseService) TableName() string {
 }
 
 type LogisticsService struct {
-	ID           uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
-	EnterpriseID uint64         `gorm:"index;not null;comment:企业ID" json:"enterprise_id"`
-	Name         string         `gorm:"type:varchar(200);not null;comment:服务名称" json:"name"`
-	RouteStart   string         `gorm:"type:varchar(100);comment:起始地" json:"route_start"`
-	RouteEnd     string         `gorm:"type:varchar(100);comment:目的地" json:"route_end"`
-	ServiceScope string         `gorm:"type:varchar(255);comment:服务范围" json:"service_scope"`
-	VehicleType  string         `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
-	LoadCapacity float64        `gorm:"type:decimal(12,2);comment:载重能力" json:"load_capacity"`
-	PriceRule    string         `gorm:"type:varchar(500);comment:价格规则" json:"price_rule"`
-	QuoteRules   JSONMap        `gorm:"type:json;comment:结构化报价规则" json:"quote_rules"`
-	FleetName    string         `gorm:"type:varchar(200);comment:车队名称" json:"fleet_name"`
-	VehicleCerts StringList     `gorm:"type:json;comment:车辆资质" json:"vehicle_certs"`
-	DriverCerts  StringList     `gorm:"type:json;comment:司机资质" json:"driver_certs"`
-	Images       StringList     `gorm:"type:json;comment:展示图片" json:"images"`
-	Certificates StringList     `gorm:"type:json;comment:资质附件" json:"certificates"`
-	Description  string         `gorm:"type:text;comment:描述" json:"description"`
-	Status       OfferStatus    `gorm:"type:tinyint;default:1;index;comment:状态" json:"status"`
-	AuditRemark  string         `gorm:"type:varchar(500);comment:审核备注" json:"audit_remark"`
-	ApprovedAt   *time.Time     `gorm:"comment:审核通过时间" json:"approved_at"`
-	CreatedBy    uint64         `gorm:"comment:创建者" json:"created_by"`
-	CreatedAt    time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
-	UpdatedBy    uint64         `gorm:"comment:修改者" json:"updated_by"`
-	UpdatedAt    time.Time      `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index;comment:删除时间" json:"-"`
+	ID            uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnterpriseID  uint64         `gorm:"index;not null;comment:企业ID" json:"enterprise_id"`
+	Name          string         `gorm:"type:varchar(200);not null;comment:服务名称" json:"name"`
+	RouteStart    string         `gorm:"type:varchar(100);comment:起始地" json:"route_start"`
+	RouteEnd      string         `gorm:"type:varchar(100);comment:目的地" json:"route_end"`
+	ServiceScope  string         `gorm:"type:varchar(255);comment:服务范围" json:"service_scope"`
+	TransportMode string         `gorm:"type:varchar(64);comment:运输方式 公路/铁路/水路/航空" json:"transport_mode"`
+	TransitCycle  string         `gorm:"type:varchar(64);comment:运输周期" json:"transit_cycle"`
+	UnitPrice     float64        `gorm:"type:decimal(10,2);comment:运价-元/吨" json:"unit_price"`
+	ContactInfo   string         `gorm:"type:varchar(255);comment:联系方式" json:"contact_info"`
+	VehicleType   string         `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
+	LoadCapacity  float64        `gorm:"type:decimal(12,2);comment:载重能力" json:"load_capacity"`
+	PriceRule     string         `gorm:"type:varchar(500);comment:价格规则" json:"price_rule"`
+	QuoteRules    JSONMap        `gorm:"type:json;comment:结构化报价规则" json:"quote_rules"`
+	FleetName     string         `gorm:"type:varchar(200);comment:车队名称" json:"fleet_name"`
+	VehicleCerts  StringList     `gorm:"type:json;comment:车辆资质" json:"vehicle_certs"`
+	DriverCerts   StringList     `gorm:"type:json;comment:司机资质" json:"driver_certs"`
+	Images        StringList     `gorm:"type:json;comment:展示图片" json:"images"`
+	Certificates  StringList     `gorm:"type:json;comment:资质附件" json:"certificates"`
+	Description   string         `gorm:"type:text;comment:描述" json:"description"`
+	Status        OfferStatus    `gorm:"type:tinyint;default:1;index;comment:状态" json:"status"`
+	AuditRemark   string         `gorm:"type:varchar(500);comment:审核备注" json:"audit_remark"`
+	ApprovedAt    *time.Time     `gorm:"comment:审核通过时间" json:"approved_at"`
+	CreatedBy     uint64         `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt     time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedBy     uint64         `gorm:"comment:修改者" json:"updated_by"`
+	UpdatedAt     time.Time      `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index;comment:删除时间" json:"-"`
 }
 
 func (LogisticsService) TableName() string {
@@ -147,4 +151,39 @@ type FinanceService struct {
 
 func (FinanceService) TableName() string {
 	return "finance_services"
+}
+
+type FinanceAuthorizedWarehouse struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	FinanceServiceID      uint64         `gorm:"index;not null;comment:金融产品ID" json:"finance_service_id"`
+	FinanceEnterpriseID   uint64         `gorm:"index;not null;comment:资金方企业ID" json:"finance_enterprise_id"`
+	WarehouseServiceID    uint64         `gorm:"index;not null;comment:仓储资源ID" json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64         `gorm:"index;not null;comment:仓储方企业ID" json:"warehouse_enterprise_id"`
+	AuthorizationType     string         `gorm:"type:varchar(32);default:pledge_supervision;comment:授权类型 pledge_supervision/collateral" json:"authorization_type"`
+	Status                string         `gorm:"type:varchar(32);default:active;index;comment:状态 active/revoked" json:"status"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index;comment:删除时间" json:"-"`
+}
+
+func (FinanceAuthorizedWarehouse) TableName() string {
+	return "finance_authorized_warehouses"
+}
+
+type FinanceAuthorizedLogistics struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	FinanceServiceID      uint64         `gorm:"index;not null;comment:金融产品ID" json:"finance_service_id"`
+	FinanceEnterpriseID   uint64         `gorm:"index;not null;comment:资金方企业ID" json:"finance_enterprise_id"`
+	LogisticsServiceID    uint64         `gorm:"index;not null;comment:物流资源ID" json:"logistics_service_id"`
+	LogisticsEnterpriseID uint64         `gorm:"index;not null;comment:物流方企业ID" json:"logistics_enterprise_id"`
+	Status                string         `gorm:"type:varchar(32);default:active;index;comment:状态 active/revoked" json:"status"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index;comment:删除时间" json:"-"`
+}
+
+func (FinanceAuthorizedLogistics) TableName() string {
+	return "finance_authorized_logistics"
 }

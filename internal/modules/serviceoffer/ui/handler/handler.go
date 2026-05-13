@@ -200,24 +200,28 @@ func (h *Handler) CreateLogistics(c *gin.Context) {
 		return
 	}
 	item := entity.LogisticsService{
-		EnterpriseID: claims.EnterpriseID,
-		Name:         req.Name,
-		RouteStart:   req.RouteStart,
-		RouteEnd:     req.RouteEnd,
-		ServiceScope: req.ServiceScope,
-		VehicleType:  req.VehicleType,
-		LoadCapacity: req.LoadCapacity,
-		PriceRule:    req.PriceRule,
-		QuoteRules:   entity.JSONMap(req.QuoteRules),
-		FleetName:    req.FleetName,
-		VehicleCerts: entity.StringList(req.VehicleCerts),
-		DriverCerts:  entity.StringList(req.DriverCerts),
-		Images:       entity.StringList(req.Images),
-		Certificates: entity.StringList(req.Certificates),
-		Description:  req.Description,
-		Status:       entity.OfferStatusPending,
-		CreatedBy:    claims.UserID,
-		UpdatedBy:    claims.UserID,
+		EnterpriseID:  claims.EnterpriseID,
+		Name:          req.Name,
+		RouteStart:    req.RouteStart,
+		RouteEnd:      req.RouteEnd,
+		ServiceScope:  req.ServiceScope,
+		TransportMode: req.TransportMode,
+		TransitCycle:  req.TransitCycle,
+		UnitPrice:     req.UnitPrice,
+		ContactInfo:   req.ContactInfo,
+		VehicleType:   req.VehicleType,
+		LoadCapacity:  req.LoadCapacity,
+		PriceRule:     req.PriceRule,
+		QuoteRules:    entity.JSONMap(req.QuoteRules),
+		FleetName:     req.FleetName,
+		VehicleCerts:  entity.StringList(req.VehicleCerts),
+		DriverCerts:   entity.StringList(req.DriverCerts),
+		Images:        entity.StringList(req.Images),
+		Certificates:  entity.StringList(req.Certificates),
+		Description:   req.Description,
+		Status:        entity.OfferStatusPending,
+		CreatedBy:     claims.UserID,
+		UpdatedBy:     claims.UserID,
 	}
 	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("创建物流资源失败"))
@@ -307,6 +311,10 @@ func (h *Handler) UpdateLogistics(c *gin.Context) {
 	item.RouteStart = req.RouteStart
 	item.RouteEnd = req.RouteEnd
 	item.ServiceScope = req.ServiceScope
+	item.TransportMode = req.TransportMode
+	item.TransitCycle = req.TransitCycle
+	item.UnitPrice = req.UnitPrice
+	item.ContactInfo = req.ContactInfo
 	item.VehicleType = req.VehicleType
 	item.LoadCapacity = req.LoadCapacity
 	item.PriceRule = req.PriceRule
@@ -699,12 +707,17 @@ func warehouseToInfo(item *entity.WarehouseService) dto.WarehouseServiceInfo {
 
 func logisticsToInfo(item *entity.LogisticsService) dto.LogisticsServiceInfo {
 	return dto.LogisticsServiceInfo{
-		ID: item.ID, EnterpriseID: item.EnterpriseID, Name: item.Name, RouteStart: item.RouteStart,
-		RouteEnd: item.RouteEnd, ServiceScope: item.ServiceScope, VehicleType: item.VehicleType,
-		LoadCapacity: item.LoadCapacity, PriceRule: item.PriceRule, QuoteRules: map[string]any(item.QuoteRules),
-		FleetName: item.FleetName, VehicleCerts: []string(item.VehicleCerts), DriverCerts: []string(item.DriverCerts),
-		Images: []string(item.Images), Certificates: []string(item.Certificates), Description: item.Description,
-		Status: int(item.Status), AuditRemark: item.AuditRemark, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		ID: item.ID, EnterpriseID: item.EnterpriseID, Name: item.Name,
+		RouteStart: item.RouteStart, RouteEnd: item.RouteEnd, ServiceScope: item.ServiceScope,
+		TransportMode: item.TransportMode, TransitCycle: item.TransitCycle,
+		UnitPrice: item.UnitPrice, ContactInfo: item.ContactInfo,
+		VehicleType: item.VehicleType, LoadCapacity: item.LoadCapacity,
+		PriceRule: item.PriceRule, QuoteRules: map[string]any(item.QuoteRules),
+		FleetName:    item.FleetName,
+		VehicleCerts: []string(item.VehicleCerts), DriverCerts: []string(item.DriverCerts),
+		Images: []string(item.Images), Certificates: []string(item.Certificates),
+		Description: item.Description, Status: int(item.Status), AuditRemark: item.AuditRemark,
+		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 
@@ -717,4 +730,288 @@ func financeToInfo(item *entity.FinanceService) dto.FinanceServiceInfo {
 		Description: item.Description, Status: int(item.Status), AuditRemark: item.AuditRemark,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func (h *Handler) AuthorizeWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	financeID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req dto.AuthorizeWarehouseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var finance entity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", financeID, claims.EnterpriseID).First(&finance).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("金融产品不存在或无权操作"))
+		return
+	}
+
+	var warehouse entity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND status = ?", req.WarehouseServiceID, entity.OfferStatusApproved).First(&warehouse).Error; err != nil {
+		response.Error(c, ecode.ErrBadRequest.WithMessage("仓储资源不存在或未审核通过"))
+		return
+	}
+
+	authType := strings.TrimSpace(req.AuthorizationType)
+	if authType == "" {
+		authType = "pledge_supervision"
+	}
+
+	auth := entity.FinanceAuthorizedWarehouse{
+		FinanceServiceID:      finance.ID,
+		FinanceEnterpriseID:   claims.EnterpriseID,
+		WarehouseServiceID:    warehouse.ID,
+		WarehouseEnterpriseID: warehouse.EnterpriseID,
+		AuthorizationType:     authType,
+		Status:                "active",
+		CreatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&auth).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("授权监管仓失败"))
+		return
+	}
+	invalidateServiceOfferCache(c.Request.Context())
+	response.Success(c, dto.AuthorizedWarehouseInfo{
+		ID:                    auth.ID,
+		FinanceServiceID:      auth.FinanceServiceID,
+		WarehouseServiceID:    auth.WarehouseServiceID,
+		WarehouseEnterpriseID: auth.WarehouseEnterpriseID,
+		AuthorizationType:     auth.AuthorizationType,
+		Status:                auth.Status,
+		CreatedAt:             auth.CreatedAt,
+	})
+}
+
+func (h *Handler) RevokeWarehouse(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	authID, _ := strconv.ParseUint(c.Param("auth_id"), 10, 64)
+	var auth entity.FinanceAuthorizedWarehouse
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND finance_enterprise_id = ?", authID, claims.EnterpriseID).First(&auth).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("授权记录不存在"))
+		return
+	}
+	auth.Status = "revoked"
+	h.db.WithContext(c.Request.Context()).Save(&auth)
+	invalidateServiceOfferCache(c.Request.Context())
+	response.Success(c, gin.H{"id": auth.ID, "status": "revoked"})
+}
+
+func (h *Handler) ListAuthorizedWarehouses(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	financeID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+
+	var auths []entity.FinanceAuthorizedWarehouse
+	h.db.WithContext(c.Request.Context()).
+		Where("finance_enterprise_id = ? AND finance_service_id = ? AND status = ?", claims.EnterpriseID, financeID, "active").
+		Order("id DESC").
+		Find(&auths)
+
+	list := make([]dto.AuthorizedWarehouseInfo, 0, len(auths))
+	for _, a := range auths {
+		list = append(list, dto.AuthorizedWarehouseInfo{
+			ID:                    a.ID,
+			FinanceServiceID:      a.FinanceServiceID,
+			WarehouseServiceID:    a.WarehouseServiceID,
+			WarehouseEnterpriseID: a.WarehouseEnterpriseID,
+			AuthorizationType:     a.AuthorizationType,
+			Status:                a.Status,
+			CreatedAt:             a.CreatedAt,
+		})
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func (h *Handler) AuthorizeLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	financeID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var req dto.AuthorizeLogisticsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var finance entity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", financeID, claims.EnterpriseID).First(&finance).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("金融产品不存在或无权操作"))
+		return
+	}
+
+	var logistics entity.LogisticsService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND status = ?", req.LogisticsServiceID, entity.OfferStatusApproved).First(&logistics).Error; err != nil {
+		response.Error(c, ecode.ErrBadRequest.WithMessage("物流资源不存在或未审核通过"))
+		return
+	}
+
+	auth := entity.FinanceAuthorizedLogistics{
+		FinanceServiceID:      finance.ID,
+		FinanceEnterpriseID:   claims.EnterpriseID,
+		LogisticsServiceID:    logistics.ID,
+		LogisticsEnterpriseID: logistics.EnterpriseID,
+		Status:                "active",
+		CreatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&auth).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("授权物流方失败"))
+		return
+	}
+	invalidateServiceOfferCache(c.Request.Context())
+	response.Success(c, dto.AuthorizedLogisticsInfo{
+		ID:                    auth.ID,
+		FinanceServiceID:      auth.FinanceServiceID,
+		LogisticsServiceID:    auth.LogisticsServiceID,
+		LogisticsEnterpriseID: auth.LogisticsEnterpriseID,
+		Status:                auth.Status,
+		CreatedAt:             auth.CreatedAt,
+	})
+}
+
+func (h *Handler) RevokeLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	authID, _ := strconv.ParseUint(c.Param("auth_id"), 10, 64)
+	var auth entity.FinanceAuthorizedLogistics
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND finance_enterprise_id = ?", authID, claims.EnterpriseID).First(&auth).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("授权记录不存在"))
+		return
+	}
+	auth.Status = "revoked"
+	h.db.WithContext(c.Request.Context()).Save(&auth)
+	invalidateServiceOfferCache(c.Request.Context())
+	response.Success(c, gin.H{"id": auth.ID, "status": "revoked"})
+}
+
+func (h *Handler) ListWarehousesForMyGoods(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+
+	var sellerProductWarehouseIDs []uint64
+	h.db.WithContext(c.Request.Context()).
+		Table("products").
+		Where("enterprise_id = ? AND warehouse_service_id > 0", claims.EnterpriseID).
+		Pluck("warehouse_service_id", &sellerProductWarehouseIDs)
+
+	var buyerOrderWarehouseIDs []uint64
+	h.db.WithContext(c.Request.Context()).
+		Table("orders").
+		Where("buyer_id = ? AND status NOT IN (9, 11) AND JSON_LENGTH(delivery_info) > 0", claims.EnterpriseID).
+		Pluck("JSON_UNQUOTE(JSON_EXTRACT(delivery_info, '$.warehouse_service_id'))", &buyerOrderWarehouseIDs)
+
+	warehouseIDSet := map[uint64]bool{}
+	for _, id := range sellerProductWarehouseIDs {
+		warehouseIDSet[id] = true
+	}
+	for _, id := range buyerOrderWarehouseIDs {
+		if id > 0 {
+			warehouseIDSet[id] = true
+		}
+	}
+
+	var warehouseIDs []uint64
+	for id := range warehouseIDSet {
+		warehouseIDs = append(warehouseIDs, id)
+	}
+
+	var rows []entity.WarehouseService
+	if len(warehouseIDs) > 0 {
+		h.db.WithContext(c.Request.Context()).Where("id IN ? AND status = ?", warehouseIDs, entity.OfferStatusApproved).Find(&rows)
+	}
+
+	list := make([]dto.WarehouseServiceInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, warehouseToInfo(&row))
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func (h *Handler) ListLogisticsForMyShipments(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+
+	var logisticsOrders []entity.LogisticsService
+	var orderIDs []uint64
+	h.db.WithContext(c.Request.Context()).
+		Table("orders").
+		Where("(buyer_id = ? OR seller_id = ?) AND status NOT IN (9, 11)", claims.EnterpriseID, claims.EnterpriseID).
+		Pluck("id", &orderIDs)
+
+	if len(orderIDs) > 0 {
+		var logisticsOrderRows []struct {
+			LogisticsServiceID uint64
+		}
+		h.db.WithContext(c.Request.Context()).
+			Table("logistics_orders").
+			Select("DISTINCT logistics_service_id").
+			Where("order_id IN ?", orderIDs).
+			Find(&logisticsOrderRows)
+
+		var serviceIDs []uint64
+		for _, lo := range logisticsOrderRows {
+			if lo.LogisticsServiceID > 0 {
+				serviceIDs = append(serviceIDs, lo.LogisticsServiceID)
+			}
+		}
+		if len(serviceIDs) > 0 {
+			h.db.WithContext(c.Request.Context()).Where("id IN ? AND status = ?", serviceIDs, entity.OfferStatusApproved).Find(&logisticsOrders)
+		}
+	}
+
+	list := make([]dto.LogisticsServiceInfo, 0, len(logisticsOrders))
+	for _, row := range logisticsOrders {
+		list = append(list, logisticsToInfo(&row))
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func (h *Handler) ListFinanceAvailableForOrder(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("未登录或未加入企业"))
+		return
+	}
+	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+
+	var financeServices []entity.FinanceService
+	h.db.WithContext(c.Request.Context()).
+		Where("status = ?", entity.OfferStatusApproved).
+		Order("id DESC").
+		Find(&financeServices)
+
+	list := make([]dto.FinanceServiceInfo, 0, len(financeServices))
+	for _, fs := range financeServices {
+		list = append(list, financeToInfo(&fs))
+	}
+	response.Success(c, gin.H{
+		"order_id": orderID,
+		"list":     list,
+	})
 }

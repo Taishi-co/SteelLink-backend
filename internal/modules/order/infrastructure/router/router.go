@@ -69,5 +69,17 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("/:id/receipts/confirm", buyerService, orderHandler.ConfirmReceipt)
 		orders.POST("/:id/reconcile", sellerService, orderHandler.Reconcile)
 		orders.POST("/:id/archive", buyerOrSellerService, orderHandler.Archive)
+
+		orders.POST("/:id/breach", buyerOrSellerService, orderHandler.ReportBreach)
+		orders.GET("/:id/breach-records", fulfillmentParticipant, orderHandler.ListBreachRecords)
+		orders.GET("/:id/litigation-records", fulfillmentParticipant, orderHandler.ListLitigationRecords)
+
+		adminFreeze := middleware.RequireUserType("operator", "super_admin")
+		orders.POST("/:id/freeze", adminFreeze, orderHandler.FreezeOrder)
+		orders.POST("/:id/unfreeze", adminFreeze, orderHandler.UnfreezeOrder)
+		orders.POST("/breach-records/:breach_id/mediate", adminFreeze, orderHandler.MediateBreach)
+		orders.POST("/breach-records/:breach_id/resolve", adminFreeze, orderHandler.ResolveBreach)
+		orders.POST("/breach-records/:breach_id/litigation", buyerOrSellerService, orderHandler.CreateLitigation)
+		orders.PUT("/litigation-records/:litigation_id", adminFreeze, orderHandler.UpdateLitigationStatus)
 	}
 }

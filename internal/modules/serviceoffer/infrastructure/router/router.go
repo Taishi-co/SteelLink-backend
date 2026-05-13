@@ -16,8 +16,16 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/finance-services", middleware.OptionalAuth(), h.ListFinance)
 	r.GET("/finance-services/:id", middleware.OptionalAuth(), h.GetFinance)
 
+	buyerOrSeller := middleware.RequireTradeCapability("procurement", "sales")
+
+	warehouseQuery := r.Group("/warehouse-services")
+	warehouseQuery.Use(middleware.AuthRequired(), buyerOrSeller)
+	{
+		warehouseQuery.GET("/my-goods", h.ListWarehousesForMyGoods)
+	}
+
 	warehouse := r.Group("/warehouse-services")
-	warehouse.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("sales", "warehouse"))
+	warehouse.Use(middleware.AuthRequired(), middleware.RequireProviderService("warehouse"))
 	{
 		warehouse.POST("", h.CreateWarehouse)
 		warehouse.GET("/mine", h.ListMyWarehouses)
@@ -25,6 +33,12 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		warehouse.DELETE("/:id", h.DeleteWarehouse)
 	}
 	r.PUT("/warehouse-services/:id/audit", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), h.AuditWarehouse)
+
+	logisticsQuery := r.Group("/logistics-services")
+	logisticsQuery.Use(middleware.AuthRequired(), buyerOrSeller)
+	{
+		logisticsQuery.GET("/my-shipments", h.ListLogisticsForMyShipments)
+	}
 
 	logistics := r.Group("/logistics-services")
 	logistics.Use(middleware.AuthRequired(), middleware.RequireProviderService("logistics"))
@@ -36,6 +50,12 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 	r.PUT("/logistics-services/:id/audit", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), h.AuditLogistics)
 
+	financeQuery := r.Group("/finance-services")
+	financeQuery.Use(middleware.AuthRequired(), buyerOrSeller)
+	{
+		financeQuery.GET("/available-for-order/:order_id", h.ListFinanceAvailableForOrder)
+	}
+
 	finance := r.Group("/finance-services")
 	finance.Use(middleware.AuthRequired(), middleware.RequireProviderService("finance"))
 	{
@@ -43,6 +63,11 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		finance.GET("/mine", h.ListMyFinance)
 		finance.PUT("/:id", h.UpdateFinance)
 		finance.DELETE("/:id", h.DeleteFinance)
+		finance.POST("/:id/authorize-warehouse", h.AuthorizeWarehouse)
+		finance.DELETE("/authorized-warehouses/:auth_id", h.RevokeWarehouse)
+		finance.GET("/:id/authorized-warehouses", h.ListAuthorizedWarehouses)
+		finance.POST("/:id/authorize-logistics", h.AuthorizeLogistics)
+		finance.DELETE("/authorized-logistics/:auth_id", h.RevokeLogistics)
 	}
 	r.PUT("/finance-services/:id/audit", middleware.AuthRequired(), middleware.RequireUserType("operator", "super_admin"), h.AuditFinance)
 }

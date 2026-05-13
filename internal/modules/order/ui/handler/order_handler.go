@@ -1030,6 +1030,202 @@ func isOrderAdmin(userType string) bool {
 	return userType == "operator" || userType == "super_admin"
 }
 
+func (h *OrderHandler) ReportBreach(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.ReportBreachRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.ReportBreach(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ListBreachRecords(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.ListBreachRecords(c.Request.Context(), id)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"list": result})
+}
+
+func (h *OrderHandler) MediateBreach(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	breachID, err := strconv.ParseUint(c.Param("breach_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的违约记录ID")
+		return
+	}
+	var req dto.MediateBreachRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.MediateBreach(c.Request.Context(), breachID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ResolveBreach(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	breachID, err := strconv.ParseUint(c.Param("breach_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的违约记录ID")
+		return
+	}
+	var req dto.ResolveBreachRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.ResolveBreach(c.Request.Context(), breachID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) FreezeOrder(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.FreezeOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.FreezeOrder(c.Request.Context(), id, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) UnfreezeOrder(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.UnfreezeOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.UnfreezeOrder(c.Request.Context(), id, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) CreateLitigation(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	breachID, err := strconv.ParseUint(c.Param("breach_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的违约记录ID")
+		return
+	}
+	var req dto.CreateLitigationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.CreateLitigation(c.Request.Context(), breachID, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) UpdateLitigationStatus(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	litigationID, err := strconv.ParseUint(c.Param("litigation_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的诉讼记录ID")
+		return
+	}
+	var req dto.UpdateLitigationStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.UpdateLitigationStatus(c.Request.Context(), litigationID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) ListLitigationRecords(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.ListLitigationRecords(c.Request.Context(), id)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, gin.H{"list": result})
+}
+
 func intQuery(c *gin.Context, key string, fallback int) int {
 	raw := c.Query(key)
 	if raw == "" {
