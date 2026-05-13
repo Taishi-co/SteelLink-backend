@@ -211,6 +211,42 @@ func (LogisticsTrackingEvent) TableName() string {
 	return "logistics_tracking_events"
 }
 
+// FulfillmentDocType 履约单据类型
+type FulfillmentDocType string
+
+const (
+	DocTypePickupOrder      FulfillmentDocType = "pickup_order"
+	DocTypeOutboundOrder    FulfillmentDocType = "outbound_order"
+	DocTypeSealPhoto        FulfillmentDocType = "seal_photo"
+	DocTypeGPSTrack         FulfillmentDocType = "gps_track"
+	DocTypeInspectionResult FulfillmentDocType = "inspection_result"
+	DocTypeReceiptOrder     FulfillmentDocType = "receipt_order"
+	DocTypeInboundOrder     FulfillmentDocType = "inbound_order"
+	DocTypeWaybill          FulfillmentDocType = "waybill"
+	DocTypeDeliveryPhoto    FulfillmentDocType = "delivery_photo"
+)
+
+type FulfillmentDocument struct {
+	ID               uint64             `gorm:"primaryKey;autoIncrement" json:"id"`
+	LogisticsOrderID uint64             `gorm:"index;not null;comment:物流委托单ID" json:"logistics_order_id"`
+	OrderID          uint64             `gorm:"index;comment:交易订单ID" json:"order_id"`
+	DocType          FulfillmentDocType `gorm:"type:varchar(64);index;not null;comment:单据类型" json:"doc_type"`
+	FileURL          string             `gorm:"type:varchar(500);not null;comment:文件地址" json:"file_url"`
+	FileHash         string             `gorm:"type:varchar(128);comment:文件哈希" json:"file_hash"`
+	Remark           string             `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	GPSLatitude      *float64           `gorm:"comment:GPS纬度" json:"gps_latitude"`
+	GPSLongitude     *float64           `gorm:"comment:GPS经度" json:"gps_longitude"`
+	CapturedAt       string             `gorm:"type:varchar(64);comment:拍摄时间" json:"captured_at"`
+	UploadedBy       uint64             `gorm:"index;comment:上传人" json:"uploaded_by"`
+	EnterpriseID     uint64             `gorm:"index;comment:上传企业" json:"enterprise_id"`
+	UploadedRole     string             `gorm:"type:varchar(32);comment:上传角色" json:"uploaded_role"`
+	CreatedAt        time.Time          `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+}
+
+func (FulfillmentDocument) TableName() string {
+	return "fulfillment_documents"
+}
+
 type FulfillmentGuarantee struct {
 	ID               uint64          `gorm:"primaryKey;autoIncrement" json:"id"`
 	GuaranteeNo      string          `gorm:"type:varchar(64);uniqueIndex;not null;comment:保障单号" json:"guarantee_no"`

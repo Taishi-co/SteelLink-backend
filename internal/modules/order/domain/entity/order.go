@@ -43,6 +43,7 @@ const (
 	OrderStatusPendingWarehouseReselect OrderStatus = 24 // 待重新选仓
 	OrderStatusPendingLogisticsRebid    OrderStatus = 25 // 待重新发起物流
 	OrderStatusPendingWarehouseSelect   OrderStatus = 26 // 待选择仓库
+	OrderStatusPendingLogisticsContract OrderStatus = 27 // 待物流合同签署
 )
 
 var validStatusTransitions = map[OrderStatus][]OrderStatus{
@@ -64,7 +65,7 @@ var validStatusTransitions = map[OrderStatus][]OrderStatus{
 	OrderStatusPendingSellerConfirm:     {OrderStatusPendingBuyerConfirm, OrderStatusCancelled},
 	OrderStatusPendingBuyerConfirm:      {OrderStatusPendingContract, OrderStatusCancelled},
 	OrderStatusLogisticsBidding:         {OrderStatusPendingLogisticsConfirm, OrderStatusPendingLogisticsRebid},
-	OrderStatusPendingLogisticsConfirm:  {OrderStatusShipping, OrderStatusPendingDelivery},
+	OrderStatusPendingLogisticsConfirm:  {OrderStatusPendingLogisticsContract, OrderStatusPendingDelivery},
 	OrderStatusShipping:                 {OrderStatusDelivered, OrderStatusReceived},
 	OrderStatusReceived:                 {OrderStatusReconciled},
 	OrderStatusReconciled:               {OrderStatusArchived},
@@ -72,6 +73,7 @@ var validStatusTransitions = map[OrderStatus][]OrderStatus{
 	OrderStatusFinancingReview:          {OrderStatusPendingFinancingContract, OrderStatusPendingPayment, OrderStatusCancelled},
 	OrderStatusPendingFinancingContract: {OrderStatusPaid, OrderStatusCancelled},
 	OrderStatusPendingLogisticsRebid:    {OrderStatusLogisticsBidding, OrderStatusCancelled},
+	OrderStatusPendingLogisticsContract: {OrderStatusShipping, OrderStatusCancelled},
 }
 
 func ValidateStatusTransition(from, to OrderStatus) bool {
@@ -454,6 +456,86 @@ type ShipmentTask struct {
 
 func (ShipmentTask) TableName() string {
 	return "shipment_tasks"
+}
+
+// LogisticsContractStatus 物流合同状态
+type LogisticsContractStatus string
+
+const (
+	LogisticsContractPending         LogisticsContractStatus = "pending"
+	LogisticsContractBuyerSigned     LogisticsContractStatus = "buyer_signed"
+	LogisticsContractLogisticsSigned LogisticsContractStatus = "logistics_signed"
+	LogisticsContractCompleted       LogisticsContractStatus = "completed"
+	LogisticsContractCancelled       LogisticsContractStatus = "cancelled"
+)
+
+type LogisticsContract struct {
+	ID                    uint64                  `gorm:"primaryKey;autoIncrement" json:"id"`
+	ContractNo            string                  `gorm:"type:varchar(64);uniqueIndex;not null;comment:合同编号" json:"contract_no"`
+	OrderID               uint64                  `gorm:"index;not null;comment:关联订单" json:"order_id"`
+	OrderNo               string                  `gorm:"type:varchar(32);index;comment:订单号" json:"order_no"`
+	BiddingID             uint64                  `gorm:"index;comment:关联竞价" json:"bidding_id"`
+	QuoteID               uint64                  `gorm:"index;comment:关联报价" json:"quote_id"`
+	BuyerEnterpriseID     uint64                  `gorm:"index;not null;comment:买方企业" json:"buyer_enterprise_id"`
+	LogisticsEnterpriseID uint64                  `gorm:"index;not null;comment:物流方企业" json:"logistics_enterprise_id"`
+	SellerEnterpriseID    uint64                  `gorm:"index;comment:卖方企业" json:"seller_enterprise_id"`
+	ContractURL           string                  `gorm:"type:varchar(500);comment:合同文件URL" json:"contract_url"`
+	FreightAmount         float64                 `gorm:"type:decimal(12,2);comment:运费金额" json:"freight_amount"`
+	CommissionRate        float64                 `gorm:"type:decimal(6,4);default:0.03;comment:平台抽佣比例" json:"commission_rate"`
+	PickupWarehouseID     uint64                  `gorm:"index;comment:指定提货仓库" json:"pickup_warehouse_id"`
+	PickupWarehouseName   string                  `gorm:"type:varchar(200);comment:提货仓库名称" json:"pickup_warehouse_name"`
+	DestinationAddress    string                  `gorm:"type:varchar(500);comment:目的地地址" json:"destination_address"`
+	IsFinancingOrder      bool                    `gorm:"default:false;comment:是否融资订单" json:"is_financing_order"`
+	Status                LogisticsContractStatus `gorm:"type:varchar(32);index;not null;default:pending;comment:状态" json:"status"`
+	BuyerSignedAt         *time.Time              `gorm:"comment:买方签署时间" json:"buyer_signed_at"`
+	LogisticsSignedAt     *time.Time              `gorm:"comment:物流方签署时间" json:"logistics_signed_at"`
+	CompletedAt           *time.Time              `gorm:"comment:合同完成时间" json:"completed_at"`
+	CreatedBy             uint64                  `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt             time.Time               `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt             time.Time               `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt          `gorm:"index;comment:删除时间" json:"-"`
+}
+
+func (LogisticsContract) TableName() string {
+	return "logistics_contracts"
+}
+
+func (c *LogisticsContract) BothSigned() bool {
+	return c.BuyerSignedAt != nil && c.LogisticsSignedAt != nil
+}
+
+// LogisticsSettlementStatus 物流结算状态
+type LogisticsSettlementStatus string
+
+const (
+	LogisticsSettlementPending   LogisticsSettlementStatus = "pending"
+	LogisticsSettlementPaid      LogisticsSettlementStatus = "paid"
+	LogisticsSettlementCommitted LogisticsSettlementStatus = "committed"
+)
+
+type LogisticsSettlement struct {
+	ID                   uint64                    `gorm:"primaryKey;autoIncrement" json:"id"`
+	SettlementNo         string                    `gorm:"type:varchar(64);uniqueIndex;not null;comment:结算单号" json:"settlement_no"`
+	LogisticsContractID  uint64                    `gorm:"index;not null;comment:关联物流合同" json:"logistics_contract_id"`
+	OrderID              uint64                    `gorm:"index;not null;comment:关联订单" json:"order_id"`
+	OrderNo              string                    `gorm:"type:varchar(32);index;comment:订单号" json:"order_no"`
+	PayerEnterpriseID    uint64                    `gorm:"index;not null;comment:付款方企业" json:"payer_enterprise_id"`
+	PayeeEnterpriseID    uint64                    `gorm:"index;not null;comment:收款方企业(物流)" json:"payee_enterprise_id"`
+	FreightAmount        float64                   `gorm:"type:decimal(12,2);not null;comment:运费" json:"freight_amount"`
+	PlatformCommission   float64                   `gorm:"type:decimal(12,2);comment:平台抽佣" json:"platform_commission"`
+	NetPayable           float64                   `gorm:"type:decimal(12,2);comment:实付金额" json:"net_payable"`
+	PaymentVoucherURL    string                    `gorm:"type:varchar(500);comment:支付凭证" json:"payment_voucher_url"`
+	CommissionVoucherURL string                    `gorm:"type:varchar(500);comment:抽佣凭证" json:"commission_voucher_url"`
+	Status               LogisticsSettlementStatus `gorm:"type:varchar(32);index;not null;default:pending;comment:状态" json:"status"`
+	PaidAt               *time.Time                `gorm:"comment:支付时间" json:"paid_at"`
+	CommissionPaidAt     *time.Time                `gorm:"comment:抽佣支付时间" json:"commission_paid_at"`
+	CreatedBy            uint64                    `gorm:"comment:创建者" json:"created_by"`
+	CreatedAt            time.Time                 `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	UpdatedAt            time.Time                 `gorm:"autoUpdateTime;comment:更新时间" json:"updated_at"`
+}
+
+func (LogisticsSettlement) TableName() string {
+	return "logistics_settlements"
 }
 
 type FinancingRequestStatus string

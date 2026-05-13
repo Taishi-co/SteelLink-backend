@@ -677,10 +677,10 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	if err := checkOrderFrozenOrException(order); err != nil {
 		return nil, err
 	}
-	if order.DeliveryInfo == nil || order.DeliveryInfo.WarehouseEnterpriseID == 0 {
-		return nil, ecode.ErrBadRequest.WithMessage("订单未绑定仓储方，无法仓库确认")
+	if order.DeliveryInfo == nil || order.DeliveryInfo.DestWarehouseEnterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("订单未绑定目的地仓储方，无法仓库确认")
 	}
-	if order.DeliveryInfo.WarehouseEnterpriseID != warehouseEnterpriseID {
+	if order.DeliveryInfo.DestWarehouseEnterpriseID != warehouseEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单仓库条件")
 	}
 	if order.Status != orderEntity.OrderStatusPendingWarehouseConfirm {
@@ -1069,7 +1069,7 @@ func (s *OrderService) ListByBuyer(ctx context.Context, buyerID uint64) ([]*dto.
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, s.toOrderDetailInfo(ctx, order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -1084,7 +1084,7 @@ func (s *OrderService) ListBySeller(ctx context.Context, sellerID uint64) ([]*dt
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
-		result = append(result, s.toOrderDetailInfo(ctx, order))
+		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
 }
@@ -1094,7 +1094,7 @@ func (s *OrderService) ListByWarehouse(ctx context.Context, warehouseEnterpriseI
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看仓储订单")
 	}
 	query := database.GetDB().WithContext(ctx).
-		Where("JSON_EXTRACT(delivery_info, '$.warehouse_enterprise_id') = ?", warehouseEnterpriseID)
+		Where("JSON_EXTRACT(delivery_info, '$.warehouse_enterprise_id') = ? OR JSON_EXTRACT(delivery_info, '$.dest_warehouse_enterprise_id') = ?", warehouseEnterpriseID, warehouseEnterpriseID)
 	if status != nil {
 		query = query.Where("status = ?", *status)
 	}
@@ -1879,7 +1879,10 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 		return nil, err
 	}
 	if order.BuyerID != enterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
+		isFunding, _ := s.isFundingParticipant(ctx, order.ID, enterpriseID)
+		if order.FinanceID == 0 || !isFunding {
+			return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
+		}
 	}
 	if order.Status != orderEntity.OrderStatusDelivering && order.Status != orderEntity.OrderStatusShipping && order.Status != orderEntity.OrderStatusDelivered {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
@@ -1919,6 +1922,26 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 				return err
 			}
 			if err := ensureLogisticsOrderSyncTx(tx, order, nil, nil, &task, operatorID); err != nil {
+				return err
+			}
+		}
+		var logisticsContract orderEntity.LogisticsContract
+		if err := tx.Where("order_id = ? AND status = ?", order.ID, orderEntity.LogisticsContractCompleted).Order("id desc").First(&logisticsContract).Error; err == nil {
+			commission := logisticsContract.FreightAmount * logisticsContract.CommissionRate
+			settlement := orderEntity.LogisticsSettlement{
+				SettlementNo:        generateSettlementNo(),
+				LogisticsContractID: logisticsContract.ID,
+				OrderID:             order.ID,
+				OrderNo:             order.OrderNo,
+				PayerEnterpriseID:   order.BuyerID,
+				PayeeEnterpriseID:   logisticsContract.LogisticsEnterpriseID,
+				FreightAmount:       logisticsContract.FreightAmount,
+				PlatformCommission:  commission,
+				NetPayable:          logisticsContract.FreightAmount - commission,
+				Status:              orderEntity.LogisticsSettlementPending,
+				CreatedBy:           operatorID,
+			}
+			if err := tx.Create(&settlement).Error; err != nil {
 				return err
 			}
 		}
@@ -2119,7 +2142,7 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	fromStatus := order.Status
 	bidding.SelectedQuoteID = req.QuoteID
 	bidding.Status = orderEntity.LogisticsBiddingStatusSelected
-	order.Status = orderEntity.OrderStatusShipping
+	order.Status = orderEntity.OrderStatusPendingLogisticsContract
 	order.UpdatedBy = operatorID
 
 	existingDelivery := order.DeliveryInfo
@@ -2162,53 +2185,258 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	}
 	order.DeliveryInfo = deliveryInfo
 
+	isFinancingOrder := order.FinanceID > 0
+
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&bidding).Error; err != nil {
 			return err
 		}
-		var task orderEntity.ShipmentTask
-		if order.Status == orderEntity.OrderStatusShipping {
-			task = orderEntity.ShipmentTask{
-				OrderID:               order.ID,
-				OrderNo:               order.OrderNo,
-				LogisticsEnterpriseID: quote.LogisticsEnterpriseID,
-				LogisticsQuoteID:      quote.ID,
-				Status:                orderEntity.ShipmentStatusPendingPickup,
-			}
-			if err := tx.Where("order_id = ?", order.ID).Assign(task).FirstOrCreate(&task).Error; err != nil {
-				return err
-			}
+		contract := orderEntity.LogisticsContract{
+			ContractNo:            generateLogisticsContractNo(),
+			OrderID:               order.ID,
+			OrderNo:               order.OrderNo,
+			BiddingID:             bidding.ID,
+			QuoteID:               quote.ID,
+			BuyerEnterpriseID:     order.BuyerID,
+			LogisticsEnterpriseID: quote.LogisticsEnterpriseID,
+			SellerEnterpriseID:    order.SellerID,
+			FreightAmount:         quote.Amount,
+			CommissionRate:        0.03,
+			PickupWarehouseID:     deliveryInfo.WarehouseServiceID,
+			PickupWarehouseName:   deliveryInfo.WarehouseName,
+			DestinationAddress:    deliveryInfo.Address,
+			IsFinancingOrder:      isFinancingOrder,
+			Status:                orderEntity.LogisticsContractPending,
+			CreatedBy:             operatorID,
+		}
+		if err := tx.Create(&contract).Error; err != nil {
+			return err
 		}
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		if err := ensureLogisticsOrderSyncTx(tx, order, &bidding, &quote, &task, operatorID); err != nil {
-			return err
-		}
-		if err := createOrderEvent(tx, ctx, order, "logistics_quote_confirmed", operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
-			"quote_id": req.QuoteID,
+		if err := createOrderEvent(tx, ctx, order, "logistics_contract_created", operatorID, enterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"quote_id":    req.QuoteID,
+			"contract_id": contract.ID,
+			"contract_no": contract.ContractNo,
 		}); err != nil {
 			return err
 		}
-		notifyBuyerContent := "订单「" + order.OrderNo + "」物流已确认接单，司机/车辆信息已同步至提货信息，请关注物流进度。"
+		notifyBuyerContent := "订单「" + order.OrderNo + "」物流已确认接单，请签署物流合同后开始运输。"
 		if err := createEnterpriseNotification(tx, ctx, order.BuyerID, operatorID, notificationEntity.NotificationTypeOrder,
-			"物流已确认接单",
+			"物流已确认，请签署物流合同",
 			notifyBuyerContent,
 			"/orders",
-			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "quote_id": quote.ID, "event": "logistics_quote_confirmed"},
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "contract_id": contract.ID, "event": "logistics_contract_created"},
 		); err != nil {
 			return err
 		}
-		return createEnterpriseNotification(tx, ctx, quote.LogisticsEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder,
-			"物流报价已确认",
-			"订单「"+order.OrderNo+"」已确认采用您的物流报价，请安排提货运输。",
+		return createEnterpriseNotification(tx, ctx, order.SellerID, operatorID, notificationEntity.NotificationTypeOrder,
+			"物流车队已确认",
+			"订单「"+order.OrderNo+"」物流方已确认接单，买方和物流方正在签署物流合同。",
 			"/orders",
-			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "quote_id": quote.ID, "event": "logistics_quote_confirmed"},
+			notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "contract_id": contract.ID, "event": "logistics_contract_created"},
 		)
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认物流资源失败")
 	}
 	return s.toOrderDetailInfo(ctx, order), nil
+}
+
+func (s *OrderService) GetLogisticsContract(ctx context.Context, orderID uint64) (*dto.LogisticsContractInfo, error) {
+	db := database.GetDB()
+	var contract orderEntity.LogisticsContract
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&contract).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流合同不存在")
+	}
+	return toLogisticsContractInfo(&contract), nil
+}
+
+func (s *OrderService) BuyerSignLogisticsContract(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.SignLogisticsContractRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.Status != orderEntity.OrderStatusPendingLogisticsContract {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署物流合同")
+	}
+	if order.BuyerID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有买方可以签署")
+	}
+
+	db := database.GetDB()
+	var contract orderEntity.LogisticsContract
+	if err := db.WithContext(ctx).Where("order_id = ?", order.ID).Order("id desc").First(&contract).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流合同不存在")
+	}
+	if contract.BuyerSignedAt != nil {
+		return nil, ecode.ErrBadRequest.WithMessage("买方已签署")
+	}
+
+	now := time.Now()
+	contract.BuyerSignedAt = &now
+	if req.ContractURL != "" {
+		contract.ContractURL = req.ContractURL
+	}
+	if contract.LogisticsSignedAt != nil {
+		contract.Status = orderEntity.LogisticsContractCompleted
+		contract.CompletedAt = &now
+	} else {
+		contract.Status = orderEntity.LogisticsContractBuyerSigned
+	}
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&contract).Error; err != nil {
+			return err
+		}
+		if err := createOrderEvent(tx, ctx, order, "logistics_contract_buyer_signed", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
+			"contract_id": contract.ID,
+			"contract_no": contract.ContractNo,
+		}); err != nil {
+			return err
+		}
+		if contract.Status == orderEntity.LogisticsContractCompleted {
+			return s.completeLogisticsContractTx(tx, ctx, order, &contract, operatorID)
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("签署物流合同失败")
+	}
+	return s.toOrderDetailInfo(ctx, order), nil
+}
+
+func (s *OrderService) LogisticsSignLogisticsContract(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.SignLogisticsContractRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.Status != orderEntity.OrderStatusPendingLogisticsContract {
+		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可签署物流合同")
+	}
+
+	db := database.GetDB()
+	var contract orderEntity.LogisticsContract
+	if err := db.WithContext(ctx).Where("order_id = ?", order.ID).Order("id desc").First(&contract).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流合同不存在")
+	}
+	if contract.LogisticsEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有物流方可以签署")
+	}
+	if contract.LogisticsSignedAt != nil {
+		return nil, ecode.ErrBadRequest.WithMessage("物流方已签署")
+	}
+
+	now := time.Now()
+	contract.LogisticsSignedAt = &now
+	if req.ContractURL != "" {
+		contract.ContractURL = req.ContractURL
+	}
+	if contract.BuyerSignedAt != nil {
+		contract.Status = orderEntity.LogisticsContractCompleted
+		contract.CompletedAt = &now
+	} else {
+		contract.Status = orderEntity.LogisticsContractLogisticsSigned
+	}
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&contract).Error; err != nil {
+			return err
+		}
+		if err := createOrderEvent(tx, ctx, order, "logistics_contract_logistics_signed", operatorID, enterpriseID, "logistics", order.Status, order.Status, orderEntity.OrderEventPayload{
+			"contract_id": contract.ID,
+			"contract_no": contract.ContractNo,
+		}); err != nil {
+			return err
+		}
+		if contract.Status == orderEntity.LogisticsContractCompleted {
+			return s.completeLogisticsContractTx(tx, ctx, order, &contract, operatorID)
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("签署物流合同失败")
+	}
+	return s.toOrderDetailInfo(ctx, order), nil
+}
+
+func (s *OrderService) completeLogisticsContractTx(tx *gorm.DB, ctx context.Context, order *orderEntity.Order, contract *orderEntity.LogisticsContract, operatorID uint64) error {
+	fromStatus := order.Status
+	order.Status = orderEntity.OrderStatusShipping
+	order.UpdatedBy = operatorID
+
+	task := orderEntity.ShipmentTask{
+		OrderID:               order.ID,
+		OrderNo:               order.OrderNo,
+		LogisticsEnterpriseID: contract.LogisticsEnterpriseID,
+		LogisticsQuoteID:      contract.QuoteID,
+		Status:                orderEntity.ShipmentStatusPendingPickup,
+	}
+	if err := tx.Where("order_id = ?", order.ID).Assign(task).FirstOrCreate(&task).Error; err != nil {
+		return err
+	}
+	if err := tx.Save(order).Error; err != nil {
+		return err
+	}
+
+	var bidding orderEntity.LogisticsBidding
+	tx.Where("id = ?", contract.BiddingID).First(&bidding)
+	var quote orderEntity.LogisticsBidQuote
+	tx.Where("id = ?", contract.QuoteID).First(&quote)
+	if err := ensureLogisticsOrderSyncTx(tx, order, &bidding, &quote, &task, operatorID); err != nil {
+		return err
+	}
+
+	if err := createOrderEvent(tx, ctx, order, "logistics_contract_completed", operatorID, contract.LogisticsEnterpriseID, "logistics", fromStatus, order.Status, orderEntity.OrderEventPayload{
+		"contract_id": contract.ID,
+		"contract_no": contract.ContractNo,
+	}); err != nil {
+		return err
+	}
+
+	if err := createEnterpriseNotification(tx, ctx, contract.LogisticsEnterpriseID, operatorID, notificationEntity.NotificationTypeOrder,
+		"物流合同已签署完成",
+		"订单「"+order.OrderNo+"」物流合同双方已签署完成，请安排提货运输。提货仓库："+contract.PickupWarehouseName,
+		"/orders",
+		notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "contract_id": contract.ID},
+	); err != nil {
+		return err
+	}
+	return createEnterpriseNotification(tx, ctx, order.SellerID, operatorID, notificationEntity.NotificationTypeOrder,
+		"物流合同签署完成，运输即将开始",
+		"订单「"+order.OrderNo+"」物流合同已签署完成，物流方即将安排提货。",
+		"/orders",
+		notificationEntity.NotificationMetadata{"order_id": order.ID, "order_no": order.OrderNo, "contract_id": contract.ID},
+	)
+}
+
+func toLogisticsContractInfo(c *orderEntity.LogisticsContract) *dto.LogisticsContractInfo {
+	return &dto.LogisticsContractInfo{
+		ID:                    c.ID,
+		ContractNo:            c.ContractNo,
+		OrderID:               c.OrderID,
+		BiddingID:             c.BiddingID,
+		QuoteID:               c.QuoteID,
+		BuyerEnterpriseID:     c.BuyerEnterpriseID,
+		LogisticsEnterpriseID: c.LogisticsEnterpriseID,
+		SellerEnterpriseID:    c.SellerEnterpriseID,
+		ContractURL:           c.ContractURL,
+		FreightAmount:         c.FreightAmount,
+		CommissionRate:        c.CommissionRate,
+		PickupWarehouseID:     c.PickupWarehouseID,
+		PickupWarehouseName:   c.PickupWarehouseName,
+		DestinationAddress:    c.DestinationAddress,
+		IsFinancingOrder:      c.IsFinancingOrder,
+		Status:                string(c.Status),
+		BuyerSignedAt:         c.BuyerSignedAt,
+		LogisticsSignedAt:     c.LogisticsSignedAt,
+		CompletedAt:           c.CompletedAt,
+		CreatedAt:             c.CreatedAt,
+	}
 }
 
 func (s *OrderService) CloseLogisticsBidding(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
@@ -2422,6 +2650,81 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 		return nil, ecode.ErrDatabase.WithMessage("回传运输进度失败")
 	}
 	return s.toOrderDetailInfo(ctx, order), nil
+}
+
+func (s *OrderService) GetLogisticsSettlement(ctx context.Context, orderID uint64) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func (s *OrderService) PayLogisticsSettlement(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.PayLogisticsSettlementRequest) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	if settlement.PayerEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有付款方可以支付")
+	}
+	if settlement.Status != orderEntity.LogisticsSettlementPending {
+		return nil, ecode.ErrBadRequest.WithMessage("结算单状态不可支付")
+	}
+
+	now := time.Now()
+	settlement.PaymentVoucherURL = req.VoucherURL
+	settlement.PaidAt = &now
+	settlement.Status = orderEntity.LogisticsSettlementPaid
+	if err := db.WithContext(ctx).Save(&settlement).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("支付失败")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func (s *OrderService) PayLogisticsCommission(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.PayLogisticsSettlementRequest) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	if settlement.PayerEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有付款方可以支付抽佣")
+	}
+	if settlement.Status != orderEntity.LogisticsSettlementPaid {
+		return nil, ecode.ErrBadRequest.WithMessage("请先支付物流费用")
+	}
+
+	now := time.Now()
+	settlement.CommissionVoucherURL = req.VoucherURL
+	settlement.CommissionPaidAt = &now
+	settlement.Status = orderEntity.LogisticsSettlementCommitted
+	if err := db.WithContext(ctx).Save(&settlement).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("支付抽佣失败")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func toLogisticsSettlementInfo(s *orderEntity.LogisticsSettlement) *dto.LogisticsSettlementInfo {
+	return &dto.LogisticsSettlementInfo{
+		ID:                   s.ID,
+		SettlementNo:         s.SettlementNo,
+		LogisticsContractID:  s.LogisticsContractID,
+		OrderID:              s.OrderID,
+		PayerEnterpriseID:    s.PayerEnterpriseID,
+		PayeeEnterpriseID:    s.PayeeEnterpriseID,
+		FreightAmount:        s.FreightAmount,
+		PlatformCommission:   s.PlatformCommission,
+		NetPayable:           s.NetPayable,
+		PaymentVoucherURL:    s.PaymentVoucherURL,
+		CommissionVoucherURL: s.CommissionVoucherURL,
+		Status:               string(s.Status),
+		PaidAt:               s.PaidAt,
+		CommissionPaidAt:     s.CommissionPaidAt,
+		CreatedAt:            s.CreatedAt,
+	}
 }
 
 func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
@@ -2644,6 +2947,16 @@ func (s *OrderService) toOrderDetailInfo(ctx context.Context, order *orderEntity
 		info.ShipmentTask = toShipmentTaskInfo(&shipment)
 	}
 
+	var logisticsContract orderEntity.LogisticsContract
+	if err := db.Where("order_id = ?", order.ID).Order("id desc").First(&logisticsContract).Error; err == nil {
+		info.LogisticsContractDTO = toLogisticsContractInfo(&logisticsContract)
+	}
+
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.Where("order_id = ?", order.ID).Order("id desc").First(&settlement).Error; err == nil {
+		info.LogisticsSettlement = toLogisticsSettlementInfo(&settlement)
+	}
+
 	events, err := s.ListEvents(ctx, order.ID, 0, true)
 	if err == nil {
 		info.Events = events
@@ -2803,19 +3116,12 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 			Status:      "current",
 			Description: "当前待支付，请上传支付凭证或申请托盘融资。",
 		})
-	} else if status == orderEntity.OrderStatusFinancingReview {
+	} else if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract {
 		items = append(items, dto.TimelineItem{
 			Key:         "payment",
-			Label:       "托盘融资审批中",
-			Status:      "current",
-			Description: "资金方正在进行风控审批，请耐心等待。",
-		})
-	} else if status == orderEntity.OrderStatusPendingFinancingContract {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment",
-			Label:       "待签署融资合同",
-			Status:      "current",
-			Description: "请签署债务合同并支付手续费。",
+			Label:       "已申请融资",
+			Status:      "completed",
+			Description: "买方已选择托盘融资方式。",
 		})
 	} else {
 		paymentDesc := "已完成支付。"
@@ -2830,19 +3136,64 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 		if status == orderEntity.OrderStatusFinancingReview {
 			items = append(items, dto.TimelineItem{
 				Key:         "financing_review",
-				Label:       "融资审批",
+				Label:       "风控审批中",
 				Status:      "current",
-				Description: "资金方风控审批中。",
+				Description: "资金方正在进行风控审批，请耐心等待。",
 			})
 		} else if status == orderEntity.OrderStatusPendingFinancingContract {
 			items = append(items, dto.TimelineItem{
-				Key:         "financing_contract",
-				Label:       "签署融资合同",
-				Status:      "current",
-				Description: "买方需签署债务合同并支付手续费。",
+				Key:         "financing_review",
+				Label:       "风控审批通过",
+				Status:      "completed",
+				Description: "资金方风控审批已通过。",
 			})
-		} else {
-			addItem("financing", "托盘融资", "融资已放款。", financingReached, "financing_disbursed")
+			items = append(items, dto.TimelineItem{
+				Key:         "financing_contract",
+				Label:       "签署融资合同并支付手续费",
+				Status:      "current",
+				Description: "请签署债务合同并上传手续费支付凭证。",
+			})
+		} else if financingReached && order.FinanceID > 0 {
+			hasEvent := func(eventType string) bool {
+				for _, e := range events {
+					if e.EventType == eventType {
+						return true
+					}
+				}
+				return false
+			}
+
+			riskApproved := hasEvent("financing_risk_approved")
+			contractGenerated := hasEvent("financing_debt_contract_generated")
+			feePaid := hasEvent("financing_buyer_signed_fee_paid")
+			disbursed := hasEvent("financing_disbursed")
+			pledged := hasEvent("pledge_recorded")
+
+			if riskApproved {
+				items = append(items, dto.TimelineItem{Key: "financing_review", Label: "风控审批通过", Status: "completed", Description: "资金方风控审批已通过。"})
+			}
+			if contractGenerated {
+				items = append(items, dto.TimelineItem{Key: "financing_contract", Label: "融资合同已生成", Status: "completed", Description: "资金方已生成债务合同。"})
+			} else if riskApproved {
+				items = append(items, dto.TimelineItem{Key: "financing_contract", Label: "待资金方生成合同", Status: "current", Description: "等待资金方生成债务合同。"})
+			}
+			if feePaid {
+				items = append(items, dto.TimelineItem{Key: "financing_fee_paid", Label: "合同已签署·手续费已付", Status: "completed", Description: "买方已签署债务合同并支付手续费。"})
+			} else if contractGenerated {
+				items = append(items, dto.TimelineItem{Key: "financing_fee_paid", Label: "待买方签署并支付手续费", Status: "current", Description: "请买方签署债务合同并上传手续费支付凭证。"})
+			}
+			if disbursed {
+				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "资金方已放款", Status: "completed", Description: "资金方已完成放款。"})
+			} else if feePaid {
+				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "待资金方放款", Status: "current", Description: "等待资金方确认放款。"})
+			}
+			if pledged {
+				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "货权质押已记录", Status: "completed", Description: "资金方已记录货权质押，可进入物流履约。"})
+			} else if disbursed {
+				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "待记录货权质押", Status: "current", Description: "资金方需记录货权质押后，卖方才能发起物流。"})
+			}
+		} else if financingReached {
+			addItem("financing", "托盘融资", "融资已完成。", financingReached, "financing_disbursed")
 		}
 	}
 
@@ -3082,6 +3433,14 @@ func isOrderExpired(order *orderEntity.Order) bool {
 
 func generatePickupCode() string {
 	return fmt.Sprintf("PK%s", time.Now().Format("0102150405"))
+}
+
+func generateLogisticsContractNo() string {
+	return fmt.Sprintf("LC%s%04d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%10000)
+}
+
+func generateSettlementNo() string {
+	return fmt.Sprintf("LS%s%04d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%10000)
 }
 
 func (s *OrderService) ensureContract(ctx context.Context, order *orderEntity.Order) error {

@@ -10,6 +10,7 @@ func AutoMigrate() error {
 		&entity.WarehouseInventoryMovement{},
 		&entity.LogisticsOrder{},
 		&entity.LogisticsTrackingEvent{},
+		&entity.FulfillmentDocument{},
 		&entity.FulfillmentGuarantee{},
 	)
 }

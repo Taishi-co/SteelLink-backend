@@ -747,3 +747,194 @@ func randomDigits(length int) string {
 	}
 	return string(result)
 }
+
+func (h *Handler) UploadFulfillmentDocument(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	logisticsOrderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的物流委托ID")
+		return
+	}
+	var req dto.UploadFulfillmentDocRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var logisticsOrder entity.LogisticsOrder
+	if err := h.db.WithContext(c.Request.Context()).First(&logisticsOrder, logisticsOrderID).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("物流委托单不存在"))
+		return
+	}
+
+	role := ""
+	if claims.EnterpriseID == logisticsOrder.CarrierEnterpriseID {
+		role = "logistics"
+	} else if claims.EnterpriseID == logisticsOrder.BuyerEnterpriseID {
+		role = "buyer"
+	} else {
+		role = "warehouse"
+	}
+
+	doc := entity.FulfillmentDocument{
+		LogisticsOrderID: logisticsOrderID,
+		OrderID:          logisticsOrder.OrderID,
+		DocType:          entity.FulfillmentDocType(req.DocType),
+		FileURL:          req.FileURL,
+		FileHash:         req.FileHash,
+		Remark:           req.Remark,
+		GPSLatitude:      req.GPSLatitude,
+		GPSLongitude:     req.GPSLongitude,
+		CapturedAt:       req.CapturedAt,
+		UploadedBy:       claims.UserID,
+		EnterpriseID:     claims.EnterpriseID,
+		UploadedRole:     role,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&doc).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("上传单据失败"))
+		return
+	}
+	response.Success(c, gin.H{"id": doc.ID, "doc_type": doc.DocType, "file_url": doc.FileURL})
+}
+
+func (h *Handler) ListFulfillmentDocuments(c *gin.Context) {
+	logisticsOrderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的物流委托ID")
+		return
+	}
+	var docs []entity.FulfillmentDocument
+	if err := h.db.WithContext(c.Request.Context()).Where("logistics_order_id = ?", logisticsOrderID).Order("created_at ASC").Find(&docs).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询单据失败"))
+		return
+	}
+	result := make([]dto.FulfillmentDocumentInfo, 0, len(docs))
+	for _, d := range docs {
+		result = append(result, dto.FulfillmentDocumentInfo{
+			ID:               d.ID,
+			LogisticsOrderID: d.LogisticsOrderID,
+			OrderID:          d.OrderID,
+			DocType:          string(d.DocType),
+			FileURL:          d.FileURL,
+			Remark:           d.Remark,
+			GPSLatitude:      d.GPSLatitude,
+			GPSLongitude:     d.GPSLongitude,
+			CapturedAt:       d.CapturedAt,
+			UploadedBy:       d.UploadedBy,
+			EnterpriseID:     d.EnterpriseID,
+			UploadedRole:     d.UploadedRole,
+			CreatedAt:        d.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	response.Success(c, gin.H{"list": result})
+}
+
+func (h *Handler) SealConfirm(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	logisticsOrderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的物流委托ID")
+		return
+	}
+	var req dto.SealConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var logisticsOrder entity.LogisticsOrder
+	if err := h.db.WithContext(c.Request.Context()).First(&logisticsOrder, logisticsOrderID).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("物流委托单不存在"))
+		return
+	}
+
+	doc := entity.FulfillmentDocument{
+		LogisticsOrderID: logisticsOrderID,
+		OrderID:          logisticsOrder.OrderID,
+		DocType:          entity.DocTypeSealPhoto,
+		FileURL:          req.FileURL,
+		Remark:           req.Remark,
+		UploadedBy:       claims.UserID,
+		EnterpriseID:     claims.EnterpriseID,
+		UploadedRole:     "warehouse",
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&doc).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("铅封确认失败"))
+		return
+	}
+
+	h.db.WithContext(c.Request.Context()).Create(&entity.LogisticsTrackingEvent{
+		LogisticsOrderID: logisticsOrderID,
+		EventType:        "seal_confirmed",
+		Description:      "仓库已确认铅封",
+		OccurredAt:       time.Now(),
+		CreatedBy:        claims.UserID,
+	})
+
+	response.Success(c, gin.H{"message": "铅封确认成功", "document_id": doc.ID})
+}
+
+func (h *Handler) SubmitInspection(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	logisticsOrderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的物流委托ID")
+		return
+	}
+	var req dto.InspectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var logisticsOrder entity.LogisticsOrder
+	if err := h.db.WithContext(c.Request.Context()).First(&logisticsOrder, logisticsOrderID).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("物流委托单不存在"))
+		return
+	}
+
+	role := "buyer"
+	if claims.EnterpriseID != logisticsOrder.BuyerEnterpriseID {
+		role = "warehouse"
+	}
+
+	if req.FileURL != "" {
+		doc := entity.FulfillmentDocument{
+			LogisticsOrderID: logisticsOrderID,
+			OrderID:          logisticsOrder.OrderID,
+			DocType:          entity.DocTypeInspectionResult,
+			FileURL:          req.FileURL,
+			Remark:           req.Remark,
+			UploadedBy:       claims.UserID,
+			EnterpriseID:     claims.EnterpriseID,
+			UploadedRole:     role,
+		}
+		h.db.WithContext(c.Request.Context()).Create(&doc)
+	}
+
+	sealStatus := "异常"
+	if req.SealOK {
+		sealStatus = "完好"
+	}
+	h.db.WithContext(c.Request.Context()).Create(&entity.LogisticsTrackingEvent{
+		LogisticsOrderID: logisticsOrderID,
+		EventType:        "inspection_completed",
+		Description:      fmt.Sprintf("验货结果：%s，铅封：%s", req.Result, sealStatus),
+		OccurredAt:       time.Now(),
+		CreatedBy:        claims.UserID,
+	})
+
+	response.Success(c, gin.H{"message": "验货结果已提交", "result": req.Result, "seal_ok": req.SealOK})
+}
