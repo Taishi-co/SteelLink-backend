@@ -36,6 +36,10 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		logistics.POST("/orders/:id/accept", middleware.RequireEnterpriseService("logistics"), h.AcceptLogisticsOrder)
 		logistics.PUT("/orders/:id/status", middleware.RequireEnterpriseService("logistics"), h.UpdateLogisticsOrderStatus)
 		logistics.POST("/orders/:id/tracking-events", middleware.RequireEnterpriseService("logistics"), h.AddTrackingEvent)
+		logistics.POST("/orders/:id/documents", middleware.RequireEnterpriseService("logistics", "warehouse", "procurement"), h.UploadFulfillmentDocument)
+		logistics.GET("/orders/:id/documents", middleware.RequireEnterpriseService("procurement", "sales", "warehouse", "logistics"), h.ListFulfillmentDocuments)
+		logistics.POST("/orders/:id/seal-confirm", middleware.RequireEnterpriseService("warehouse"), h.SealConfirm)
+		logistics.POST("/orders/:id/inspection", middleware.RequireEnterpriseService("procurement", "warehouse"), h.SubmitInspection)
 	}
 
 	orders := r.Group("/orders")

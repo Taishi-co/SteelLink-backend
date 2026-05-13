@@ -1922,6 +1922,26 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 				return err
 			}
 		}
+		var logisticsContract orderEntity.LogisticsContract
+		if err := tx.Where("order_id = ? AND status = ?", order.ID, orderEntity.LogisticsContractCompleted).Order("id desc").First(&logisticsContract).Error; err == nil {
+			commission := logisticsContract.FreightAmount * logisticsContract.CommissionRate
+			settlement := orderEntity.LogisticsSettlement{
+				SettlementNo:        generateSettlementNo(),
+				LogisticsContractID: logisticsContract.ID,
+				OrderID:             order.ID,
+				OrderNo:             order.OrderNo,
+				PayerEnterpriseID:   order.BuyerID,
+				PayeeEnterpriseID:   logisticsContract.LogisticsEnterpriseID,
+				FreightAmount:       logisticsContract.FreightAmount,
+				PlatformCommission:  commission,
+				NetPayable:          logisticsContract.FreightAmount - commission,
+				Status:              orderEntity.LogisticsSettlementPending,
+				CreatedBy:           operatorID,
+			}
+			if err := tx.Create(&settlement).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("确认收货失败")
@@ -2627,6 +2647,81 @@ func (s *OrderService) UpdateShipmentProgress(ctx context.Context, id, enterpris
 		return nil, ecode.ErrDatabase.WithMessage("回传运输进度失败")
 	}
 	return s.toOrderDetailInfo(ctx, order), nil
+}
+
+func (s *OrderService) GetLogisticsSettlement(ctx context.Context, orderID uint64) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func (s *OrderService) PayLogisticsSettlement(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.PayLogisticsSettlementRequest) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	if settlement.PayerEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有付款方可以支付")
+	}
+	if settlement.Status != orderEntity.LogisticsSettlementPending {
+		return nil, ecode.ErrBadRequest.WithMessage("结算单状态不可支付")
+	}
+
+	now := time.Now()
+	settlement.PaymentVoucherURL = req.VoucherURL
+	settlement.PaidAt = &now
+	settlement.Status = orderEntity.LogisticsSettlementPaid
+	if err := db.WithContext(ctx).Save(&settlement).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("支付失败")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func (s *OrderService) PayLogisticsCommission(ctx context.Context, orderID, enterpriseID, operatorID uint64, req *dto.PayLogisticsSettlementRequest) (*dto.LogisticsSettlementInfo, error) {
+	db := database.GetDB()
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.WithContext(ctx).Where("order_id = ?", orderID).Order("id desc").First(&settlement).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("物流结算单不存在")
+	}
+	if settlement.PayerEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("只有付款方可以支付抽佣")
+	}
+	if settlement.Status != orderEntity.LogisticsSettlementPaid {
+		return nil, ecode.ErrBadRequest.WithMessage("请先支付物流费用")
+	}
+
+	now := time.Now()
+	settlement.CommissionVoucherURL = req.VoucherURL
+	settlement.CommissionPaidAt = &now
+	settlement.Status = orderEntity.LogisticsSettlementCommitted
+	if err := db.WithContext(ctx).Save(&settlement).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("支付抽佣失败")
+	}
+	return toLogisticsSettlementInfo(&settlement), nil
+}
+
+func toLogisticsSettlementInfo(s *orderEntity.LogisticsSettlement) *dto.LogisticsSettlementInfo {
+	return &dto.LogisticsSettlementInfo{
+		ID:                   s.ID,
+		SettlementNo:         s.SettlementNo,
+		LogisticsContractID:  s.LogisticsContractID,
+		OrderID:              s.OrderID,
+		PayerEnterpriseID:    s.PayerEnterpriseID,
+		PayeeEnterpriseID:    s.PayeeEnterpriseID,
+		FreightAmount:        s.FreightAmount,
+		PlatformCommission:   s.PlatformCommission,
+		NetPayable:           s.NetPayable,
+		PaymentVoucherURL:    s.PaymentVoucherURL,
+		CommissionVoucherURL: s.CommissionVoucherURL,
+		Status:               string(s.Status),
+		PaidAt:               s.PaidAt,
+		CommissionPaidAt:     s.CommissionPaidAt,
+		CreatedAt:            s.CreatedAt,
+	}
 }
 
 func (s *OrderService) Reconcile(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {

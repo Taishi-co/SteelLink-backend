@@ -204,3 +204,41 @@ type FulfillmentSummary struct {
 	Logistics      []LogisticsOrderInfo    `json:"logistics_orders"`
 	Guarantees     []GuaranteeInfo         `json:"guarantees"`
 }
+
+type UploadFulfillmentDocRequest struct {
+	DocType      string   `json:"doc_type" binding:"required"`
+	FileURL      string   `json:"file_url" binding:"required"`
+	FileHash     string   `json:"file_hash"`
+	Remark       string   `json:"remark"`
+	GPSLatitude  *float64 `json:"gps_latitude"`
+	GPSLongitude *float64 `json:"gps_longitude"`
+	CapturedAt   string   `json:"captured_at"`
+}
+
+type SealConfirmRequest struct {
+	FileURL string `json:"file_url" binding:"required"`
+	Remark  string `json:"remark"`
+}
+
+type InspectionRequest struct {
+	Result   string `json:"result" binding:"required"`
+	FileURL  string `json:"file_url"`
+	SealOK   bool   `json:"seal_ok"`
+	Remark   string `json:"remark"`
+}
+
+type FulfillmentDocumentInfo struct {
+	ID               uint64   `json:"id"`
+	LogisticsOrderID uint64   `json:"logistics_order_id"`
+	OrderID          uint64   `json:"order_id"`
+	DocType          string   `json:"doc_type"`
+	FileURL          string   `json:"file_url"`
+	Remark           string   `json:"remark"`
+	GPSLatitude      *float64 `json:"gps_latitude,omitempty"`
+	GPSLongitude     *float64 `json:"gps_longitude,omitempty"`
+	CapturedAt       string   `json:"captured_at,omitempty"`
+	UploadedBy       uint64   `json:"uploaded_by"`
+	EnterpriseID     uint64   `json:"enterprise_id"`
+	UploadedRole     string   `json:"uploaded_role"`
+	CreatedAt        string   `json:"created_at"`
+}
