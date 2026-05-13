@@ -677,10 +677,10 @@ func (s *OrderService) WarehouseConfirm(ctx context.Context, id, warehouseEnterp
 	if err := checkOrderFrozenOrException(order); err != nil {
 		return nil, err
 	}
-	if order.DeliveryInfo == nil || order.DeliveryInfo.WarehouseEnterpriseID == 0 {
-		return nil, ecode.ErrBadRequest.WithMessage("订单未绑定仓储方，无法仓库确认")
+	if order.DeliveryInfo == nil || order.DeliveryInfo.DestWarehouseEnterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("订单未绑定目的地仓储方，无法仓库确认")
 	}
-	if order.DeliveryInfo.WarehouseEnterpriseID != warehouseEnterpriseID {
+	if order.DeliveryInfo.DestWarehouseEnterpriseID != warehouseEnterpriseID {
 		return nil, ecode.ErrForbidden.WithMessage("无权确认该订单仓库条件")
 	}
 	if order.Status != orderEntity.OrderStatusPendingWarehouseConfirm {
@@ -1094,7 +1094,7 @@ func (s *OrderService) ListByWarehouse(ctx context.Context, warehouseEnterpriseI
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看仓储订单")
 	}
 	query := database.GetDB().WithContext(ctx).
-		Where("JSON_EXTRACT(delivery_info, '$.warehouse_enterprise_id') = ?", warehouseEnterpriseID)
+		Where("JSON_EXTRACT(delivery_info, '$.warehouse_enterprise_id') = ? OR JSON_EXTRACT(delivery_info, '$.dest_warehouse_enterprise_id') = ?", warehouseEnterpriseID, warehouseEnterpriseID)
 	if status != nil {
 		query = query.Where("status = ?", *status)
 	}
@@ -3116,19 +3116,12 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 			Status:      "current",
 			Description: "当前待支付，请上传支付凭证或申请托盘融资。",
 		})
-	} else if status == orderEntity.OrderStatusFinancingReview {
+	} else if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract {
 		items = append(items, dto.TimelineItem{
 			Key:         "payment",
-			Label:       "托盘融资审批中",
-			Status:      "current",
-			Description: "资金方正在进行风控审批，请耐心等待。",
-		})
-	} else if status == orderEntity.OrderStatusPendingFinancingContract {
-		items = append(items, dto.TimelineItem{
-			Key:         "payment",
-			Label:       "待签署融资合同",
-			Status:      "current",
-			Description: "请签署债务合同并支付手续费。",
+			Label:       "已申请融资",
+			Status:      "completed",
+			Description: "买方已选择托盘融资方式。",
 		})
 	} else {
 		paymentDesc := "已完成支付。"
@@ -3143,19 +3136,64 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 		if status == orderEntity.OrderStatusFinancingReview {
 			items = append(items, dto.TimelineItem{
 				Key:         "financing_review",
-				Label:       "融资审批",
+				Label:       "风控审批中",
 				Status:      "current",
-				Description: "资金方风控审批中。",
+				Description: "资金方正在进行风控审批，请耐心等待。",
 			})
 		} else if status == orderEntity.OrderStatusPendingFinancingContract {
 			items = append(items, dto.TimelineItem{
-				Key:         "financing_contract",
-				Label:       "签署融资合同",
-				Status:      "current",
-				Description: "买方需签署债务合同并支付手续费。",
+				Key:         "financing_review",
+				Label:       "风控审批通过",
+				Status:      "completed",
+				Description: "资金方风控审批已通过。",
 			})
-		} else {
-			addItem("financing", "托盘融资", "融资已放款。", financingReached, "financing_disbursed")
+			items = append(items, dto.TimelineItem{
+				Key:         "financing_contract",
+				Label:       "签署融资合同并支付手续费",
+				Status:      "current",
+				Description: "请签署债务合同并上传手续费支付凭证。",
+			})
+		} else if financingReached && order.FinanceID > 0 {
+			hasEvent := func(eventType string) bool {
+				for _, e := range events {
+					if e.EventType == eventType {
+						return true
+					}
+				}
+				return false
+			}
+
+			riskApproved := hasEvent("financing_risk_approved")
+			contractGenerated := hasEvent("financing_debt_contract_generated")
+			feePaid := hasEvent("financing_buyer_signed_fee_paid")
+			disbursed := hasEvent("financing_disbursed")
+			pledged := hasEvent("pledge_recorded")
+
+			if riskApproved {
+				items = append(items, dto.TimelineItem{Key: "financing_review", Label: "风控审批通过", Status: "completed", Description: "资金方风控审批已通过。"})
+			}
+			if contractGenerated {
+				items = append(items, dto.TimelineItem{Key: "financing_contract", Label: "融资合同已生成", Status: "completed", Description: "资金方已生成债务合同。"})
+			} else if riskApproved {
+				items = append(items, dto.TimelineItem{Key: "financing_contract", Label: "待资金方生成合同", Status: "current", Description: "等待资金方生成债务合同。"})
+			}
+			if feePaid {
+				items = append(items, dto.TimelineItem{Key: "financing_fee_paid", Label: "合同已签署·手续费已付", Status: "completed", Description: "买方已签署债务合同并支付手续费。"})
+			} else if contractGenerated {
+				items = append(items, dto.TimelineItem{Key: "financing_fee_paid", Label: "待买方签署并支付手续费", Status: "current", Description: "请买方签署债务合同并上传手续费支付凭证。"})
+			}
+			if disbursed {
+				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "资金方已放款", Status: "completed", Description: "资金方已完成放款。"})
+			} else if feePaid {
+				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "待资金方放款", Status: "current", Description: "等待资金方确认放款。"})
+			}
+			if pledged {
+				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "货权质押已记录", Status: "completed", Description: "资金方已记录货权质押，可进入物流履约。"})
+			} else if disbursed {
+				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "待记录货权质押", Status: "current", Description: "资金方需记录货权质押后，卖方才能发起物流。"})
+			}
+		} else if financingReached {
+			addItem("financing", "托盘融资", "融资已完成。", financingReached, "financing_disbursed")
 		}
 	}
 
