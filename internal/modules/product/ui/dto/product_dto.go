@@ -40,6 +40,8 @@ type CreateProductRequest struct {
 	MinOrderQty        float64       `json:"min_order_qty" binding:"required,gt=0"`
 	Images             []string      `json:"images" binding:"required,min=1"`
 	QualityCert        string        `json:"quality_cert"`
+	TitleVoucherURL    string        `json:"title_voucher_url"`
+	TitleVoucherRemark string        `json:"title_voucher_remark"`
 	Description        string        `json:"description"`
 	DeliveryDays       int           `json:"delivery_days"`
 	QuoteValidity      int           `json:"quote_validity"`
@@ -57,6 +59,8 @@ type UpdateProductRequest struct {
 	Quantity           float64        `json:"quantity"`
 	UnitPrice          float64        `json:"unit_price"`
 	MinOrderQty        float64        `json:"min_order_qty"`
+	TitleVoucherURL    string         `json:"title_voucher_url"`
+	TitleVoucherRemark string         `json:"title_voucher_remark"`
 	Description        string         `json:"description"`
 	DeliveryDays       int            `json:"delivery_days"`
 	QuoteValidity      int            `json:"quote_validity"`
@@ -96,6 +100,8 @@ type ProductInfo struct {
 	AuditRemark           string        `json:"audit_remark"`
 	ApprovedAt            *time.Time    `json:"approved_at,omitempty"`
 	QualityCert           string        `json:"quality_cert"`
+	TitleVoucherURL       string        `json:"title_voucher_url"`
+	TitleVoucherRemark    string        `json:"title_voucher_remark"`
 	Images                []string      `json:"images"`
 	Description           string        `json:"description"`
 	DeliveryDays          int           `json:"delivery_days"`

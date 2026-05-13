@@ -3,21 +3,21 @@ package dto
 import "time"
 
 type CreateOrderRequest struct {
-	ProductID           uint64                   `json:"product_id"`
-	Quantity            float64                  `json:"quantity"`
-	Items               []CreateOrderItemRequest `json:"items"`
-	CartItemIDs         []uint64                 `json:"cart_item_ids"`
-	Source              string                   `json:"source"`
-	RestoreCartOnCancel bool                     `json:"restore_cart_on_cancel"`
-	ContactName         string                   `json:"contact_name"`
-	ContactPhone        string                   `json:"contact_phone"`
-	WarehouseName       string                   `json:"warehouse_name"`
-	DestWarehouseServiceID uint64                 `json:"dest_warehouse_service_id"`
-	DeliveryAddress     string                   `json:"delivery_address"`
-	DeliveryMethod      string                   `json:"delivery_method"`
-	PaymentMethod       string                   `json:"payment_method"`
-	DeliveryNote        string                   `json:"delivery_note"`
-	Remark              string                   `json:"remark"`
+	ProductID              uint64                   `json:"product_id"`
+	Quantity               float64                  `json:"quantity"`
+	Items                  []CreateOrderItemRequest `json:"items"`
+	CartItemIDs            []uint64                 `json:"cart_item_ids"`
+	Source                 string                   `json:"source"`
+	RestoreCartOnCancel    bool                     `json:"restore_cart_on_cancel"`
+	ContactName            string                   `json:"contact_name"`
+	ContactPhone           string                   `json:"contact_phone"`
+	WarehouseName          string                   `json:"warehouse_name"`
+	DestWarehouseServiceID uint64                   `json:"dest_warehouse_service_id"`
+	DeliveryAddress        string                   `json:"delivery_address"`
+	DeliveryMethod         string                   `json:"delivery_method"`
+	PaymentMethod          string                   `json:"payment_method"`
+	DeliveryNote           string                   `json:"delivery_note"`
+	Remark                 string                   `json:"remark"`
 }
 
 type CreateOrderItemRequest struct {
@@ -103,15 +103,13 @@ type BuyerConfirmRequest struct {
 }
 
 type DirectPaymentRequest struct {
-	VoucherURL      string   `json:"voucher_url"`
-	TransactionNo   string   `json:"transaction_no"`
-	PayerAccount    string   `json:"payer_account"`
-	PayeeAccount    string   `json:"payee_account"`
-	TitleVoucherURL string   `json:"title_voucher_url"`
-	TitleRemark     string   `json:"title_remark"`
-	CapturedAt      string   `json:"captured_at"`
-	GPSLatitude     *float64 `json:"gps_latitude"`
-	GPSLongitude    *float64 `json:"gps_longitude"`
+	VoucherURL    string   `json:"voucher_url"`
+	TransactionNo string   `json:"transaction_no"`
+	PayerAccount  string   `json:"payer_account"`
+	PayeeAccount  string   `json:"payee_account"`
+	CapturedAt    string   `json:"captured_at"`
+	GPSLatitude   *float64 `json:"gps_latitude"`
+	GPSLongitude  *float64 `json:"gps_longitude"`
 }
 
 type CreateFinancingRequest struct {
@@ -482,4 +480,85 @@ type PledgeEventInfo struct {
 	ActorUserID        uint64    `json:"actor_user_id"`
 	ActorEnterpriseID  uint64    `json:"actor_enterprise_id"`
 	CreatedAt          time.Time `json:"created_at"`
+}
+
+type ReportBreachRequest struct {
+	BreachParty  string   `json:"breach_party" binding:"required,oneof=buyer seller"`
+	BreachType   string   `json:"breach_type" binding:"required"`
+	Description  string   `json:"description" binding:"required"`
+	EvidenceURLs []string `json:"evidence_urls"`
+}
+
+type BreachRecordInfo struct {
+	ID                   uint64     `json:"id"`
+	OrderID              uint64     `json:"order_id"`
+	OrderNo              string     `json:"order_no"`
+	ReporterEnterpriseID uint64     `json:"reporter_enterprise_id"`
+	BreachParty          string     `json:"breach_party"`
+	BreachEnterpriseID   uint64     `json:"breach_enterprise_id"`
+	BreachType           string     `json:"breach_type"`
+	Description          string     `json:"description"`
+	EvidenceURLs         []string   `json:"evidence_urls"`
+	Status               string     `json:"status"`
+	MediationResult      string     `json:"mediation_result,omitempty"`
+	MediatedBy           uint64     `json:"mediated_by,omitempty"`
+	MediatedAt           *time.Time `json:"mediated_at,omitempty"`
+	ResolutionResult     string     `json:"resolution_result,omitempty"`
+	ResolvedBy           uint64     `json:"resolved_by,omitempty"`
+	ResolvedAt           *time.Time `json:"resolved_at,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+}
+
+type MediateBreachRequest struct {
+	MediationResult string `json:"mediation_result" binding:"required"`
+}
+
+type ResolveBreachRequest struct {
+	ResolutionResult string `json:"resolution_result" binding:"required"`
+}
+
+type FreezeOrderRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+type UnfreezeOrderRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+type CreateLitigationRequest struct {
+	CaseNo       string   `json:"case_no"`
+	Court        string   `json:"court"`
+	ClaimAmount  float64  `json:"claim_amount"`
+	Description  string   `json:"description" binding:"required"`
+	EvidenceURLs []string `json:"evidence_urls"`
+}
+
+type UpdateLitigationStatusRequest struct {
+	Status         string `json:"status" binding:"required,oneof=accepted in_progress judged closed"`
+	CaseNo         string `json:"case_no"`
+	Court          string `json:"court"`
+	JudgmentResult string `json:"judgment_result"`
+	JudgmentURL    string `json:"judgment_url"`
+}
+
+type LitigationRecordInfo struct {
+	ID                    uint64     `json:"id"`
+	BreachRecordID        uint64     `json:"breach_record_id"`
+	OrderID               uint64     `json:"order_id"`
+	OrderNo               string     `json:"order_no"`
+	PlaintiffEnterpriseID uint64     `json:"plaintiff_enterprise_id"`
+	DefendantEnterpriseID uint64     `json:"defendant_enterprise_id"`
+	CaseNo                string     `json:"case_no"`
+	Court                 string     `json:"court"`
+	ClaimAmount           float64    `json:"claim_amount"`
+	Description           string     `json:"description"`
+	EvidenceURLs          []string   `json:"evidence_urls"`
+	Status                string     `json:"status"`
+	JudgmentResult        string     `json:"judgment_result,omitempty"`
+	JudgmentURL           string     `json:"judgment_url,omitempty"`
+	JudgedAt              *time.Time `json:"judged_at,omitempty"`
+	ClosedAt              *time.Time `json:"closed_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }

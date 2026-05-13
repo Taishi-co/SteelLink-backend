@@ -1211,9 +1211,6 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 }
 
 func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.DirectPaymentRequest) (*dto.OrderInfo, error) {
-	if !isHTTPURL(req.TitleVoucherURL) {
-		return nil, ecode.ErrBadRequest.WithMessage("直采货权/仓单监管凭证URL必须是有效的HTTP/HTTPS地址")
-	}
 	result, err := s.UploadPaymentVoucher(ctx, id, enterpriseID, operatorID, &dto.UploadPaymentVoucherRequest{
 		VoucherURL:    req.VoucherURL,
 		TransactionNo: req.TransactionNo,
@@ -1233,19 +1230,34 @@ func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, oper
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
+
+	var titleVoucherURL string
+	var titleVoucherRemark string
+	if len(order.Items) > 0 {
+		product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
+		if prodErr == nil && product != nil {
+			titleVoucherURL = strings.TrimSpace(product.TitleVoucherURL)
+			titleVoucherRemark = strings.TrimSpace(product.TitleVoucherRemark)
+		}
+	}
+	if titleVoucherURL == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证")
+	}
+
 	if order.Remark == nil {
 		order.Remark = orderEntity.Remark{}
 	}
-	order.Remark["direct_title_voucher_url"] = strings.TrimSpace(req.TitleVoucherURL)
-	order.Remark["direct_title_remark"] = strings.TrimSpace(req.TitleRemark)
+	order.Remark["direct_title_voucher_url"] = titleVoucherURL
+	order.Remark["direct_title_remark"] = titleVoucherRemark
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
 		return createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
-			"title_voucher_url": strings.TrimSpace(req.TitleVoucherURL),
-			"title_remark":      strings.TrimSpace(req.TitleRemark),
+			"title_voucher_url": titleVoucherURL,
+			"title_remark":      titleVoucherRemark,
+			"source":            "product_certification",
 		})
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("记录直采货权监管失败")
@@ -3531,7 +3543,14 @@ func (s *OrderService) ensureTitleControlReadyForLogistics(ctx context.Context, 
 		return ecode.ErrDatabase.WithMessage("查询融资质押状态失败")
 	}
 	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
+		if len(order.Items) > 0 {
+			product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
+			if prodErr != nil || product == nil || strings.TrimSpace(product.TitleVoucherURL) == "" {
+				if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
+					return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约。请确认卖方已在商品上架时认证货权凭证")
+				}
+			}
+		} else if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
 			return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约")
 		}
 	}
@@ -3760,5 +3779,462 @@ func toFinancingRequestInfo(item *orderEntity.OrderFinancingRequest) *dto.Financ
 		ReleasedAt:          item.ReleasedAt,
 		CreatedAt:           item.CreatedAt,
 		UpdatedAt:           item.UpdatedAt,
+	}
+}
+
+func (s *OrderService) ReportBreach(ctx context.Context, orderID, reporterEnterpriseID, operatorID uint64, req *dto.ReportBreachRequest) (*dto.BreachRecordInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.BuyerID != reporterEnterpriseID && !isOrderSeller(order, reporterEnterpriseID) {
+		return nil, ecode.ErrForbidden.WithMessage("无权对该订单发起违约举报")
+	}
+	if order.Status < orderEntity.OrderStatusPendingContract {
+		return nil, ecode.ErrBadRequest.WithMessage("订单尚未签署合同，不可发起违约举报")
+	}
+	if order.Status == orderEntity.OrderStatusCancelled || order.Status == orderEntity.OrderStatusArchived {
+		return nil, ecode.ErrBadRequest.WithMessage("订单已终止或归档，不可发起违约举报")
+	}
+
+	var breachEnterpriseID uint64
+	breachParty := orderEntity.BreachParty(req.BreachParty)
+	switch breachParty {
+	case orderEntity.BreachPartyBuyer:
+		breachEnterpriseID = order.BuyerID
+	case orderEntity.BreachPartySeller:
+		breachEnterpriseID = order.SellerID
+	default:
+		return nil, ecode.ErrBadRequest.WithMessage("违约方参数无效")
+	}
+
+	evidenceURLs := orderEntity.StringList{}
+	for _, u := range req.EvidenceURLs {
+		if u != "" {
+			evidenceURLs = append(evidenceURLs, strings.TrimSpace(u))
+		}
+	}
+
+	record := &orderEntity.BreachRecord{
+		OrderID:              order.ID,
+		OrderNo:              order.OrderNo,
+		ReporterEnterpriseID: reporterEnterpriseID,
+		BreachParty:          breachParty,
+		BreachEnterpriseID:   breachEnterpriseID,
+		BreachType:           strings.TrimSpace(req.BreachType),
+		Description:          strings.TrimSpace(req.Description),
+		EvidenceURLs:         evidenceURLs,
+		Status:               orderEntity.BreachRecordStatusSubmitted,
+		CreatedBy:            operatorID,
+		UpdatedBy:            operatorID,
+	}
+
+	fromStatus := order.Status
+	order.Status = orderEntity.OrderStatusException
+	order.UpdatedBy = operatorID
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(record).Error; err != nil {
+			return err
+		}
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "breach_reported", operatorID, reporterEnterpriseID, actorServiceForOrder(order, reporterEnterpriseID), fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"breach_record_id":     record.ID,
+			"breach_party":         string(breachParty),
+			"breach_enterprise_id": breachEnterpriseID,
+			"breach_type":          record.BreachType,
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("提交违约举报失败")
+	}
+
+	return toBreachRecordInfo(record), nil
+}
+
+func (s *OrderService) ListBreachRecords(ctx context.Context, orderID uint64) ([]*dto.BreachRecordInfo, error) {
+	var records []orderEntity.BreachRecord
+	if err := database.GetDB().WithContext(ctx).Where("order_id = ?", orderID).Order("id DESC").Find(&records).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("查询违约记录失败")
+	}
+	result := make([]*dto.BreachRecordInfo, 0, len(records))
+	for i := range records {
+		result = append(result, toBreachRecordInfo(&records[i]))
+	}
+	return result, nil
+}
+
+func (s *OrderService) MediateBreach(ctx context.Context, breachRecordID, operatorID uint64, req *dto.MediateBreachRequest) (*dto.BreachRecordInfo, error) {
+	var record orderEntity.BreachRecord
+	if err := database.GetDB().WithContext(ctx).First(&record, breachRecordID).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("违约记录不存在")
+	}
+	if record.Status != orderEntity.BreachRecordStatusSubmitted && record.Status != orderEntity.BreachRecordStatusUnderReview {
+		return nil, ecode.ErrBadRequest.WithMessage("当前违约记录状态不可发起协调")
+	}
+	now := time.Now()
+	record.Status = orderEntity.BreachRecordStatusMediating
+	record.MediationResult = strings.TrimSpace(req.MediationResult)
+	record.MediatedBy = operatorID
+	record.MediatedAt = &now
+	record.UpdatedBy = operatorID
+
+	order, _ := s.orderRepo.FindByID(ctx, record.OrderID)
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+		if order != nil {
+			return createOrderEvent(tx, ctx, order, "breach_mediation_started", operatorID, 0, "admin", order.Status, order.Status, orderEntity.OrderEventPayload{
+				"breach_record_id": record.ID,
+				"mediation_result": record.MediationResult,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新协调结果失败")
+	}
+
+	return toBreachRecordInfo(&record), nil
+}
+
+func (s *OrderService) ResolveBreach(ctx context.Context, breachRecordID, operatorID uint64, req *dto.ResolveBreachRequest) (*dto.BreachRecordInfo, error) {
+	var record orderEntity.BreachRecord
+	if err := database.GetDB().WithContext(ctx).First(&record, breachRecordID).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("违约记录不存在")
+	}
+	if record.Status != orderEntity.BreachRecordStatusMediating && record.Status != orderEntity.BreachRecordStatusUnderReview && record.Status != orderEntity.BreachRecordStatusSubmitted {
+		return nil, ecode.ErrBadRequest.WithMessage("当前违约记录状态不可处理")
+	}
+	now := time.Now()
+	record.Status = orderEntity.BreachRecordStatusResolved
+	record.ResolutionResult = strings.TrimSpace(req.ResolutionResult)
+	record.ResolvedBy = operatorID
+	record.ResolvedAt = &now
+	record.UpdatedBy = operatorID
+
+	order, _ := s.orderRepo.FindByID(ctx, record.OrderID)
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+		if order != nil && order.Status == orderEntity.OrderStatusException {
+			order.Status = orderEntity.OrderStatusFrozen
+			order.UpdatedBy = operatorID
+			if err := tx.Save(order).Error; err != nil {
+				return err
+			}
+			return createOrderEvent(tx, ctx, order, "breach_resolved", operatorID, 0, "admin", orderEntity.OrderStatusException, order.Status, orderEntity.OrderEventPayload{
+				"breach_record_id":  record.ID,
+				"resolution_result": record.ResolutionResult,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("处理违约记录失败")
+	}
+
+	return toBreachRecordInfo(&record), nil
+}
+
+func (s *OrderService) FreezeOrder(ctx context.Context, orderID, operatorID uint64, req *dto.FreezeOrderRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.Status == orderEntity.OrderStatusFrozen {
+		return nil, ecode.ErrBadRequest.WithMessage("订单已冻结")
+	}
+	if order.Status == orderEntity.OrderStatusCancelled || order.Status == orderEntity.OrderStatusArchived {
+		return nil, ecode.ErrBadRequest.WithMessage("订单已终止或归档，不可冻结")
+	}
+	fromStatus := order.Status
+	order.Status = orderEntity.OrderStatusFrozen
+	order.UpdatedBy = operatorID
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "order_frozen", operatorID, 0, "admin", fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"reason": strings.TrimSpace(req.Reason),
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("冻结订单失败")
+	}
+	return toOrderInfo(order, nil), nil
+}
+
+func (s *OrderService) UnfreezeOrder(ctx context.Context, orderID, operatorID uint64, req *dto.UnfreezeOrderRequest) (*dto.OrderInfo, error) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	}
+	if order.Status != orderEntity.OrderStatusFrozen {
+		return nil, ecode.ErrBadRequest.WithMessage("订单当前未冻结，不可解冻")
+	}
+
+	var lastEvent orderEntity.OrderEvent
+	if err := database.GetDB().WithContext(ctx).Where("order_id = ? AND event_type = ?", order.ID, "order_frozen").Order("id DESC").First(&lastEvent).Error; err == nil {
+		if lastEvent.FromStatus >= orderEntity.OrderStatusPendingContract {
+			order.Status = lastEvent.FromStatus
+		} else {
+			order.Status = orderEntity.OrderStatusException
+		}
+	} else {
+		order.Status = orderEntity.OrderStatusException
+	}
+	order.UpdatedBy = operatorID
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "order_unfrozen", operatorID, 0, "admin", orderEntity.OrderStatusFrozen, order.Status, orderEntity.OrderEventPayload{
+			"reason": strings.TrimSpace(req.Reason),
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("解冻订单失败")
+	}
+	return toOrderInfo(order, nil), nil
+}
+
+func (s *OrderService) CreateLitigation(ctx context.Context, breachRecordID, plaintiffEnterpriseID, operatorID uint64, req *dto.CreateLitigationRequest) (*dto.LitigationRecordInfo, error) {
+	var breachRecord orderEntity.BreachRecord
+	if err := database.GetDB().WithContext(ctx).First(&breachRecord, breachRecordID).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("违约记录不存在")
+	}
+	order, err := s.orderRepo.FindByID(ctx, breachRecord.OrderID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if order == nil {
+		return nil, ecode.ErrNotFound.WithMessage("关联订单不存在")
+	}
+	if order.BuyerID != plaintiffEnterpriseID && !isOrderSeller(order, plaintiffEnterpriseID) {
+		return nil, ecode.ErrForbidden.WithMessage("无权对该违约记录发起诉讼")
+	}
+
+	var defendantEnterpriseID uint64
+	if breachRecord.BreachParty == orderEntity.BreachPartyBuyer {
+		defendantEnterpriseID = order.BuyerID
+	} else {
+		defendantEnterpriseID = order.SellerID
+	}
+
+	evidenceURLs := orderEntity.StringList{}
+	for _, u := range req.EvidenceURLs {
+		if u != "" {
+			evidenceURLs = append(evidenceURLs, strings.TrimSpace(u))
+		}
+	}
+
+	litigation := &orderEntity.LitigationRecord{
+		BreachRecordID:        breachRecordID,
+		OrderID:               order.ID,
+		OrderNo:               order.OrderNo,
+		PlaintiffEnterpriseID: plaintiffEnterpriseID,
+		DefendantEnterpriseID: defendantEnterpriseID,
+		CaseNo:                strings.TrimSpace(req.CaseNo),
+		Court:                 strings.TrimSpace(req.Court),
+		ClaimAmount:           req.ClaimAmount,
+		Description:           strings.TrimSpace(req.Description),
+		EvidenceURLs:          evidenceURLs,
+		Status:                orderEntity.LitigationStatusFiled,
+		CreatedBy:             operatorID,
+		UpdatedBy:             operatorID,
+	}
+
+	fromBreachStatus := breachRecord.Status
+	breachRecord.Status = orderEntity.BreachRecordStatusLitigating
+	breachRecord.UpdatedBy = operatorID
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(litigation).Error; err != nil {
+			return err
+		}
+		if err := tx.Save(&breachRecord).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "litigation_filed", operatorID, plaintiffEnterpriseID, actorServiceForOrder(order, plaintiffEnterpriseID), order.Status, order.Status, orderEntity.OrderEventPayload{
+			"litigation_id":      litigation.ID,
+			"breach_record_id":   breachRecordID,
+			"from_breach_status": string(fromBreachStatus),
+			"to_breach_status":   string(breachRecord.Status),
+			"claim_amount":       litigation.ClaimAmount,
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("发起诉讼失败")
+	}
+
+	return toLitigationRecordInfo(litigation), nil
+}
+
+func (s *OrderService) UpdateLitigationStatus(ctx context.Context, litigationID, operatorID uint64, req *dto.UpdateLitigationStatusRequest) (*dto.LitigationRecordInfo, error) {
+	var litigation orderEntity.LitigationRecord
+	if err := database.GetDB().WithContext(ctx).First(&litigation, litigationID).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("诉讼记录不存在")
+	}
+
+	fromStatus := litigation.Status
+	litigation.Status = orderEntity.LitigationStatus(req.Status)
+	litigation.UpdatedBy = operatorID
+
+	if req.CaseNo != "" {
+		litigation.CaseNo = strings.TrimSpace(req.CaseNo)
+	}
+	if req.Court != "" {
+		litigation.Court = strings.TrimSpace(req.Court)
+	}
+	if req.JudgmentResult != "" {
+		litigation.JudgmentResult = strings.TrimSpace(req.JudgmentResult)
+	}
+	if req.JudgmentURL != "" {
+		litigation.JudgmentURL = strings.TrimSpace(req.JudgmentURL)
+	}
+
+	now := time.Now()
+	switch litigation.Status {
+	case orderEntity.LitigationStatusJudged:
+		litigation.JudgedAt = &now
+	case orderEntity.LitigationStatusClosed:
+		litigation.ClosedAt = &now
+		if litigation.JudgedAt == nil {
+			litigation.JudgedAt = &now
+		}
+	}
+
+	order, _ := s.orderRepo.FindByID(ctx, litigation.OrderID)
+
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&litigation).Error; err != nil {
+			return err
+		}
+		if order != nil {
+			eventPayload := orderEntity.OrderEventPayload{
+				"litigation_id": litigation.ID,
+				"from_status":   string(fromStatus),
+				"to_status":     string(litigation.Status),
+			}
+			if litigation.Status == orderEntity.LitigationStatusJudged {
+				eventPayload["judgment_result"] = litigation.JudgmentResult
+			}
+			return createOrderEvent(tx, ctx, order, "litigation_status_updated", operatorID, 0, "admin", order.Status, order.Status, eventPayload)
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新诉讼状态失败")
+	}
+
+	if litigation.Status == orderEntity.LitigationStatusClosed && order != nil {
+		var breachRecord orderEntity.BreachRecord
+		if err := database.GetDB().WithContext(ctx).First(&breachRecord, litigation.BreachRecordID).Error; err == nil {
+			now2 := time.Now()
+			breachRecord.Status = orderEntity.BreachRecordStatusResolved
+			breachRecord.ResolvedBy = operatorID
+			breachRecord.ResolvedAt = &now2
+			breachRecord.ResolutionResult = "诉讼结案: " + litigation.JudgmentResult
+			breachRecord.UpdatedBy = operatorID
+			database.GetDB().WithContext(ctx).Save(&breachRecord)
+		}
+
+		if order.Status == orderEntity.OrderStatusFrozen || order.Status == orderEntity.OrderStatusException {
+			order.Status = orderEntity.OrderStatusCancelled
+			order.UpdatedBy = operatorID
+			database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if err := tx.Save(order).Error; err != nil {
+					return err
+				}
+				return createOrderEvent(tx, ctx, order, "order_cancelled_after_litigation", operatorID, 0, "admin", orderEntity.OrderStatusException, order.Status, orderEntity.OrderEventPayload{
+					"litigation_id": litigation.ID,
+				})
+			})
+		}
+	}
+
+	return toLitigationRecordInfo(&litigation), nil
+}
+
+func (s *OrderService) ListLitigationRecords(ctx context.Context, orderID uint64) ([]*dto.LitigationRecordInfo, error) {
+	var records []orderEntity.LitigationRecord
+	if err := database.GetDB().WithContext(ctx).Where("order_id = ?", orderID).Order("id DESC").Find(&records).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("查询诉讼记录失败")
+	}
+	result := make([]*dto.LitigationRecordInfo, 0, len(records))
+	for i := range records {
+		result = append(result, toLitigationRecordInfo(&records[i]))
+	}
+	return result, nil
+}
+
+func toBreachRecordInfo(r *orderEntity.BreachRecord) *dto.BreachRecordInfo {
+	if r == nil {
+		return nil
+	}
+	evidenceURLs := []string{}
+	if r.EvidenceURLs != nil {
+		evidenceURLs = []string(r.EvidenceURLs)
+	}
+	return &dto.BreachRecordInfo{
+		ID:                   r.ID,
+		OrderID:              r.OrderID,
+		OrderNo:              r.OrderNo,
+		ReporterEnterpriseID: r.ReporterEnterpriseID,
+		BreachParty:          string(r.BreachParty),
+		BreachEnterpriseID:   r.BreachEnterpriseID,
+		BreachType:           r.BreachType,
+		Description:          r.Description,
+		EvidenceURLs:         evidenceURLs,
+		Status:               string(r.Status),
+		MediationResult:      r.MediationResult,
+		MediatedBy:           r.MediatedBy,
+		MediatedAt:           r.MediatedAt,
+		ResolutionResult:     r.ResolutionResult,
+		ResolvedBy:           r.ResolvedBy,
+		ResolvedAt:           r.ResolvedAt,
+		CreatedAt:            r.CreatedAt,
+		UpdatedAt:            r.UpdatedAt,
+	}
+}
+
+func toLitigationRecordInfo(r *orderEntity.LitigationRecord) *dto.LitigationRecordInfo {
+	if r == nil {
+		return nil
+	}
+	evidenceURLs := []string{}
+	if r.EvidenceURLs != nil {
+		evidenceURLs = []string(r.EvidenceURLs)
+	}
+	return &dto.LitigationRecordInfo{
+		ID:                    r.ID,
+		BreachRecordID:        r.BreachRecordID,
+		OrderID:               r.OrderID,
+		OrderNo:               r.OrderNo,
+		PlaintiffEnterpriseID: r.PlaintiffEnterpriseID,
+		DefendantEnterpriseID: r.DefendantEnterpriseID,
+		CaseNo:                r.CaseNo,
+		Court:                 r.Court,
+		ClaimAmount:           r.ClaimAmount,
+		Description:           r.Description,
+		EvidenceURLs:          evidenceURLs,
+		Status:                string(r.Status),
+		JudgmentResult:        r.JudgmentResult,
+		JudgmentURL:           r.JudgmentURL,
+		JudgedAt:              r.JudgedAt,
+		ClosedAt:              r.ClosedAt,
+		CreatedAt:             r.CreatedAt,
+		UpdatedAt:             r.UpdatedAt,
 	}
 }

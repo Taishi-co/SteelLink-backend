@@ -164,6 +164,8 @@ type Product struct {
 	AuditRemark           string         `gorm:"type:varchar(255);comment:审核备注" json:"audit_remark"`
 	ApprovedAt            *time.Time     `gorm:"comment:审核通过时间" json:"approved_at"`
 	QualityCert           string         `gorm:"type:varchar(500);comment:质保书URL" json:"quality_cert"`
+	TitleVoucherURL       string         `gorm:"type:varchar(500);comment:货权/仓单监管凭证URL" json:"title_voucher_url"`
+	TitleVoucherRemark    string         `gorm:"type:varchar(500);comment:货权凭证备注" json:"title_voucher_remark"`
 	Images                StringList     `gorm:"type:json;comment:商品图片" json:"images"`
 	Description           string         `gorm:"type:text;comment:商品描述" json:"description"`
 	DeliveryDays          int            `gorm:"default:3;comment:交货周期(天)" json:"delivery_days"`
