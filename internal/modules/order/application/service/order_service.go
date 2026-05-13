@@ -962,6 +962,9 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	if order.ContractInfo.BuyerSigned && order.ContractInfo.SellerSigned {
 		order.ContractInfo.SignedAt = signResult.SignedAt
 		order.Status = orderEntity.OrderStatusPendingPayment
+		// 设置过期时间
+		expiresAt := time.Now().Add(24 * time.Hour)
+		order.ExpiresAt = &expiresAt
 	}
 	fromStatus := orderEntity.OrderStatusPendingContract
 	toStatus := order.Status
@@ -1188,6 +1191,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 		GPSLongitude:  req.GPSLongitude,
 	}
 	order.Status = orderEntity.OrderStatusPaid
+	order.ExpiresAt = nil // 清除过期时间
 	order.UpdatedBy = operatorID
 
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1577,6 +1581,7 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	financing.DisbursedAt = &now
 	financing.UpdatedBy = operatorID
 	order.Status = orderEntity.OrderStatusPaid
+	order.ExpiresAt = nil // 清除过期时间
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range order.Items {
@@ -2131,13 +2136,22 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 		return nil, ecode.ErrNotFound.WithMessage("物流报价不存在")
 	}
 	isBuyer := order.BuyerID == enterpriseID
-	isLogistics := quote.LogisticsEnterpriseID == enterpriseID
-	if !isBuyer && !isLogistics {
-		return nil, ecode.ErrForbidden.WithMessage("只有买方或被选中的物流公司才能确认")
+	isSeller := isOrderSeller(order, enterpriseID)
+	sellerInitiated := bidding.SellerConfirmedQuoteID > 0
+	buyerInitiated := bidding.BuyerConfirmedQuoteID > 0
+
+	canConfirm := (sellerInitiated && isBuyer) || (buyerInitiated && isSeller)
+	if !canConfirm {
+		return nil, ecode.ErrForbidden.WithMessage("只有另一方才能确认物流报价")
 	}
 	fromStatus := order.Status
 	bidding.SelectedQuoteID = req.QuoteID
 	bidding.Status = orderEntity.LogisticsBiddingStatusSelected
+	if isBuyer {
+		bidding.BuyerConfirmedQuoteID = req.QuoteID
+	} else if isSeller {
+		bidding.SellerConfirmedQuoteID = req.QuoteID
+	}
 	order.Status = orderEntity.OrderStatusPendingLogisticsContract
 	order.UpdatedBy = operatorID
 
@@ -2507,8 +2521,10 @@ func (s *OrderService) SelectLogisticsQuote(ctx context.Context, id, enterpriseI
 	if order == nil {
 		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
 	}
-	if !isOrderSeller(order, enterpriseID) {
-		return nil, ecode.ErrForbidden.WithMessage("只有卖家可以选择物流报价")
+	isSeller := isOrderSeller(order, enterpriseID)
+	isBuyer := order.BuyerID == enterpriseID
+	if !isSeller && !isBuyer {
+		return nil, ecode.ErrForbidden.WithMessage("只有买方或卖方可以选择物流报价")
 	}
 	if order.Status != orderEntity.OrderStatusLogisticsBidding {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可选择物流报价")
@@ -2525,7 +2541,11 @@ func (s *OrderService) SelectLogisticsQuote(ctx context.Context, id, enterpriseI
 
 	fromStatus := order.Status
 	bidding.SelectedQuoteID = req.QuoteID
-	bidding.SellerConfirmedQuoteID = req.QuoteID
+	if isSeller {
+		bidding.SellerConfirmedQuoteID = req.QuoteID
+	} else {
+		bidding.BuyerConfirmedQuoteID = req.QuoteID
+	}
 	order.Status = orderEntity.OrderStatusPendingLogisticsConfirm
 	order.UpdatedBy = operatorID
 
