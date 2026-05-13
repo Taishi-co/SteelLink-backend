@@ -55,7 +55,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("/:id/logistics-quotes", logisticsService, orderHandler.CreateLogisticsQuote)
 		orders.GET("/:id/logistics-quotes", buyerOrSellerService, orderHandler.ListLogisticsQuotes)
 		orders.POST("/:id/logistics-quotes/select", sellerService, orderHandler.SelectLogisticsQuote)
-		orders.POST("/:id/logistics-confirm", logisticsService, orderHandler.ConfirmLogisticsQuote)
+		orders.POST("/:id/logistics-confirm", buyerOrSellerService, orderHandler.ConfirmLogisticsQuote)
 		orders.GET("/:id/logistics-contracts", fulfillmentParticipant, orderHandler.GetLogisticsContract)
 		orders.POST("/:id/logistics-contracts/buyer-sign", buyerService, orderHandler.BuyerSignLogisticsContract)
 		orders.POST("/:id/logistics-contracts/logistics-sign", logisticsService, orderHandler.LogisticsSignLogisticsContract)

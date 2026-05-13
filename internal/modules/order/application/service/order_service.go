@@ -1116,14 +1116,8 @@ func (s *OrderService) ListByLogistics(ctx context.Context, logisticsEnterpriseI
 	db := database.GetDB().WithContext(ctx)
 	var orders []*orderEntity.Order
 	if status != nil && *status == int(orderEntity.OrderStatusLogisticsBidding) {
-		quotedOrderIDs := make([]uint64, 0)
-		db.Model(&orderEntity.LogisticsBidQuote{}).
-			Where("logistics_enterprise_id = ?", logisticsEnterpriseID).
-			Pluck("order_id", &quotedOrderIDs)
-		if len(quotedOrderIDs) == 0 {
-			return []*dto.OrderInfo{}, nil
-		}
-		if err := db.Where("id IN ?", quotedOrderIDs).Order("id desc").Find(&orders).Error; err != nil {
+		if err := db.Where("status = ?", orderEntity.OrderStatusLogisticsBidding).
+			Order("id desc").Find(&orders).Error; err != nil {
 			return nil, ecode.ErrDatabase.WithMessage("查询物流竞价订单失败")
 		}
 	} else {
@@ -2136,8 +2130,10 @@ func (s *OrderService) ConfirmLogisticsQuote(ctx context.Context, id, enterprise
 	if err := db.WithContext(ctx).Where("id = ? AND bidding_id = ?", req.QuoteID, bidding.ID).First(&quote).Error; err != nil {
 		return nil, ecode.ErrNotFound.WithMessage("物流报价不存在")
 	}
-	if quote.LogisticsEnterpriseID != enterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("只有被选中的物流公司才能确认")
+	isBuyer := order.BuyerID == enterpriseID
+	isLogistics := quote.LogisticsEnterpriseID == enterpriseID
+	if !isBuyer && !isLogistics {
+		return nil, ecode.ErrForbidden.WithMessage("只有买方或被选中的物流公司才能确认")
 	}
 	fromStatus := order.Status
 	bidding.SelectedQuoteID = req.QuoteID
@@ -2514,7 +2510,7 @@ func (s *OrderService) SelectLogisticsQuote(ctx context.Context, id, enterpriseI
 	if !isOrderSeller(order, enterpriseID) {
 		return nil, ecode.ErrForbidden.WithMessage("只有卖家可以选择物流报价")
 	}
-	if order.Status != orderEntity.OrderStatusPendingLogisticsConfirm {
+	if order.Status != orderEntity.OrderStatusLogisticsBidding {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可选择物流报价")
 	}
 	db := database.GetDB()
@@ -2526,12 +2522,26 @@ func (s *OrderService) SelectLogisticsQuote(ctx context.Context, id, enterpriseI
 	if err := db.WithContext(ctx).Where("id = ? AND bidding_id = ?", req.QuoteID, bidding.ID).First(&quote).Error; err != nil {
 		return nil, ecode.ErrNotFound.WithMessage("物流报价不存在")
 	}
+
+	fromStatus := order.Status
 	bidding.SelectedQuoteID = req.QuoteID
 	bidding.SellerConfirmedQuoteID = req.QuoteID
-	if err := db.WithContext(ctx).Save(&bidding).Error; err != nil {
+	order.Status = orderEntity.OrderStatusPendingLogisticsConfirm
+	order.UpdatedBy = operatorID
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&bidding).Error; err != nil {
+			return err
+		}
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("选择物流报价失败")
 	}
-	err = createOrderEvent(db.WithContext(ctx), ctx, order, "logistics_quote_selected", operatorID, enterpriseID, "sales", order.Status, order.Status, orderEntity.OrderEventPayload{
+
+	err = createOrderEvent(db.WithContext(ctx), ctx, order, "logistics_quote_selected", operatorID, enterpriseID, "sales", fromStatus, order.Status, orderEntity.OrderEventPayload{
 		"quote_id":   req.QuoteID,
 		"bidding_id": bidding.ID,
 	})
