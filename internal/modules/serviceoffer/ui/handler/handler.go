@@ -388,7 +388,7 @@ func (h *Handler) CreateFinance(c *gin.Context) {
 		return
 	}
 	invalidateServiceOfferCache(c.Request.Context())
-	response.Success(c, financeToInfo(&item))
+	response.Success(c, h.enrichFinanceInfo(&item))
 }
 
 func (h *Handler) ListFinance(c *gin.Context) {
@@ -486,7 +486,7 @@ func (h *Handler) UpdateFinance(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新金融服务失败"))
 		return
 	}
-	response.Success(c, financeToInfo(&item))
+	response.Success(c, h.enrichFinanceInfo(&item))
 }
 
 func (h *Handler) DeleteFinance(c *gin.Context) {
@@ -503,7 +503,7 @@ func (h *Handler) DeleteFinance(c *gin.Context) {
 		response.Error(c, ecode.ErrDatabase.WithMessage("下线金融服务失败"))
 		return
 	}
-	response.Success(c, financeToInfo(&item))
+	response.Success(c, h.enrichFinanceInfo(&item))
 }
 
 func (h *Handler) AuditWarehouse(c *gin.Context) {
@@ -530,7 +530,7 @@ func (h *Handler) AuditFinance(c *gin.Context) {
 		return
 	}
 	invalidateServiceOfferCache(c.Request.Context())
-	response.Success(c, financeToInfo(&item))
+	response.Success(c, h.enrichFinanceInfo(&item))
 }
 
 func (h *Handler) GetWarehouse(c *gin.Context) {
@@ -652,7 +652,7 @@ func (h *Handler) GetFinance(c *gin.Context) {
 		response.NotFound(c, "金融服务不存在")
 		return
 	}
-	result := financeToInfo(&item)
+	result := h.enrichFinanceInfo(&item)
 	cache.SetJSON(c.Request.Context(), key, result, cache.ServiceOfferDetailTTL)
 	response.Success(c, result)
 }
@@ -730,6 +730,26 @@ func financeToInfo(item *entity.FinanceService) dto.FinanceServiceInfo {
 		Description: item.Description, Status: int(item.Status), AuditRemark: item.AuditRemark,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func (h *Handler) enrichFinanceInfo(item *entity.FinanceService) dto.FinanceServiceInfo {
+	info := financeToInfo(item)
+	ctx := context.Background()
+	var warehouseIDs []uint64
+	h.db.WithContext(ctx).Model(&entity.FinanceAuthorizedWarehouse{}).
+		Where("finance_service_id = ? AND status = ?", item.ID, "active").
+		Pluck("warehouse_service_id", &warehouseIDs)
+	if len(warehouseIDs) > 0 {
+		info.AuthorizedWarehouseIDs = warehouseIDs
+	}
+	var logisticsIDs []uint64
+	h.db.WithContext(ctx).Model(&entity.FinanceAuthorizedLogistics{}).
+		Where("finance_service_id = ? AND status = ?", item.ID, "active").
+		Pluck("logistics_service_id", &logisticsIDs)
+	if len(logisticsIDs) > 0 {
+		info.AuthorizedLogisticsIDs = logisticsIDs
+	}
+	return info
 }
 
 func (h *Handler) AuthorizeWarehouse(c *gin.Context) {
