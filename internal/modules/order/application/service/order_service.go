@@ -1879,7 +1879,10 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 		return nil, err
 	}
 	if order.BuyerID != enterpriseID {
-		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
+		isFunding, _ := s.isFundingParticipant(ctx, order.ID, enterpriseID)
+		if order.FinanceID == 0 || !isFunding {
+			return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
+		}
 	}
 	if order.Status != orderEntity.OrderStatusDelivering && order.Status != orderEntity.OrderStatusShipping && order.Status != orderEntity.OrderStatusDelivered {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")
@@ -2942,6 +2945,16 @@ func (s *OrderService) toOrderDetailInfo(ctx context.Context, order *orderEntity
 	var shipment orderEntity.ShipmentTask
 	if err := db.Where("order_id = ?", order.ID).Order("id desc").First(&shipment).Error; err == nil {
 		info.ShipmentTask = toShipmentTaskInfo(&shipment)
+	}
+
+	var logisticsContract orderEntity.LogisticsContract
+	if err := db.Where("order_id = ?", order.ID).Order("id desc").First(&logisticsContract).Error; err == nil {
+		info.LogisticsContractDTO = toLogisticsContractInfo(&logisticsContract)
+	}
+
+	var settlement orderEntity.LogisticsSettlement
+	if err := db.Where("order_id = ?", order.ID).Order("id desc").First(&settlement).Error; err == nil {
+		info.LogisticsSettlement = toLogisticsSettlementInfo(&settlement)
 	}
 
 	events, err := s.ListEvents(ctx, order.ID, 0, true)
