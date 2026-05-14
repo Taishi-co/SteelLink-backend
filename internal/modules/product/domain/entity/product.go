@@ -31,14 +31,23 @@ const (
 
 // ProductSpec 商品规格JSON结构
 type ProductSpec struct {
-	Material   string `json:"material"`   // 材质
-	Spec       string `json:"spec"`       // 规格
-	Thickness  string `json:"thickness"`  // 厚度
-	Width      string `json:"width"`      // 宽度
-	Length     string `json:"length"`     // 长度
-	Surface    string `json:"surface"`    // 表面处理
-	Edge       string `json:"edge"`       // 边部
-	Processing string `json:"processing"` // 加工方式
+	Material        string  `json:"material"`                    // 材质/牌号快照
+	Spec            string  `json:"spec"`                        // 原始规格
+	Thickness       string  `json:"thickness"`                   // 厚度兼容字段
+	Width           string  `json:"width"`                       // 宽度兼容字段
+	Length          string  `json:"length"`                      // 长度兼容字段
+	HeightSpecType  string  `json:"height_spec_type,omitempty"`  // 厚度/直径/高度
+	HeightSpecValue float64 `json:"height_spec_value,omitempty"` // 厚度/直径/高度值
+	HeightSpecUnit  string  `json:"height_spec_unit,omitempty"`  // 厚度/直径/高度单位
+	WidthSpecType   string  `json:"width_spec_type,omitempty"`   // 宽度/壁厚
+	WidthSpecValue  float64 `json:"width_spec_value,omitempty"`  // 宽度/壁厚值
+	WidthSpecUnit   string  `json:"width_spec_unit,omitempty"`   // 宽度/壁厚单位
+	LengthType      string  `json:"length_type,omitempty"`       // custom/coil/fixed
+	LengthValue     float64 `json:"length_value,omitempty"`      // 长度值
+	LengthUnit      string  `json:"length_unit,omitempty"`       // 长度单位
+	Surface         string  `json:"surface"`                     // 表面处理
+	Edge            string  `json:"edge"`                        // 边部
+	Processing      string  `json:"processing"`                  // 加工方式
 }
 
 // Value 实现driver.Valuer接口
@@ -143,14 +152,27 @@ type Product struct {
 	ProductNo             string         `gorm:"type:varchar(32);uniqueIndex;comment:商品编号" json:"product_no"`
 	Name                  string         `gorm:"type:varchar(200);comment:商品名称" json:"name"`
 	GoodsType             GoodsType      `gorm:"type:varchar(20);default:spot;index;comment:货品类型 spot现货 futures期货" json:"goods_type"`
+	CategoryID            uint64         `gorm:"index;comment:品种ID" json:"category_id"`
+	GradeID               uint64         `gorm:"index;comment:牌号ID" json:"grade_id"`
+	SteelMillID           uint64         `gorm:"index;comment:钢厂/产地ID" json:"steel_mill_id"`
 	Category              string         `gorm:"type:varchar(50);comment:商品分类" json:"category"`
 	SubCategory           string         `gorm:"type:varchar(50);comment:商品子分类" json:"sub_category"`
 	SteelMill             string         `gorm:"type:varchar(100);comment:钢厂" json:"steel_mill"`
 	Spec                  *ProductSpec   `gorm:"type:json;comment:商品规格" json:"spec"`
+	SpecRaw               string         `gorm:"type:varchar(120);index;comment:原始规格" json:"spec_raw"`
+	HeightSpecType        string         `gorm:"type:varchar(20);index;comment:厚度/直径/高度类型" json:"height_spec_type"`
+	HeightSpecValue       float64        `gorm:"type:decimal(10,3);index;comment:厚度/直径/高度值" json:"height_spec_value"`
+	HeightSpecUnit        string         `gorm:"type:varchar(10);comment:厚度/直径/高度单位" json:"height_spec_unit"`
+	WidthSpecType         string         `gorm:"type:varchar(20);index;comment:宽度/壁厚类型" json:"width_spec_type"`
+	WidthSpecValue        float64        `gorm:"type:decimal(10,3);index;comment:宽度/壁厚值" json:"width_spec_value"`
+	WidthSpecUnit         string         `gorm:"type:varchar(10);comment:宽度/壁厚单位" json:"width_spec_unit"`
+	LengthType            string         `gorm:"type:varchar(20);index;comment:长度类型 custom自定义 coil卷 fixed定尺" json:"length_type"`
+	LengthValue           float64        `gorm:"type:decimal(10,3);index;comment:长度值" json:"length_value"`
+	LengthUnit            string         `gorm:"type:varchar(10);comment:长度单位" json:"length_unit"`
 	WarehouseServiceID    uint64         `gorm:"index;comment:仓储资源ID" json:"warehouse_service_id"`
 	WarehouseEnterpriseID uint64         `gorm:"index;comment:仓储方企业ID" json:"warehouse_enterprise_id"`
 	WarehouseInfo         *WarehouseInfo `gorm:"type:json;comment:仓库信息" json:"warehouse_info"`
-	BundleNo              string         `gorm:"type:varchar(100);uniqueIndex;comment:捆包号" json:"bundle_no"`
+	BundleNo              string         `gorm:"type:varchar(100);index;comment:捆包号" json:"bundle_no"`
 	Quantity              float64        `gorm:"type:decimal(10,2);comment:库存数量(吨)" json:"quantity"`
 	AvailableQty          float64        `gorm:"type:decimal(10,2);comment:可用数量(吨)" json:"available_qty"`
 	LockedQty             float64        `gorm:"type:decimal(10,2);default:0;comment:锁定数量(吨)" json:"locked_qty"`

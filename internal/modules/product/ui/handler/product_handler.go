@@ -192,6 +192,36 @@ func (h *ProductHandler) ListCategories(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// ListGrades 获取商品牌号列表
+func (h *ProductHandler) ListGrades(c *gin.Context) {
+	var req dto.ProductGradeListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.ListGrades(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListSteelMills 获取商品钢厂/产地列表
+func (h *ProductHandler) ListSteelMills(c *gin.Context) {
+	var req dto.ProductSteelMillListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.ListSteelMills(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 // CreateCategory 创建商品品类
 func (h *ProductHandler) CreateCategory(c *gin.Context) {
 	userID := middleware.GetUserID(c)
