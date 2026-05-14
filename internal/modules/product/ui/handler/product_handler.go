@@ -48,6 +48,52 @@ func (h *ProductHandler) Create(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// ParseBatchImport 解析卖家上传的商品台账或截图，返回待确认草稿
+func (h *ProductHandler) ParseBatchImport(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.BadRequest(c, "请选择要导入的台账或截图")
+		return
+	}
+	result, svcErr := h.productService.ParseProductImport(c.Request.Context(), file, c.PostForm("hint"))
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// ConfirmBatchImport 确认批量导入草稿并创建商品
+func (h *ProductHandler) ConfirmBatchImport(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	var req dto.ConfirmProductImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.productService.ConfirmProductImport(c.Request.Context(), &req, userID, claims.EnterpriseID)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // Update 更新卖家自有商品，提交后重新进入平台审核
 func (h *ProductHandler) Update(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -185,6 +231,36 @@ func (h *ProductHandler) ListCategories(c *gin.Context) {
 		return
 	}
 	result, err := h.productService.ListCategories(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListGrades 获取商品牌号列表
+func (h *ProductHandler) ListGrades(c *gin.Context) {
+	var req dto.ProductGradeListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.ListGrades(c.Request.Context(), &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListSteelMills 获取商品钢厂/产地列表
+func (h *ProductHandler) ListSteelMills(c *gin.Context) {
+	var req dto.ProductSteelMillListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.productService.ListSteelMills(c.Request.Context(), &req)
 	if err != nil {
 		response.Error(c, err.(*ecode.Error))
 		return
