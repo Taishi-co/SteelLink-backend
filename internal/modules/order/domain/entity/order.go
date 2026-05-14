@@ -409,6 +409,10 @@ type LogisticsBidding struct {
 	OrderNo                string                 `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
 	SellerEnterpriseID     uint64                 `gorm:"index;comment:卖方企业ID" json:"seller_enterprise_id"`
 	WarehouseEnterpriseID  uint64                 `gorm:"index;comment:仓储方企业ID" json:"warehouse_enterprise_id"`
+	InitiatorEnterpriseID  uint64                 `gorm:"index;comment:竞价发起方企业ID" json:"initiator_enterprise_id"`
+	InitiatorRole          string                 `gorm:"type:varchar(16);comment:发起方角色 buyer/seller" json:"initiator_role"`
+	ResponderEnterpriseID  uint64                 `gorm:"index;comment:响应方企业ID" json:"responder_enterprise_id"`
+	ResponderConfirmed     bool                   `gorm:"default:false;comment:响应方是否已确认" json:"responder_confirmed"`
 	PickupAddress          string                 `gorm:"type:varchar(500);comment:提货地址" json:"pickup_address"`
 	DestinationAddress     string                 `gorm:"type:varchar(500);comment:目的地地址" json:"destination_address"`
 	Requirement            string                 `gorm:"type:varchar(1000);comment:承运要求" json:"requirement"`
@@ -777,4 +781,47 @@ func randomDigits(length int) string {
 		result[i] = digits[n.Int64()]
 	}
 	return string(result)
+}
+
+var OrderStatusFlow = map[OrderStatus]int{
+	OrderStatusDraft:                    0,
+	OrderStatusPendingDestWarehouse:     1,
+	OrderStatusPendingWarehouseConfirm:  2,
+	OrderStatusPendingSellerConfirm:     3,
+	OrderStatusPendingBuyerConfirm:      4,
+	OrderStatusPendingConfirm:           5,
+	OrderStatusPendingContract:          6,
+	OrderStatusPendingPayment:           7,
+	OrderStatusPaid:                     8,
+	OrderStatusFinancingReview:          9,
+	OrderStatusPendingFinancingContract: 10,
+	OrderStatusPendingLogisticsRebid:    11,
+	OrderStatusLogisticsBidding:         12,
+	OrderStatusPendingLogisticsConfirm:  13,
+	OrderStatusPendingLogisticsContract: 14,
+	OrderStatusPendingDelivery:          15,
+	OrderStatusDelivering:               16,
+	OrderStatusShipping:                17,
+	OrderStatusDelivered:               18,
+	OrderStatusReceived:                19,
+	OrderStatusCompleted:               20,
+	OrderStatusReconciled:              21,
+	OrderStatusArchived:                22,
+	OrderStatusPendingWarehouseSelect:   23,
+	OrderStatusPendingWarehouseReselect: 24,
+	OrderStatusFrozen:                  25,
+	OrderStatusException:               26,
+	OrderStatusCancelled:               27,
+}
+
+func OrderStatusReached(current, target OrderStatus) bool {
+	currentRank, ok := OrderStatusFlow[current]
+	if !ok {
+		return false
+	}
+	targetRank, ok := OrderStatusFlow[target]
+	if !ok {
+		return false
+	}
+	return currentRank >= targetRank
 }

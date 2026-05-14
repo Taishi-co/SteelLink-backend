@@ -388,6 +388,10 @@ type LogisticsBiddingInfo struct {
 	OrderNo                string    `json:"order_no"`
 	Status                 string    `json:"status"`
 	FreightPayer           string    `json:"freight_payer"`
+	InitiatorEnterpriseID  uint64    `json:"initiator_enterprise_id"`
+	InitiatorRole          string    `json:"initiator_role"`
+	ResponderEnterpriseID  uint64    `json:"responder_enterprise_id"`
+	ResponderConfirmed     bool      `json:"responder_confirmed"`
 	SelectedQuoteID        uint64    `json:"selected_quote_id"`
 	BuyerConfirmedQuoteID  uint64    `json:"buyer_confirmed_quote_id"`
 	SellerConfirmedQuoteID uint64    `json:"seller_confirmed_quote_id"`
