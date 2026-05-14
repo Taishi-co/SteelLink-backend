@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	notificationService "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/service"
@@ -18,15 +19,19 @@ import (
 
 // ProductService 商品服务
 type ProductService struct {
-	productRepo  repository.ProductRepository
-	categoryRepo *persistence.ProductCategoryRepository
+	productRepo   repository.ProductRepository
+	categoryRepo  *persistence.ProductCategoryRepository
+	gradeRepo     *persistence.ProductGradeRepository
+	steelMillRepo *persistence.ProductSteelMillRepository
 }
 
 // NewProductService 创建商品服务
 func NewProductService() *ProductService {
 	return &ProductService{
-		productRepo:  persistence.NewProductRepository(),
-		categoryRepo: persistence.NewProductCategoryRepository(),
+		productRepo:   persistence.NewProductRepository(),
+		categoryRepo:  persistence.NewProductCategoryRepository(),
+		gradeRepo:     persistence.NewProductGradeRepository(),
+		steelMillRepo: persistence.NewProductSteelMillRepository(),
 	}
 }
 
@@ -44,23 +49,33 @@ func (s *ProductService) Create(ctx context.Context, req *dto.CreateProductReque
 	if err != nil {
 		return nil, err
 	}
+	taxonomy, err := s.resolveProductTaxonomy(ctx, req, operatorID)
+	if err != nil {
+		return nil, err
+	}
+	spec := normalizeProductSpec(req.Spec)
+	spec.Material = taxonomy.Material
 
 	product := &entity.Product{
-		Name:        req.Name,
-		GoodsType:   goodsType,
-		Category:    req.Category,
-		SubCategory: req.SubCategory,
-		SteelMill:   req.SteelMill,
-		Spec: &entity.ProductSpec{
-			Material:   req.Spec.Material,
-			Spec:       req.Spec.Spec,
-			Thickness:  req.Spec.Thickness,
-			Width:      req.Spec.Width,
-			Length:     req.Spec.Length,
-			Surface:    req.Spec.Surface,
-			Edge:       req.Spec.Edge,
-			Processing: req.Spec.Processing,
-		},
+		Name:                  strings.TrimSpace(req.Name),
+		GoodsType:             goodsType,
+		CategoryID:            taxonomy.CategoryID,
+		GradeID:               taxonomy.GradeID,
+		SteelMillID:           taxonomy.SteelMillID,
+		Category:              taxonomy.Category,
+		SubCategory:           strings.TrimSpace(req.SubCategory),
+		SteelMill:             taxonomy.SteelMill,
+		Spec:                  spec,
+		SpecRaw:               spec.Spec,
+		HeightSpecType:        spec.HeightSpecType,
+		HeightSpecValue:       spec.HeightSpecValue,
+		HeightSpecUnit:        spec.HeightSpecUnit,
+		WidthSpecType:         spec.WidthSpecType,
+		WidthSpecValue:        spec.WidthSpecValue,
+		WidthSpecUnit:         spec.WidthSpecUnit,
+		LengthType:            spec.LengthType,
+		LengthValue:           spec.LengthValue,
+		LengthUnit:            spec.LengthUnit,
 		WarehouseServiceID:    warehouseServiceID,
 		WarehouseEnterpriseID: warehouseEnterpriseID,
 		WarehouseInfo:         warehouseInfo,
@@ -128,22 +143,32 @@ func (s *ProductService) Update(ctx context.Context, id uint64, req *dto.CreateP
 	if err != nil {
 		return nil, err
 	}
-
-	product.Name = req.Name
-	product.GoodsType = goodsType
-	product.Category = req.Category
-	product.SubCategory = req.SubCategory
-	product.SteelMill = req.SteelMill
-	product.Spec = &entity.ProductSpec{
-		Material:   req.Spec.Material,
-		Spec:       req.Spec.Spec,
-		Thickness:  req.Spec.Thickness,
-		Width:      req.Spec.Width,
-		Length:     req.Spec.Length,
-		Surface:    req.Spec.Surface,
-		Edge:       req.Spec.Edge,
-		Processing: req.Spec.Processing,
+	taxonomy, err := s.resolveProductTaxonomy(ctx, req, operatorID)
+	if err != nil {
+		return nil, err
 	}
+	spec := normalizeProductSpec(req.Spec)
+	spec.Material = taxonomy.Material
+
+	product.Name = strings.TrimSpace(req.Name)
+	product.GoodsType = goodsType
+	product.CategoryID = taxonomy.CategoryID
+	product.GradeID = taxonomy.GradeID
+	product.SteelMillID = taxonomy.SteelMillID
+	product.Category = taxonomy.Category
+	product.SubCategory = strings.TrimSpace(req.SubCategory)
+	product.SteelMill = taxonomy.SteelMill
+	product.Spec = spec
+	product.SpecRaw = spec.Spec
+	product.HeightSpecType = spec.HeightSpecType
+	product.HeightSpecValue = spec.HeightSpecValue
+	product.HeightSpecUnit = spec.HeightSpecUnit
+	product.WidthSpecType = spec.WidthSpecType
+	product.WidthSpecValue = spec.WidthSpecValue
+	product.WidthSpecUnit = spec.WidthSpecUnit
+	product.LengthType = spec.LengthType
+	product.LengthValue = spec.LengthValue
+	product.LengthUnit = spec.LengthUnit
 	product.WarehouseServiceID = warehouseServiceID
 	product.WarehouseEnterpriseID = warehouseEnterpriseID
 	product.WarehouseInfo = warehouseInfo
@@ -224,6 +249,58 @@ func (s *ProductService) ListCategories(ctx context.Context, req *dto.ProductCat
 	list := make([]*dto.ProductCategoryInfo, 0, len(categories))
 	for _, category := range categories {
 		list = append(list, toProductCategoryInfo(category))
+	}
+	cache.SetJSON(ctx, key, list, cache.ProductListTTL)
+	return list, nil
+}
+
+func (s *ProductService) ListGrades(ctx context.Context, req *dto.ProductGradeListRequest) ([]*dto.ProductGradeInfo, error) {
+	categoryID := req.CategoryID
+	if categoryID == 0 && strings.TrimSpace(req.Category) != "" {
+		category, err := s.categoryRepo.FindByName(ctx, strings.TrimSpace(req.Category))
+		if err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		if category != nil {
+			categoryID = category.ID
+		}
+	}
+	key := cache.Key("product:grades", struct {
+		CategoryID      uint64
+		IncludeDisabled bool
+	}{CategoryID: categoryID, IncludeDisabled: req.IncludeDisabled})
+	var cached []*dto.ProductGradeInfo
+	if cache.GetJSON(ctx, key, &cached) {
+		return cached, nil
+	}
+	grades, err := s.gradeRepo.List(ctx, persistence.ProductGradeQuery{
+		CategoryID: categoryID,
+		ActiveOnly: !req.IncludeDisabled,
+	})
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	list := make([]*dto.ProductGradeInfo, 0, len(grades))
+	for _, grade := range grades {
+		list = append(list, toProductGradeInfo(grade))
+	}
+	cache.SetJSON(ctx, key, list, cache.ProductListTTL)
+	return list, nil
+}
+
+func (s *ProductService) ListSteelMills(ctx context.Context, req *dto.ProductSteelMillListRequest) ([]*dto.ProductSteelMillInfo, error) {
+	key := cache.Key("product:steel-mills", req)
+	var cached []*dto.ProductSteelMillInfo
+	if cache.GetJSON(ctx, key, &cached) {
+		return cached, nil
+	}
+	mills, err := s.steelMillRepo.List(ctx, !req.IncludeDisabled)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	list := make([]*dto.ProductSteelMillInfo, 0, len(mills))
+	for _, mill := range mills {
+		list = append(list, toProductSteelMillInfo(mill))
 	}
 	cache.SetJSON(ctx, key, list, cache.ProductListTTL)
 	return list, nil
@@ -340,8 +417,12 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 	products, total, err := s.productRepo.List(ctx, &repository.ProductQuery{
 		Page:               req.Page,
 		PageSize:           req.PageSize,
+		CategoryID:         req.CategoryID,
+		GradeID:            req.GradeID,
+		SteelMillID:        req.SteelMillID,
 		Category:           req.Category,
 		SubCategory:        req.SubCategory,
+		Material:           req.Material,
 		Keyword:            req.Keyword,
 		SteelMill:          req.SteelMill,
 		Status:             req.Status,
@@ -353,6 +434,15 @@ func (s *ProductService) List(ctx context.Context, req *dto.ProductListRequest) 
 		City:               req.City,
 		GoodsType:          req.GoodsType,
 		WarehouseServiceID: req.WarehouseServiceID,
+		HeightSpecType:     req.HeightSpecType,
+		MinHeightSpec:      req.MinHeightSpec,
+		MaxHeightSpec:      req.MaxHeightSpec,
+		WidthSpecType:      req.WidthSpecType,
+		MinWidthSpec:       req.MinWidthSpec,
+		MaxWidthSpec:       req.MaxWidthSpec,
+		LengthType:         req.LengthType,
+		MinLength:          req.MinLength,
+		MaxLength:          req.MaxLength,
 		SortBy:             req.SortBy,
 	})
 	if err != nil {
@@ -481,6 +571,8 @@ func invalidateProductCache(ctx context.Context) {
 	cache.DeleteByPattern(ctx, "product:list:*")
 	cache.DeleteByPattern(ctx, "product:public-detail:*")
 	cache.DeleteByPattern(ctx, "product:categories:*")
+	cache.DeleteByPattern(ctx, "product:grades:*")
+	cache.DeleteByPattern(ctx, "product:steel-mills:*")
 	cache.DeleteByPattern(ctx, "ai:match-products:*")
 	cache.DeleteByPattern(ctx, "ai:match-logistics:*")
 }
@@ -493,15 +585,42 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 	var spec dto.ProductSpec
 	if product.Spec != nil {
 		spec = dto.ProductSpec{
-			Material:   product.Spec.Material,
-			Spec:       product.Spec.Spec,
-			Thickness:  product.Spec.Thickness,
-			Width:      product.Spec.Width,
-			Length:     product.Spec.Length,
-			Surface:    product.Spec.Surface,
-			Edge:       product.Spec.Edge,
-			Processing: product.Spec.Processing,
+			Material:        product.Spec.Material,
+			Spec:            product.Spec.Spec,
+			Thickness:       product.Spec.Thickness,
+			Width:           product.Spec.Width,
+			Length:          product.Spec.Length,
+			HeightSpecType:  product.Spec.HeightSpecType,
+			HeightSpecValue: product.Spec.HeightSpecValue,
+			HeightSpecUnit:  product.Spec.HeightSpecUnit,
+			WidthSpecType:   product.Spec.WidthSpecType,
+			WidthSpecValue:  product.Spec.WidthSpecValue,
+			WidthSpecUnit:   product.Spec.WidthSpecUnit,
+			LengthType:      product.Spec.LengthType,
+			LengthValue:     product.Spec.LengthValue,
+			LengthUnit:      product.Spec.LengthUnit,
+			Surface:         product.Spec.Surface,
+			Edge:            product.Spec.Edge,
+			Processing:      product.Spec.Processing,
 		}
+	}
+	if spec.Spec == "" {
+		spec.Spec = product.SpecRaw
+	}
+	if spec.HeightSpecType == "" {
+		spec.HeightSpecType = product.HeightSpecType
+		spec.HeightSpecValue = product.HeightSpecValue
+		spec.HeightSpecUnit = product.HeightSpecUnit
+	}
+	if spec.WidthSpecType == "" {
+		spec.WidthSpecType = product.WidthSpecType
+		spec.WidthSpecValue = product.WidthSpecValue
+		spec.WidthSpecUnit = product.WidthSpecUnit
+	}
+	if spec.LengthType == "" {
+		spec.LengthType = product.LengthType
+		spec.LengthValue = product.LengthValue
+		spec.LengthUnit = product.LengthUnit
 	}
 
 	var warehouseInfo dto.WarehouseInfo
@@ -529,10 +648,23 @@ func toProductInfo(product *entity.Product) *dto.ProductInfo {
 		ProductNo:             product.ProductNo,
 		Name:                  product.Name,
 		GoodsType:             string(goodsType),
+		CategoryID:            product.CategoryID,
+		GradeID:               product.GradeID,
+		SteelMillID:           product.SteelMillID,
 		Category:              product.Category,
 		SubCategory:           product.SubCategory,
 		SteelMill:             product.SteelMill,
 		Spec:                  spec,
+		SpecRaw:               product.SpecRaw,
+		HeightSpecType:        product.HeightSpecType,
+		HeightSpecValue:       product.HeightSpecValue,
+		HeightSpecUnit:        product.HeightSpecUnit,
+		WidthSpecType:         product.WidthSpecType,
+		WidthSpecValue:        product.WidthSpecValue,
+		WidthSpecUnit:         product.WidthSpecUnit,
+		LengthType:            product.LengthType,
+		LengthValue:           product.LengthValue,
+		LengthUnit:            product.LengthUnit,
 		WarehouseServiceID:    product.WarehouseServiceID,
 		WarehouseEnterpriseID: product.WarehouseEnterpriseID,
 		WarehouseInfo:         warehouseInfo,
@@ -617,6 +749,212 @@ func toProductCategoryInfo(category *entity.ProductCategory) *dto.ProductCategor
 		CreatedAt:   category.CreatedAt,
 		UpdatedAt:   category.UpdatedAt,
 	}
+}
+
+func toProductGradeInfo(grade *entity.ProductGrade) *dto.ProductGradeInfo {
+	if grade == nil {
+		return nil
+	}
+	displayName := grade.DisplayName
+	if displayName == "" {
+		displayName = grade.Name
+	}
+	return &dto.ProductGradeInfo{
+		ID:          grade.ID,
+		CategoryID:  grade.CategoryID,
+		Name:        grade.Name,
+		DisplayName: displayName,
+		Code:        grade.Code,
+		Aliases:     []string(grade.Aliases),
+		Standard:    grade.Standard,
+		Sort:        grade.Sort,
+		Status:      grade.Status,
+		CreatedAt:   grade.CreatedAt,
+		UpdatedAt:   grade.UpdatedAt,
+	}
+}
+
+func toProductSteelMillInfo(mill *entity.ProductSteelMill) *dto.ProductSteelMillInfo {
+	if mill == nil {
+		return nil
+	}
+	displayName := mill.DisplayName
+	if displayName == "" {
+		displayName = mill.Name
+	}
+	return &dto.ProductSteelMillInfo{
+		ID:          mill.ID,
+		Name:        mill.Name,
+		DisplayName: displayName,
+		Code:        mill.Code,
+		Aliases:     []string(mill.Aliases),
+		Letter:      mill.Letter,
+		LogoURL:     mill.LogoURL,
+		Sort:        mill.Sort,
+		Status:      mill.Status,
+		CreatedAt:   mill.CreatedAt,
+		UpdatedAt:   mill.UpdatedAt,
+	}
+}
+
+type productTaxonomy struct {
+	CategoryID  uint64
+	GradeID     uint64
+	SteelMillID uint64
+	Category    string
+	Material    string
+	SteelMill   string
+}
+
+func (s *ProductService) resolveProductTaxonomy(ctx context.Context, req *dto.CreateProductRequest, operatorID uint64) (productTaxonomy, error) {
+	result := productTaxonomy{
+		CategoryID:  req.CategoryID,
+		GradeID:     req.GradeID,
+		SteelMillID: req.SteelMillID,
+		Category:    strings.TrimSpace(req.Category),
+		Material:    strings.TrimSpace(req.Spec.Material),
+		SteelMill:   strings.TrimSpace(req.SteelMill),
+	}
+
+	if result.CategoryID > 0 {
+		category, err := s.categoryRepo.FindByID(ctx, result.CategoryID)
+		if err != nil {
+			return result, ecode.ErrDatabase
+		}
+		if category == nil {
+			return result, ecode.ErrBadRequest.WithMessage("绑定的品种不存在")
+		}
+		if result.Category == "" {
+			result.Category = category.Name
+		}
+	}
+	category, err := s.categoryRepo.EnsureByNameReturning(ctx, result.Category, operatorID)
+	if err != nil {
+		return result, ecode.ErrDatabase.WithMessage("创建商品品种失败")
+	}
+	if category != nil {
+		result.CategoryID = category.ID
+		result.Category = category.Name
+	}
+
+	if result.GradeID > 0 {
+		grade, err := s.gradeRepo.FindByID(ctx, result.GradeID)
+		if err != nil {
+			return result, ecode.ErrDatabase
+		}
+		if grade == nil {
+			return result, ecode.ErrBadRequest.WithMessage("绑定的牌号不存在")
+		}
+		if result.Material == "" {
+			result.Material = grade.Name
+		}
+		if result.CategoryID == 0 && grade.CategoryID > 0 {
+			result.CategoryID = grade.CategoryID
+		}
+	}
+	grade, err := s.gradeRepo.EnsureByName(ctx, result.CategoryID, result.Material, operatorID)
+	if err != nil {
+		return result, ecode.ErrDatabase.WithMessage("创建商品牌号失败")
+	}
+	if grade != nil {
+		result.GradeID = grade.ID
+		result.Material = grade.Name
+	}
+
+	if result.SteelMillID > 0 {
+		mill, err := s.steelMillRepo.FindByID(ctx, result.SteelMillID)
+		if err != nil {
+			return result, ecode.ErrDatabase
+		}
+		if mill == nil {
+			return result, ecode.ErrBadRequest.WithMessage("绑定的钢厂不存在")
+		}
+		if result.SteelMill == "" {
+			result.SteelMill = mill.Name
+		}
+	}
+	mill, err := s.steelMillRepo.EnsureByName(ctx, result.SteelMill, operatorID)
+	if err != nil {
+		return result, ecode.ErrDatabase.WithMessage("创建商品钢厂失败")
+	}
+	if mill != nil {
+		result.SteelMillID = mill.ID
+		result.SteelMill = mill.Name
+	}
+	return result, nil
+}
+
+func normalizeProductSpec(req dto.ProductSpec) *entity.ProductSpec {
+	spec := &entity.ProductSpec{
+		Material:        strings.TrimSpace(req.Material),
+		Spec:            strings.TrimSpace(req.Spec),
+		Thickness:       strings.TrimSpace(req.Thickness),
+		Width:           strings.TrimSpace(req.Width),
+		Length:          strings.TrimSpace(req.Length),
+		HeightSpecType:  normalizeSpecType(req.HeightSpecType, "thickness"),
+		HeightSpecValue: req.HeightSpecValue,
+		HeightSpecUnit:  normalizeSpecUnit(req.HeightSpecUnit),
+		WidthSpecType:   normalizeSpecType(req.WidthSpecType, "width"),
+		WidthSpecValue:  req.WidthSpecValue,
+		WidthSpecUnit:   normalizeSpecUnit(req.WidthSpecUnit),
+		LengthType:      normalizeSpecType(req.LengthType, "custom"),
+		LengthValue:     req.LengthValue,
+		LengthUnit:      normalizeSpecUnit(req.LengthUnit),
+		Surface:         strings.TrimSpace(req.Surface),
+		Edge:            strings.TrimSpace(req.Edge),
+		Processing:      strings.TrimSpace(req.Processing),
+	}
+	if spec.HeightSpecValue <= 0 {
+		spec.HeightSpecValue = parseSpecNumber(spec.Thickness)
+	}
+	if spec.WidthSpecValue <= 0 {
+		spec.WidthSpecValue = parseSpecNumber(spec.Width)
+	}
+	if spec.LengthValue <= 0 {
+		spec.LengthValue = parseSpecNumber(spec.Length)
+	}
+	if spec.Thickness == "" && spec.HeightSpecType == "thickness" && spec.HeightSpecValue > 0 {
+		spec.Thickness = formatSpecNumber(spec.HeightSpecValue)
+	}
+	if spec.Width == "" && spec.WidthSpecType == "width" && spec.WidthSpecValue > 0 {
+		spec.Width = formatSpecNumber(spec.WidthSpecValue)
+	}
+	if spec.Length == "" && spec.LengthValue > 0 {
+		spec.Length = formatSpecNumber(spec.LengthValue)
+	}
+	return spec
+}
+
+func normalizeSpecType(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func normalizeSpecUnit(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "mm"
+	}
+	return value
+}
+
+func parseSpecNumber(value string) float64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+func formatSpecNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func normalizeGoodsType(value string) (entity.GoodsType, error) {

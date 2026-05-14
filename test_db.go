@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -21,7 +23,7 @@ func main() {
 	for i, dsn := range dsns {
 		fmt.Printf("\n=== 测试 DSN %d ===\n", i+1)
 		fmt.Printf("DSN: %s\n", dsn)
-		
+
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
 			log.Printf("Failed to open database: %v", err)

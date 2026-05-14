@@ -65,9 +65,21 @@ func (r *ProductCategoryRepository) Delete(ctx context.Context, id uint64) error
 }
 
 func (r *ProductCategoryRepository) EnsureByName(ctx context.Context, name string, operatorID uint64) error {
+	_, err := r.EnsureByNameReturning(ctx, name, operatorID)
+	return err
+}
+
+func (r *ProductCategoryRepository) EnsureByNameReturning(ctx context.Context, name string, operatorID uint64) (*entity.ProductCategory, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil
+		return nil, nil
+	}
+	existing, err := r.FindByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
 	}
 	category := &entity.ProductCategory{
 		Name:        name,
@@ -77,9 +89,12 @@ func (r *ProductCategoryRepository) EnsureByName(ctx context.Context, name strin
 		CreatedBy:   operatorID,
 		UpdatedBy:   operatorID,
 	}
-	return r.db.WithContext(ctx).
+	if err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "name"}}, DoNothing: true}).
-		Create(category).Error
+		Create(category).Error; err != nil {
+		return nil, err
+	}
+	return r.FindByName(ctx, name)
 }
 
 func SeedProductCategoriesFromProducts(ctx context.Context) error {

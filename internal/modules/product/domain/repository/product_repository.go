@@ -20,8 +20,12 @@ type ProductRepository interface {
 type ProductQuery struct {
 	Page               int
 	PageSize           int
+	CategoryID         uint64
+	GradeID            uint64
+	SteelMillID        uint64
 	Category           string
 	SubCategory        string
+	Material           string
 	Keyword            string
 	SteelMill          string
 	Status             *int
@@ -33,5 +37,14 @@ type ProductQuery struct {
 	City               string
 	GoodsType          string
 	WarehouseServiceID uint64
+	HeightSpecType     string
+	MinHeightSpec      float64
+	MaxHeightSpec      float64
+	WidthSpecType      string
+	MinWidthSpec       float64
+	MaxWidthSpec       float64
+	LengthType         string
+	MinLength          float64
+	MaxLength          float64
 	SortBy             string
 }

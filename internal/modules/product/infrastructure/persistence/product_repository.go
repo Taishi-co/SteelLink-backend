@@ -52,15 +52,27 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 
 	db := r.db.WithContext(ctx).Model(&entity.Product{})
 
+	if query.CategoryID > 0 {
+		db = db.Where("category_id = ?", query.CategoryID)
+	}
+	if query.GradeID > 0 {
+		db = db.Where("grade_id = ?", query.GradeID)
+	}
+	if query.SteelMillID > 0 {
+		db = db.Where("steel_mill_id = ?", query.SteelMillID)
+	}
 	if query.Category != "" {
 		db = db.Where("category = ? OR sub_category = ?", query.Category, query.Category)
 	}
 	if query.SubCategory != "" {
 		db = db.Where("sub_category = ?", query.SubCategory)
 	}
+	if query.Material != "" {
+		db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(spec, '$.material')) = ?", query.Material)
+	}
 	if query.Keyword != "" {
 		like := "%" + query.Keyword + "%"
-		db = db.Where("name LIKE ? OR steel_mill LIKE ? OR bundle_no LIKE ? OR product_no LIKE ?", like, like, like, like)
+		db = db.Where("name LIKE ? OR steel_mill LIKE ? OR bundle_no LIKE ? OR product_no LIKE ? OR spec_raw LIKE ? OR JSON_UNQUOTE(JSON_EXTRACT(spec, '$.material')) LIKE ?", like, like, like, like, like, like)
 	}
 	if query.SteelMill != "" {
 		db = db.Where("steel_mill = ?", query.SteelMill)
@@ -91,6 +103,33 @@ func (r *productRepository) List(ctx context.Context, query *repository.ProductQ
 	}
 	if query.WarehouseServiceID > 0 {
 		db = db.Where("warehouse_service_id = ?", query.WarehouseServiceID)
+	}
+	if query.HeightSpecType != "" {
+		db = db.Where("height_spec_type = ?", query.HeightSpecType)
+	}
+	if query.MinHeightSpec > 0 {
+		db = db.Where("height_spec_value >= ?", query.MinHeightSpec)
+	}
+	if query.MaxHeightSpec > 0 {
+		db = db.Where("height_spec_value <= ?", query.MaxHeightSpec)
+	}
+	if query.WidthSpecType != "" {
+		db = db.Where("width_spec_type = ?", query.WidthSpecType)
+	}
+	if query.MinWidthSpec > 0 {
+		db = db.Where("width_spec_value >= ?", query.MinWidthSpec)
+	}
+	if query.MaxWidthSpec > 0 {
+		db = db.Where("width_spec_value <= ?", query.MaxWidthSpec)
+	}
+	if query.LengthType != "" {
+		db = db.Where("length_type = ?", query.LengthType)
+	}
+	if query.MinLength > 0 {
+		db = db.Where("length_value >= ?", query.MinLength)
+	}
+	if query.MaxLength > 0 {
+		db = db.Where("length_value <= ?", query.MaxLength)
 	}
 
 	if err := db.Count(&total).Error; err != nil {
