@@ -130,10 +130,10 @@ func ensureLogisticsOrderSyncTx(tx *gorm.DB, order *orderEntity.Order, bidding *
 		return nil
 	}
 	logisticsEnterpriseID := uint64(0)
-	if quote != nil {
+	if quote != nil && quote.LogisticsEnterpriseID != 0 {
 		logisticsEnterpriseID = quote.LogisticsEnterpriseID
 	}
-	if logisticsEnterpriseID == 0 && task != nil {
+	if logisticsEnterpriseID == 0 && task != nil && task.LogisticsEnterpriseID != 0 {
 		logisticsEnterpriseID = task.LogisticsEnterpriseID
 	}
 	if logisticsEnterpriseID == 0 {

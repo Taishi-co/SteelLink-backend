@@ -453,12 +453,19 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 		return
 	}
 	var item entity.LogisticsOrder
-	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND carrier_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
-		response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
-		return
+	targetStatus := entity.NormalizeLogisticsOrderStatus(entity.LogisticsOrderStatus(req.Status))
+	if targetStatus == entity.LogisticsOrderReceiptSigned {
+		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND buyer_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+			response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
+			return
+		}
+	} else {
+		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND carrier_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+			response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
+			return
+		}
 	}
 	currentStatus := entity.NormalizeLogisticsOrderStatus(item.Status)
-	targetStatus := entity.NormalizeLogisticsOrderStatus(entity.LogisticsOrderStatus(req.Status))
 	if !entity.CanTransitionLogisticsOrderStatus(currentStatus, targetStatus) {
 		response.BadRequest(c, "当前物流状态不可推进到目标节点")
 		return
@@ -482,7 +489,37 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 			OccurredAt:       now,
 			CreatedBy:        claims.UserID,
 		}
-		return tx.Create(&event).Error
+		if err := tx.Create(&event).Error; err != nil {
+			return err
+		}
+		if targetStatus == entity.LogisticsOrderReceiptSigned && item.OrderID > 0 {
+			var order orderEntity.Order
+			if err := tx.Where("id = ?", item.OrderID).First(&order).Error; err == nil {
+				if order.Status != orderEntity.OrderStatusReceived && order.Status != orderEntity.OrderStatusReconciled && order.Status != orderEntity.OrderStatusArchived && order.Status != orderEntity.OrderStatusCompleted {
+					fromStatus := order.Status
+					order.Status = orderEntity.OrderStatusReceived
+					order.ReceiptAt = &now
+					order.UpdatedBy = claims.UserID
+					if err := tx.Save(&order).Error; err != nil {
+						return err
+					}
+					orderEvent := orderEntity.OrderEvent{
+						OrderID:       order.ID,
+						OrderNo:       order.OrderNo,
+						EventType:     "buyer_received",
+						ActorUserID:   claims.UserID,
+						ActorEnterpriseID: claims.EnterpriseID,
+						ActorService:  "procurement",
+						FromStatus:    fromStatus,
+						ToStatus:      orderEntity.OrderStatusReceived,
+					}
+					if err := tx.Create(&orderEvent).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		response.Error(c, ecode.ErrDatabase.WithMessage("更新物流状态失败"))
 		return

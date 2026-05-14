@@ -125,7 +125,8 @@ func (h *OrderHandler) List(c *gin.Context) {
 	case "warehouse":
 		result, err = h.orderService.ListByWarehouse(c.Request.Context(), claims.EnterpriseID, status)
 	case "logistics":
-		result, err = h.orderService.ListByLogistics(c.Request.Context(), claims.EnterpriseID, status)
+		bidding := c.Query("bidding") == "true"
+		result, err = h.orderService.ListByLogistics(c.Request.Context(), claims.EnterpriseID, status, bidding)
 	default:
 		result, err = h.orderService.ListByEnterprise(c.Request.Context(), claims.EnterpriseID)
 	}
@@ -865,7 +866,7 @@ func (h *OrderHandler) GetLogisticsContract(c *gin.Context) {
 	response.Success(c, result)
 }
 
-func (h *OrderHandler) BuyerSignLogisticsContract(c *gin.Context) {
+func (h *OrderHandler) InitiatorSignLogisticsContract(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
 		response.Unauthorized(c, "未登录")
@@ -878,7 +879,26 @@ func (h *OrderHandler) BuyerSignLogisticsContract(c *gin.Context) {
 	}
 	var req dto.SignLogisticsContractRequest
 	_ = c.ShouldBindJSON(&req)
-	result, svcErr := h.orderService.BuyerSignLogisticsContract(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	result, svcErr := h.orderService.InitiatorSignLogisticsContract(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OrderHandler) RespondConfirmLogistics(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	result, svcErr := h.orderService.RespondConfirmLogistics(c.Request.Context(), id, claims.EnterpriseID, claims.UserID)
 	if svcErr != nil {
 		response.Error(c, svcErr.(*ecode.Error))
 		return

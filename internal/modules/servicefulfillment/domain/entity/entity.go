@@ -100,7 +100,7 @@ func CanTransitionLogisticsOrderStatus(from, to LogisticsOrderStatus) bool {
 		LogisticsOrderLoadingConfirmed:  {LogisticsOrderInTransit},
 		LogisticsOrderInTransit:         {LogisticsOrderArrivalConfirmed},
 		LogisticsOrderArrivalConfirmed:  {LogisticsOrderReceiptSigned},
-		LogisticsOrderReceiptSigned:     {LogisticsOrderInboundCompleted, LogisticsOrderCompleted},
+		LogisticsOrderReceiptSigned:     {LogisticsOrderInboundCompleted},
 		LogisticsOrderInboundCompleted:  {LogisticsOrderCompleted},
 		LogisticsOrderCompleted:         {},
 	}
