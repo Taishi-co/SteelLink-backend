@@ -251,3 +251,59 @@ type UpdateProductStatusRequest struct {
 	AuditRemark      string `json:"audit_remark" binding:"omitempty,max=255"`
 	AuditRemarkCamel string `json:"auditRemark" binding:"omitempty,max=255"`
 }
+
+type ProductImportProduct struct {
+	Name               string        `json:"name"`
+	GoodsType          string        `json:"goods_type"`
+	CategoryID         uint64        `json:"category_id"`
+	GradeID            uint64        `json:"grade_id"`
+	SteelMillID        uint64        `json:"steel_mill_id"`
+	Category           string        `json:"category"`
+	SubCategory        string        `json:"sub_category"`
+	SteelMill          string        `json:"steel_mill"`
+	Spec               ProductSpec   `json:"spec"`
+	WarehouseServiceID uint64        `json:"warehouse_service_id"`
+	WarehouseInfo      WarehouseInfo `json:"warehouse_info"`
+	BundleNo           string        `json:"bundle_no"`
+	Quantity           float64       `json:"quantity"`
+	UnitPrice          float64       `json:"unit_price"`
+	MinOrderQty        float64       `json:"min_order_qty"`
+	Images             []string      `json:"images"`
+	QualityCert        string        `json:"quality_cert"`
+	Description        string        `json:"description"`
+	DeliveryDays       int           `json:"delivery_days"`
+	QuoteValidity      int           `json:"quote_validity"`
+}
+
+type ProductImportDraftItem struct {
+	RowNo      int                  `json:"row_no"`
+	Confidence float64              `json:"confidence"`
+	Warnings   []string             `json:"warnings"`
+	Product    ProductImportProduct `json:"product"`
+}
+
+type ProductImportParseResponse struct {
+	SourceFilename string                   `json:"source_filename"`
+	SourceType     string                   `json:"source_type"`
+	UsedModel      bool                     `json:"used_model"`
+	Items          []ProductImportDraftItem `json:"items"`
+	Warnings       []string                 `json:"warnings"`
+}
+
+type ConfirmProductImportRequest struct {
+	SubmitForReview bool                     `json:"submit_for_review"`
+	Items           []ProductImportDraftItem `json:"items" binding:"required,min=1,max=200"`
+}
+
+type ProductImportConfirmItemResult struct {
+	RowNo   int          `json:"row_no"`
+	Status  string       `json:"status"`
+	Error   string       `json:"error,omitempty"`
+	Product *ProductInfo `json:"product,omitempty"`
+}
+
+type ProductImportConfirmResponse struct {
+	SuccessCount int                              `json:"success_count"`
+	FailedCount  int                              `json:"failed_count"`
+	Items        []ProductImportConfirmItemResult `json:"items"`
+}
