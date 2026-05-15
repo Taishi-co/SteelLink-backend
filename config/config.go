@@ -182,6 +182,9 @@ type aiProcurementAdminConfig struct {
 		Provider            string  `json:"provider"`
 		BaseURL             string  `json:"baseUrl"`
 		APIKeyEnv           string  `json:"apiKeyEnv"`
+		VisionProvider      string  `json:"visionProvider"`
+		VisionBaseURL       string  `json:"visionBaseUrl"`
+		VisionAPIKeyEnv     string  `json:"visionApiKeyEnv"`
 		Model               string  `json:"model"`
 		Temperature         float64 `json:"temperature"`
 		TopP                float64 `json:"topP"`
@@ -298,7 +301,7 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 		c.VisionBaseURL = "https://api.minimax.io/v1/coding_plan/vlm"
 	}
 	if c.VisionAPIKeyEnv == "" {
-		c.VisionAPIKeyEnv = c.APIKeyEnv
+		c.VisionAPIKeyEnv = "MINIMAX_TOKEN_PLAN_API_KEY"
 	}
 	if c.Temperature <= 0 || c.Temperature > 1 {
 		c.Temperature = 0.2
@@ -742,7 +745,7 @@ func hardcodedAIProcurementFallback() AIProcurementConfig {
 		Model:               "MiniMax-M2.7",
 		VisionProvider:      "minimax_token_plan",
 		VisionBaseURL:       "https://api.minimax.io/v1/coding_plan/vlm",
-		VisionAPIKeyEnv:     "MINIMAX_API_KEY",
+		VisionAPIKeyEnv:     "MINIMAX_TOKEN_PLAN_API_KEY",
 		Temperature:         0.2,
 		TopP:                0.9,
 		MaxTokens:           1200,
@@ -786,6 +789,15 @@ func applyAdminAIProcurementConfig(target *AIProcurementConfig, source aiProcure
 	}
 	if source.Model.APIKeyEnv != "" {
 		target.APIKeyEnv = source.Model.APIKeyEnv
+	}
+	if source.Model.VisionProvider != "" {
+		target.VisionProvider = source.Model.VisionProvider
+	}
+	if source.Model.VisionBaseURL != "" {
+		target.VisionBaseURL = strings.TrimRight(source.Model.VisionBaseURL, "/")
+	}
+	if source.Model.VisionAPIKeyEnv != "" {
+		target.VisionAPIKeyEnv = source.Model.VisionAPIKeyEnv
 	}
 	if source.Model.Model != "" {
 		target.Model = source.Model.Model

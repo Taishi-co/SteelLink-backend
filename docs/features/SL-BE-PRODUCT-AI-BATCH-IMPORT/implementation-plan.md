@@ -14,15 +14,16 @@
   - `internal/modules/product/infrastructure/router/router.go`
 - 文档文件:
   - `docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT/*`
-- 配置文件: 无新增配置。
+- 配置文件: 增加 `AI_PROCUREMENT_VISION_PROVIDER`、`AI_PROCUREMENT_VISION_BASE_URL`、`AI_PROCUREMENT_VISION_API_KEY_ENV`。
 
 ## 实施步骤
 
 1. 增加商品导入 DTO、解析接口和确认接口。
 2. 实现 csv/tsv/txt/xlsx 规则解析和规格字段拆分。
 3. 复用既有 AI 模型配置，增加文本识别和 MiniMax Token Plan 图片识别入口。
-4. 将确认后的草稿逐行创建商品，返回成功和失败行。
-5. 增加解析单元测试并执行 release gate。
+4. 接收 Admin 写入 Redis 的视觉识别配置，支持在 Admin 选择 Token Plan 端点和环境变量名。
+5. 将确认后的草稿逐行创建商品，返回成功和失败行。
+6. 增加解析单元测试并执行 release gate。
 
 ## 验证计划
 
