@@ -25,11 +25,11 @@ AI 采购后端已具备规则解析、商品匹配、订单草稿、融资方�
 
 ## 推荐 MiniMax 配置
 
-### OpenAI-compatible
+### Token Plan Anthropic-compatible
 
 - `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`
 - `AI_PROCUREMENT_PROVIDER=minimax`
-- `AI_PROCUREMENT_BASE_URL=https://api.minimax.io/v1/chat/completions`
+- `AI_PROCUREMENT_BASE_URL=https://api.minimaxi.com/anthropic`
 - `AI_PROCUREMENT_API_KEY_ENV=MINIMAX_API_KEY`
 - `MINIMAX_API_KEY=<真实密钥>`
 - `AI_PROCUREMENT_MODEL=MiniMax-M2.7`

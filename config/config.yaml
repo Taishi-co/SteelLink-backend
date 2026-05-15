@@ -61,11 +61,11 @@ storage:
 ai_procurement:
   model_parsing_enabled: false
   provider: minimax
-  base_url: https://api.minimax.io/v1/chat/completions
+  base_url: https://api.minimaxi.com/anthropic
   api_key_env: MINIMAX_API_KEY
   model: MiniMax-M2.7
   vision_provider: minimax_token_plan
-  vision_base_url: https://api.minimax.io/v1/coding_plan/vlm
+  vision_base_url: https://api.minimaxi.com/v1/coding_plan/vlm
   vision_api_key_env: MINIMAX_TOKEN_PLAN_API_KEY
   temperature: 0.2
   top_p: 0.9

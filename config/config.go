@@ -286,7 +286,7 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 		c.Provider = "rule_based"
 	}
 	if c.BaseURL == "" {
-		c.BaseURL = "https://api.minimax.io/v1/chat/completions"
+		c.BaseURL = "https://api.minimaxi.com/anthropic"
 	}
 	if c.APIKeyEnv == "" {
 		c.APIKeyEnv = "MINIMAX_API_KEY"
@@ -298,7 +298,7 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 		c.VisionProvider = "minimax_token_plan"
 	}
 	if c.VisionBaseURL == "" {
-		c.VisionBaseURL = "https://api.minimax.io/v1/coding_plan/vlm"
+		c.VisionBaseURL = "https://api.minimaxi.com/v1/coding_plan/vlm"
 	}
 	if c.VisionAPIKeyEnv == "" {
 		c.VisionAPIKeyEnv = "MINIMAX_TOKEN_PLAN_API_KEY"
@@ -740,11 +740,11 @@ func hardcodedAIProcurementFallback() AIProcurementConfig {
 	return AIProcurementConfig{
 		ModelParsingEnabled: false,
 		Provider:            "rule_based",
-		BaseURL:             "https://api.minimax.io/v1/chat/completions",
+		BaseURL:             "https://api.minimaxi.com/anthropic",
 		APIKeyEnv:           "MINIMAX_API_KEY",
 		Model:               "MiniMax-M2.7",
 		VisionProvider:      "minimax_token_plan",
-		VisionBaseURL:       "https://api.minimax.io/v1/coding_plan/vlm",
+		VisionBaseURL:       "https://api.minimaxi.com/v1/coding_plan/vlm",
 		VisionAPIKeyEnv:     "MINIMAX_TOKEN_PLAN_API_KEY",
 		Temperature:         0.2,
 		TopP:                0.9,
