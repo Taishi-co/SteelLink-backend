@@ -13,6 +13,7 @@
 | TC-02 | XLSX 台账解析 | 卖家已登录 | 上传第一张 sheet 包含商品台账的 xlsx | 返回商品草稿列表 |
 | TC-03 | 确认创建草稿 | 已有解析草稿 | POST `/products/batch-import/confirm`，`submit_for_review=false` | 批量创建商品，状态为草稿 |
 | TC-04 | 直接提交审核 | 草稿补齐主图、库存、价格、存放地 | POST confirm，`submit_for_review=true` | 商品状态为待审核 |
+| TC-05 | 流式截图识别 | 已配置 MiniMax Token Plan Key | POST `/products/batch-import/parse-stream` 上传截图 | 先收到进度事件，最终收到 done 事件和商品草稿 |
 
 ## Exception Path
 

@@ -19,6 +19,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	products.Use(middleware.AuthRequired(), middleware.RequireTradeCapability("sales"))
 	{
 		products.POST("/batch-import/parse", productHandler.ParseBatchImport)
+		products.POST("/batch-import/parse-stream", productHandler.ParseBatchImportStream)
 		products.POST("/batch-import/confirm", productHandler.ConfirmBatchImport)
 		products.POST("", productHandler.Create)
 		products.PUT("/:id", productHandler.Update)

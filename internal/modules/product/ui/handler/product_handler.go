@@ -1,8 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/application/service"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/ui/dto"
@@ -69,6 +73,113 @@ func (h *ProductHandler) ParseBatchImport(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+type productImportStreamPayload struct {
+	Stage      string `json:"stage"`
+	Message    string `json:"message"`
+	ElapsedSec int    `json:"elapsed_sec,omitempty"`
+	Data       any    `json:"data,omitempty"`
+}
+
+// ParseBatchImportStream 以 SSE 方式解析卖家上传的商品台账或截图，避免长时间 AI 识别触发前端/网关超时
+func (h *ProductHandler) ParseBatchImportStream(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	claims := middleware.GetClaims(c)
+	if userID == 0 || claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.BadRequest(c, "请选择要导入的台账或截图")
+		return
+	}
+	hint := c.PostForm("hint")
+
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	if !writeProductImportStreamEvent(c, "progress", productImportStreamPayload{
+		Stage:   "received",
+		Message: "已收到文件，正在准备解析",
+	}) {
+		return
+	}
+
+	type parseResult struct {
+		data *dto.ProductImportParseResponse
+		err  error
+	}
+	requestCtx := c.Request.Context()
+	resultCh := make(chan parseResult, 1)
+	go func() {
+		result, svcErr := h.productService.ParseProductImport(requestCtx, file, hint)
+		resultCh <- parseResult{data: result, err: svcErr}
+	}()
+
+	start := time.Now()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	if !writeProductImportStreamEvent(c, "progress", productImportStreamPayload{
+		Stage:   "recognizing",
+		Message: "AI 正在识别商品字段，请稍候",
+	}) {
+		return
+	}
+
+	for {
+		select {
+		case <-requestCtx.Done():
+			return
+		case result := <-resultCh:
+			if result.err != nil {
+				message := result.err.Error()
+				if svcErr, ok := result.err.(*ecode.Error); ok {
+					message = svcErr.Message
+				}
+				writeProductImportStreamEvent(c, "error", productImportStreamPayload{
+					Stage:      "failed",
+					Message:    message,
+					ElapsedSec: int(time.Since(start).Seconds()),
+				})
+				return
+			}
+			writeProductImportStreamEvent(c, "done", productImportStreamPayload{
+				Stage:      "completed",
+				Message:    "识别完成，请确认商品草稿",
+				ElapsedSec: int(time.Since(start).Seconds()),
+				Data:       result.data,
+			})
+			return
+		case <-ticker.C:
+			if !writeProductImportStreamEvent(c, "progress", productImportStreamPayload{
+				Stage:      "recognizing",
+				Message:    "AI 仍在识别和整理商品草稿",
+				ElapsedSec: int(time.Since(start).Seconds()),
+			}) {
+				return
+			}
+		}
+	}
+}
+
+func writeProductImportStreamEvent(c *gin.Context, event string, payload productImportStreamPayload) bool {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return false
+	}
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return true
 }
 
 // ConfirmBatchImport 确认批量导入草稿并创建商品
