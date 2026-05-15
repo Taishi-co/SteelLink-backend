@@ -117,6 +117,9 @@ type AIProcurementConfig struct {
 	BaseURL             string             `mapstructure:"base_url"`
 	APIKeyEnv           string             `mapstructure:"api_key_env"`
 	Model               string             `mapstructure:"model"`
+	VisionProvider      string             `mapstructure:"vision_provider"`
+	VisionBaseURL       string             `mapstructure:"vision_base_url"`
+	VisionAPIKeyEnv     string             `mapstructure:"vision_api_key_env"`
 	Temperature         float64            `mapstructure:"temperature"`
 	TopP                float64            `mapstructure:"top_p"`
 	MaxTokens           int                `mapstructure:"max_tokens"`
@@ -131,6 +134,17 @@ func (c AIProcurementConfig) APIKey() string {
 		return ""
 	}
 	return os.Getenv(c.APIKeyEnv)
+}
+
+func (c AIProcurementConfig) VisionAPIKey() string {
+	apiKeyEnv := c.VisionAPIKeyEnv
+	if apiKeyEnv == "" {
+		apiKeyEnv = c.APIKeyEnv
+	}
+	if apiKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(apiKeyEnv)
 }
 
 type VectorSearchConfig struct {
@@ -276,6 +290,15 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 	}
 	if c.Model == "" {
 		c.Model = "MiniMax-M2.7"
+	}
+	if c.VisionProvider == "" {
+		c.VisionProvider = "minimax_token_plan"
+	}
+	if c.VisionBaseURL == "" {
+		c.VisionBaseURL = "https://api.minimax.io/v1/coding_plan/vlm"
+	}
+	if c.VisionAPIKeyEnv == "" {
+		c.VisionAPIKeyEnv = c.APIKeyEnv
 	}
 	if c.Temperature <= 0 || c.Temperature > 1 {
 		c.Temperature = 0.2
@@ -521,6 +544,15 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("AI_PROCUREMENT_MODEL"); v != "" {
 		c.AIProcurement.Model = v
 	}
+	if v := os.Getenv("AI_PROCUREMENT_VISION_PROVIDER"); v != "" {
+		c.AIProcurement.VisionProvider = v
+	}
+	if v := os.Getenv("AI_PROCUREMENT_VISION_BASE_URL"); v != "" {
+		c.AIProcurement.VisionBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("AI_PROCUREMENT_VISION_API_KEY_ENV"); v != "" {
+		c.AIProcurement.VisionAPIKeyEnv = v
+	}
 	if v := os.Getenv("AI_PROCUREMENT_TEMPERATURE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			c.AIProcurement.Temperature = n
@@ -708,6 +740,9 @@ func hardcodedAIProcurementFallback() AIProcurementConfig {
 		BaseURL:             "https://api.minimax.io/v1/chat/completions",
 		APIKeyEnv:           "MINIMAX_API_KEY",
 		Model:               "MiniMax-M2.7",
+		VisionProvider:      "minimax_token_plan",
+		VisionBaseURL:       "https://api.minimax.io/v1/coding_plan/vlm",
+		VisionAPIKeyEnv:     "MINIMAX_API_KEY",
 		Temperature:         0.2,
 		TopP:                0.9,
 		MaxTokens:           1200,

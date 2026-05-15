@@ -19,8 +19,9 @@
 | 编号 | 场景 | 前置条件 | 步骤 | 期望结果 |
 | --- | --- | --- | --- | --- |
 | TC-EX-01 | 不支持旧版 xls | 上传 `.xls` 文件 | 调用 parse | 返回不支持旧版 xls |
-| TC-EX-02 | 图片识别未启用模型 | 未配置 AI 模型 | 上传截图 | 返回需要启用支持图片识别的 AI 模型 |
+| TC-EX-02 | 图片识别未启用模型 | 未配置 AI 模型或 MiniMax Token Plan Key | 上传截图 | 返回需要启用支持图片识别的 AI 模型 |
 | TC-EX-03 | 行字段缺失 | 草稿缺少品种或牌号 | 调用 confirm | 返回逐行错误，不影响其他有效行 |
+| TC-EX-04 | MiniMax VLM 返回错误 | Token Plan Key 无效或额度不足 | 上传截图 | 返回 MiniMax 图像识别错误 |
 
 ## 权限测试
 
@@ -36,3 +37,4 @@
 | TC-OPS-01 | 后端测试 | `go test ./internal/modules/product/...` | 商品模块测试通过 |
 | TC-OPS-02 | 后端全量测试 | `go test ./...` | 全量测试通过 |
 | TC-OPS-03 | 发布门禁 | `./harness/release.sh docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT` | release gate 通过 |
+| TC-OPS-04 | MiniMax Token Plan 配置 | 设置 `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`、`AI_PROCUREMENT_VISION_PROVIDER=minimax_token_plan`、`AI_PROCUREMENT_VISION_BASE_URL=https://api.minimax.io/v1/coding_plan/vlm`、`AI_PROCUREMENT_VISION_API_KEY_ENV=MINIMAX_API_KEY` | 截图解析走 MiniMax VLM |
