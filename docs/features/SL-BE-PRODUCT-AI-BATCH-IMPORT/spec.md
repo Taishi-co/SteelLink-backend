@@ -17,7 +17,7 @@
 
 - 新增卖家商品批量导入解析接口，支持 csv、tsv、txt、xlsx 和图片文件。
 - 表格类文件提供规则解析兜底；启用既有 AI 模型配置时优先走大模型解析。
-- 图片类文件通过 AI 模型解析，识别失败时返回明确错误。
+- 图片类文件优先通过 MiniMax Token Plan VLM 解析，识别失败时返回明确错误。
 - 新增批量确认接口，将商家确认后的草稿批量创建为商品。
 - 默认保存为草稿；商家选择直接提交审核时执行更严格字段校验。
 
@@ -39,6 +39,8 @@
   - `products`
 - 配置或环境变量变化:
   - 复用 `AI_PROCUREMENT_MODEL_PARSING_ENABLED`、`AI_PROCUREMENT_BASE_URL`、`AI_PROCUREMENT_MODEL`、`AI_PROCUREMENT_API_KEY_ENV` 等既有模型配置。
+  - 新增图片识别配置: `AI_PROCUREMENT_VISION_PROVIDER`、`AI_PROCUREMENT_VISION_BASE_URL`、`AI_PROCUREMENT_VISION_API_KEY_ENV`。
+  - 默认图片识别 provider 为 `minimax_token_plan`，默认端点为 `https://api.minimax.io/v1/coding_plan/vlm`。
 
 ## 权限与合规影响
 
@@ -52,4 +54,4 @@
 2. 返回草稿包含品种、牌号、规格、产地、存放地、库存、价格和识别置信度。
 3. 商家确认后可批量创建商品，默认状态为草稿。
 4. 选择直接提交审核时，缺少主图、库存、单价等关键字段的行返回逐行错误。
-5. 启用 AI 模型配置后，截图文件可以走大模型解析。
+5. 启用 AI 模型配置和 MiniMax Token Plan Key 后，截图文件可以通过 MiniMax VLM 解析。

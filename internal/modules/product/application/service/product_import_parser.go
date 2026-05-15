@@ -804,6 +804,18 @@ func parseProductImportWithModel(ctx context.Context, source productImportSource
 	if !modelCfg.ModelParsingEnabled {
 		return nil, nil, false, nil
 	}
+	if source.IsImage && useMinimaxTokenPlanVision(modelCfg) {
+		content, err := parseProductImportImageWithMinimaxTokenPlan(ctx, modelCfg, source, hint)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		items, warnings, err := parseProductImportModelContent(content)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return items, warnings, true, nil
+	}
+
 	apiKey := modelCfg.APIKey()
 	if apiKey == "" || modelCfg.BaseURL == "" || modelCfg.Model == "" {
 		return nil, []string{"AI 模型配置不完整，已使用规则解析"}, false, nil
@@ -863,10 +875,78 @@ func parseProductImportWithModel(ctx context.Context, source productImportSource
 	if err != nil {
 		return nil, nil, true, err
 	}
+	items, warnings, err := parseProductImportModelContent(content)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return items, warnings, true, nil
+}
+
+func useMinimaxTokenPlanVision(modelCfg config.AIProcurementConfig) bool {
+	provider := strings.ToLower(strings.TrimSpace(modelCfg.VisionProvider))
+	return provider == "minimax_token_plan" || provider == "minimax-token-plan" || provider == "minimax_tokenplan"
+}
+
+func parseProductImportImageWithMinimaxTokenPlan(ctx context.Context, modelCfg config.AIProcurementConfig, source productImportSource, hint string) (string, error) {
+	apiKey := modelCfg.VisionAPIKey()
+	if apiKey == "" || modelCfg.VisionBaseURL == "" {
+		return "", fmt.Errorf("MiniMax Token Plan 图像识别配置不完整，请设置 AI_PROCUREMENT_VISION_BASE_URL 和 AI_PROCUREMENT_VISION_API_KEY_ENV")
+	}
+	payload := productImportVisionRequest{
+		Prompt:   productImportVisionPrompt(source, hint),
+		ImageURL: source.DataURL,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	timeout := time.Duration(modelCfg.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, productImportVisionModelURL(modelCfg.VisionBaseURL), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("MM-API-Source", "SteelLink-Backend")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("MiniMax Token Plan 图像识别失败: status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var parsed productImportVisionResponse
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return "", err
+	}
+	if parsed.BaseResp.StatusCode != 0 {
+		return "", fmt.Errorf("MiniMax Token Plan 图像识别失败: %d-%s", parsed.BaseResp.StatusCode, parsed.BaseResp.StatusMsg)
+	}
+	content := strings.TrimSpace(parsed.Content)
+	if content == "" {
+		return "", fmt.Errorf("MiniMax Token Plan 图像识别结果为空")
+	}
+	return content, nil
+}
+
+func parseProductImportModelContent(content string) ([]dto.ProductImportDraftItem, []string, error) {
 	content = normalizeProductImportJSONContent(content)
 	var parsed productImportModelResponse
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return nil, nil, true, err
+		return nil, nil, err
 	}
 
 	items := make([]dto.ProductImportDraftItem, 0, len(parsed.Items))
@@ -902,7 +982,7 @@ func parseProductImportWithModel(ctx context.Context, source productImportSource
 			},
 		})
 	}
-	return normalizeImportDraftItems(items), parsed.Warnings, true, nil
+	return normalizeImportDraftItems(items), parsed.Warnings, nil
 }
 
 type productImportChatCompletionRequest struct {
@@ -926,6 +1006,19 @@ type productImportMessagePart struct {
 
 type productImportImageURL struct {
 	URL string `json:"url"`
+}
+
+type productImportVisionRequest struct {
+	Prompt   string `json:"prompt"`
+	ImageURL string `json:"image_url"`
+}
+
+type productImportVisionResponse struct {
+	Content  string `json:"content"`
+	BaseResp struct {
+		StatusCode int    `json:"status_code"`
+		StatusMsg  string `json:"status_msg"`
+	} `json:"base_resp"`
 }
 
 func productImportSystemPrompt() string {
@@ -954,12 +1047,28 @@ func productImportModelPrompt(source productImportSource, hint string) string {
 	return strings.Join(lines, "\n")
 }
 
+func productImportVisionPrompt(source productImportSource, hint string) string {
+	return strings.Join([]string{
+		productImportSystemPrompt(),
+		productImportModelPrompt(source, hint),
+		"请直接返回上述 JSON 对象，不要输出解释、Markdown或代码块。",
+	}, "\n")
+}
+
 func productImportModelURL(baseURL string) string {
 	baseURL = strings.TrimSpace(baseURL)
 	if strings.Contains(baseURL, "/chat/completions") {
 		return baseURL
 	}
 	return strings.TrimRight(baseURL, "/") + "/chat/completions"
+}
+
+func productImportVisionModelURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if strings.Contains(baseURL, "/coding_plan/vlm") {
+		return baseURL
+	}
+	return strings.TrimRight(baseURL, "/") + "/v1/coding_plan/vlm"
 }
 
 func extractProductImportModelContent(data []byte) (string, error) {

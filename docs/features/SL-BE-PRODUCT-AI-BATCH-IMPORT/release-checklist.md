@@ -11,6 +11,7 @@
 - [ ] `./harness/release.sh docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT` 已通过
 - [ ] `go test ./...` 已通过
 - [ ] 已确认 AI 模型配置是否在目标环境启用
+- [ ] 已确认 MiniMax Token Plan Key 已写入 `AI_PROCUREMENT_VISION_API_KEY_ENV` 指向的环境变量
 - [ ] 已确认 smoke test 范围
 - [ ] GitHub PR 创建后，已执行 `./harness/lark-pr-doc.sh docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT --pr-url <github-pr-url> --pr-title "<pr-title>"` 并写入共享飞书 PR 记录
 

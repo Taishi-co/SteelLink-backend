@@ -1,6 +1,14 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/Taishi-co/SteelLink-backend/config"
+)
 
 func TestParseProductImportRowsWithHeader(t *testing.T) {
 	text := `品种,牌号,规格,产地,存放地,捆包号,库存,单价
@@ -62,5 +70,119 @@ func TestParseProductImportRowsWithoutHeader(t *testing.T) {
 	}
 	if item.Quantity != 50 || item.UnitPrice != 3800 {
 		t.Fatalf("quantity/unit price = %v/%v", item.Quantity, item.UnitPrice)
+	}
+}
+
+func TestParseProductImportWithMinimaxTokenPlanVision(t *testing.T) {
+	t.Setenv("MINIMAX_API_KEY", "test-key")
+	previousConfig := config.GlobalConfig
+	defer func() {
+		config.GlobalConfig = previousConfig
+	}()
+
+	var requestPayload struct {
+		Prompt   string `json:"prompt"`
+		ImageURL string `json:"image_url"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.Header.Get("MM-API-Source"); got != "SteelLink-Backend" {
+			t.Fatalf("MM-API-Source = %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&requestPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"content": "{\"items\":[{\"category\":\"热轧板卷\",\"material\":\"Q235B\",\"spec\":\"3.0*1500*C\",\"steel_mill\":\"唐钢\",\"warehouse_name\":\"唐山仓库A\",\"quantity\":52.5,\"unit_price\":3820,\"confidence\":0.91,\"warnings\":[]}],\"warnings\":[]}",
+			"base_resp": {"status_code": 0, "status_msg": "success"}
+		}`))
+	}))
+	defer server.Close()
+
+	config.GlobalConfig = &config.Config{
+		AIProcurement: config.AIProcurementConfig{
+			ModelParsingEnabled: true,
+			Provider:            "minimax",
+			APIKeyEnv:           "MINIMAX_API_KEY",
+			Model:               "MiniMax-M2.7",
+			VisionProvider:      "minimax_token_plan",
+			VisionBaseURL:       server.URL,
+			VisionAPIKeyEnv:     "MINIMAX_API_KEY",
+			TimeoutSec:          5,
+		},
+	}
+
+	items, warnings, usedModel, err := parseProductImportWithModel(context.Background(), productImportSource{
+		Filename:   "ledger.png",
+		SourceType: "image",
+		IsImage:    true,
+		DataURL:    "data:image/png;base64,AAAA",
+	}, "优先识别库存和单价")
+	if err != nil {
+		t.Fatalf("parseProductImportWithModel err = %v", err)
+	}
+	if !usedModel {
+		t.Fatalf("usedModel = false")
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if requestPayload.ImageURL != "data:image/png;base64,AAAA" {
+		t.Fatalf("image_url = %q", requestPayload.ImageURL)
+	}
+	if requestPayload.Prompt == "" {
+		t.Fatalf("prompt is empty")
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	product := items[0].Product
+	if product.Category != "热轧板卷" || product.Spec.Material != "Q235B" || product.SteelMill != "唐钢" {
+		t.Fatalf("unexpected product = %#v", product)
+	}
+	if product.Spec.HeightSpecValue != 3 || product.Spec.WidthSpecValue != 1500 || product.Spec.LengthType != "coil" {
+		t.Fatalf("unexpected parsed spec = %#v", product.Spec)
+	}
+}
+
+func TestParseProductImportWithMinimaxTokenPlanVisionAPIError(t *testing.T) {
+	t.Setenv("MINIMAX_API_KEY", "test-key")
+	previousConfig := config.GlobalConfig
+	defer func() {
+		config.GlobalConfig = previousConfig
+	}()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"base_resp":{"status_code":2049,"status_msg":"invalid api key"}}`))
+	}))
+	defer server.Close()
+
+	config.GlobalConfig = &config.Config{
+		AIProcurement: config.AIProcurementConfig{
+			ModelParsingEnabled: true,
+			VisionProvider:      "minimax_token_plan",
+			VisionBaseURL:       server.URL,
+			VisionAPIKeyEnv:     "MINIMAX_API_KEY",
+			TimeoutSec:          5,
+		},
+	}
+
+	_, _, usedModel, err := parseProductImportWithModel(context.Background(), productImportSource{
+		Filename:   "ledger.png",
+		SourceType: "image",
+		IsImage:    true,
+		DataURL:    "data:image/png;base64,AAAA",
+	}, "")
+	if !usedModel {
+		t.Fatalf("usedModel = false")
+	}
+	if err == nil {
+		t.Fatalf("err = nil")
 	}
 }

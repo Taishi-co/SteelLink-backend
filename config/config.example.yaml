@@ -59,6 +59,9 @@ ai_procurement:
   base_url: ${AI_PROCUREMENT_BASE_URL:https://api.minimax.io/v1/chat/completions}
   api_key_env: ${AI_PROCUREMENT_API_KEY_ENV:MINIMAX_API_KEY}
   model: ${AI_PROCUREMENT_MODEL:MiniMax-M2.7}
+  vision_provider: ${AI_PROCUREMENT_VISION_PROVIDER:minimax_token_plan}
+  vision_base_url: ${AI_PROCUREMENT_VISION_BASE_URL:https://api.minimax.io/v1/coding_plan/vlm}
+  vision_api_key_env: ${AI_PROCUREMENT_VISION_API_KEY_ENV:MINIMAX_API_KEY}
   temperature: ${AI_PROCUREMENT_TEMPERATURE:0.2}
   top_p: ${AI_PROCUREMENT_TOP_P:0.9}
   max_tokens: ${AI_PROCUREMENT_MAX_TOKENS:1200}
