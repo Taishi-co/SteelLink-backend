@@ -16,6 +16,7 @@
 ### In Scope
 
 - 新增卖家商品批量导入解析接口，支持 csv、tsv、txt、xlsx 和图片文件。
+- 新增流式解析接口，AI 图片识别期间通过 SSE 返回进度，降低 30 秒请求超时风险。
 - 表格类文件提供规则解析兜底；启用既有 AI 模型配置时优先走大模型解析。
 - 图片类文件优先通过 MiniMax Token Plan VLM 解析，识别失败时返回明确错误。
 - 新增批量确认接口，将商家确认后的草稿批量创建为商品。
@@ -31,6 +32,7 @@
 
 - 新增路由:
   - `POST /api/v1/products/batch-import/parse`
+  - `POST /api/v1/products/batch-import/parse-stream`
   - `POST /api/v1/products/batch-import/confirm`
 - 受影响服务:
   - `internal/modules/product/application/service`
@@ -55,3 +57,4 @@
 3. 商家确认后可批量创建商品，默认状态为草稿。
 4. 选择直接提交审核时，缺少主图、库存、单价等关键字段的行返回逐行错误。
 5. 启用 AI 模型配置和 MiniMax Token Plan Key 后，截图文件可以通过 MiniMax VLM 解析。
+6. 前端调用流式解析接口时，后端在识别期间持续返回阶段事件，最终返回同结构的商品草稿。

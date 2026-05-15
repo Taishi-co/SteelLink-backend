@@ -22,8 +22,9 @@
 2. 实现 csv/tsv/txt/xlsx 规则解析和规格字段拆分。
 3. 复用既有 AI 模型配置，增加文本识别和 MiniMax Token Plan 图片识别入口。
 4. 接收 Admin 写入 Redis 的视觉识别配置，支持在 Admin 选择 Token Plan 端点和环境变量名。
-5. 将确认后的草稿逐行创建商品，返回成功和失败行。
-6. 增加解析单元测试并执行 release gate。
+5. 增加 SSE 流式解析接口，长时间 AI 识别期间持续推送阶段事件，避免前端/网关等待超时。
+6. 将确认后的草稿逐行创建商品，返回成功和失败行。
+7. 增加解析单元测试并执行 release gate。
 
 ## 验证计划
 
@@ -34,6 +35,6 @@
 
 ## 风险与回滚关注点
 
-- 图片识别依赖 MiniMax Token Plan Key 和 `https://api.minimaxi.com/v1/coding_plan/vlm` 配置，未启用时会明确失败。
+- 图片识别依赖 MiniMax Token Plan Key 和 `https://api.minimaxi.com/v1/coding_plan/vlm` 配置，未启用时会明确失败；流式接口只展示处理阶段和耗时，不输出模型隐藏推理链。
 - 默认创建草稿，避免未补齐图片和审核资料的商品直接进入商城。
 - 回滚代码不会影响已创建商品。
