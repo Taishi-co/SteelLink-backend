@@ -40,7 +40,7 @@
 - 配置或环境变量变化:
   - 复用 `AI_PROCUREMENT_MODEL_PARSING_ENABLED`、`AI_PROCUREMENT_BASE_URL`、`AI_PROCUREMENT_MODEL`、`AI_PROCUREMENT_API_KEY_ENV` 等既有模型配置。
   - 新增图片识别配置: `AI_PROCUREMENT_VISION_PROVIDER`、`AI_PROCUREMENT_VISION_BASE_URL`、`AI_PROCUREMENT_VISION_API_KEY_ENV`。
-  - 默认图片识别 provider 为 `minimax_token_plan`，默认端点为 `https://api.minimax.io/v1/coding_plan/vlm`。
+  - 默认图片识别 provider 为 `minimax_token_plan`，默认端点为 `https://api.minimaxi.com/v1/coding_plan/vlm`。
 
 ## 权限与合规影响
 

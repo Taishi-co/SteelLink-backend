@@ -14,7 +14,7 @@
   - `internal/modules/product/infrastructure/router/router.go`
 - 文档文件:
   - `docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT/*`
-- 配置文件: 增加 `AI_PROCUREMENT_VISION_PROVIDER`、`AI_PROCUREMENT_VISION_BASE_URL`、`AI_PROCUREMENT_VISION_API_KEY_ENV`。
+- 配置文件: 增加 `AI_PROCUREMENT_VISION_PROVIDER`、`AI_PROCUREMENT_VISION_BASE_URL`、`AI_PROCUREMENT_VISION_API_KEY_ENV`，默认 Token Plan 域名使用 `api.minimaxi.com`。
 
 ## 实施步骤
 
@@ -34,6 +34,6 @@
 
 ## 风险与回滚关注点
 
-- 图片识别依赖 MiniMax Token Plan Key 和 `/v1/coding_plan/vlm` 配置，未启用时会明确失败。
+- 图片识别依赖 MiniMax Token Plan Key 和 `https://api.minimaxi.com/v1/coding_plan/vlm` 配置，未启用时会明确失败。
 - 默认创建草稿，避免未补齐图片和审核资料的商品直接进入商城。
 - 回滚代码不会影响已创建商品。
