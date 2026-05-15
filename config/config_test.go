@@ -18,6 +18,7 @@ func TestApplyAdminAIProcurementConfigVisionFields(t *testing.T) {
 	source.Model.VisionProvider = "minimax_token_plan"
 	source.Model.VisionBaseURL = "https://api.minimaxi.com/v1/coding_plan/vlm/"
 	source.Model.VisionAPIKeyEnv = "MINIMAX_TOKEN_PLAN_API_KEY"
+	source.Model.VisionTimeoutSec = 150
 	source.Model.Model = "MiniMax-M2.7"
 
 	applyAdminAIProcurementConfig(&target, source)
@@ -33,6 +34,9 @@ func TestApplyAdminAIProcurementConfigVisionFields(t *testing.T) {
 	}
 	if target.VisionAPIKeyEnv != "MINIMAX_TOKEN_PLAN_API_KEY" {
 		t.Fatalf("VisionAPIKeyEnv = %q", target.VisionAPIKeyEnv)
+	}
+	if target.VisionTimeoutSec != 150 {
+		t.Fatalf("VisionTimeoutSec = %d", target.VisionTimeoutSec)
 	}
 	if target.RuntimeConfig.RedisKey != "custom_ai_procurement_config" || target.RuntimeConfig.CacheTTLSec != 12 {
 		t.Fatalf("RuntimeConfig was not preserved: %#v", target.RuntimeConfig)
@@ -54,5 +58,8 @@ func TestApplyAdminAIProcurementConfigDefaultsVisionAPIKeyEnv(t *testing.T) {
 	}
 	if target.VisionAPIKeyEnv != "MINIMAX_TOKEN_PLAN_API_KEY" {
 		t.Fatalf("VisionAPIKeyEnv = %q", target.VisionAPIKeyEnv)
+	}
+	if target.VisionTimeoutSec != 120 {
+		t.Fatalf("VisionTimeoutSec = %d", target.VisionTimeoutSec)
 	}
 }

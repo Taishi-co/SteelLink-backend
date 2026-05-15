@@ -844,10 +844,7 @@ func parseProductImportWithModel(ctx context.Context, source productImportSource
 		return nil, nil, true, err
 	}
 
-	timeout := time.Duration(modelCfg.TimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout := productImportRequestTimeout(modelCfg, source.IsImage)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -901,10 +898,7 @@ func parseProductImportImageWithMinimaxTokenPlan(ctx context.Context, modelCfg c
 		return "", err
 	}
 
-	timeout := time.Duration(modelCfg.TimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout := productImportRequestTimeout(modelCfg, true)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -1045,6 +1039,21 @@ func productImportModelPrompt(source productImportSource, hint string) string {
 		lines = append(lines, "台账文本如下:", source.Text)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func productImportRequestTimeout(modelCfg config.AIProcurementConfig, isVision bool) time.Duration {
+	timeoutSec := modelCfg.TimeoutSec
+	if isVision && modelCfg.VisionTimeoutSec > 0 {
+		timeoutSec = modelCfg.VisionTimeoutSec
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout > 0 {
+		return timeout
+	}
+	if isVision {
+		return 120 * time.Second
+	}
+	return 30 * time.Second
 }
 
 func productImportVisionPrompt(source productImportSource, hint string) string {

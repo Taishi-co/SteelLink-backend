@@ -120,6 +120,7 @@ type AIProcurementConfig struct {
 	VisionProvider      string             `mapstructure:"vision_provider"`
 	VisionBaseURL       string             `mapstructure:"vision_base_url"`
 	VisionAPIKeyEnv     string             `mapstructure:"vision_api_key_env"`
+	VisionTimeoutSec    int                `mapstructure:"vision_timeout_sec"`
 	Temperature         float64            `mapstructure:"temperature"`
 	TopP                float64            `mapstructure:"top_p"`
 	MaxTokens           int                `mapstructure:"max_tokens"`
@@ -185,6 +186,7 @@ type aiProcurementAdminConfig struct {
 		VisionProvider      string  `json:"visionProvider"`
 		VisionBaseURL       string  `json:"visionBaseUrl"`
 		VisionAPIKeyEnv     string  `json:"visionApiKeyEnv"`
+		VisionTimeoutSec    int     `json:"visionTimeoutSec"`
 		Model               string  `json:"model"`
 		Temperature         float64 `json:"temperature"`
 		TopP                float64 `json:"topP"`
@@ -302,6 +304,9 @@ func applyAIProcurementDefaults(c *AIProcurementConfig) {
 	}
 	if c.VisionAPIKeyEnv == "" {
 		c.VisionAPIKeyEnv = "MINIMAX_TOKEN_PLAN_API_KEY"
+	}
+	if c.VisionTimeoutSec <= 0 {
+		c.VisionTimeoutSec = 120
 	}
 	if c.Temperature <= 0 || c.Temperature > 1 {
 		c.Temperature = 0.2
@@ -556,6 +561,11 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("AI_PROCUREMENT_VISION_API_KEY_ENV"); v != "" {
 		c.AIProcurement.VisionAPIKeyEnv = v
 	}
+	if v := os.Getenv("AI_PROCUREMENT_VISION_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AIProcurement.VisionTimeoutSec = n
+		}
+	}
 	if v := os.Getenv("AI_PROCUREMENT_TEMPERATURE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			c.AIProcurement.Temperature = n
@@ -746,6 +756,7 @@ func hardcodedAIProcurementFallback() AIProcurementConfig {
 		VisionProvider:      "minimax_token_plan",
 		VisionBaseURL:       "https://api.minimaxi.com/v1/coding_plan/vlm",
 		VisionAPIKeyEnv:     "MINIMAX_TOKEN_PLAN_API_KEY",
+		VisionTimeoutSec:    120,
 		Temperature:         0.2,
 		TopP:                0.9,
 		MaxTokens:           1200,
@@ -798,6 +809,9 @@ func applyAdminAIProcurementConfig(target *AIProcurementConfig, source aiProcure
 	}
 	if source.Model.VisionAPIKeyEnv != "" {
 		target.VisionAPIKeyEnv = source.Model.VisionAPIKeyEnv
+	}
+	if source.Model.VisionTimeoutSec > 0 {
+		target.VisionTimeoutSec = source.Model.VisionTimeoutSec
 	}
 	if source.Model.Model != "" {
 		target.Model = source.Model.Model

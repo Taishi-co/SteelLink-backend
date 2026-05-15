@@ -38,4 +38,4 @@
 | TC-OPS-01 | 后端测试 | `go test ./internal/modules/product/...` | 商品模块测试通过 |
 | TC-OPS-02 | 后端全量测试 | `go test ./...` | 全量测试通过 |
 | TC-OPS-03 | 发布门禁 | `./harness/release.sh docs/features/SL-BE-PRODUCT-AI-BATCH-IMPORT` | release gate 通过 |
-| TC-OPS-04 | MiniMax Token Plan 配置 | 设置 `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`、`AI_PROCUREMENT_VISION_PROVIDER=minimax_token_plan`、`AI_PROCUREMENT_VISION_BASE_URL=https://api.minimaxi.com/v1/coding_plan/vlm`、`AI_PROCUREMENT_VISION_API_KEY_ENV=MINIMAX_TOKEN_PLAN_API_KEY` | 截图解析走 MiniMax VLM |
+| TC-OPS-04 | MiniMax Token Plan 配置 | 设置 `AI_PROCUREMENT_MODEL_PARSING_ENABLED=true`、`AI_PROCUREMENT_VISION_PROVIDER=minimax_token_plan`、`AI_PROCUREMENT_VISION_BASE_URL=https://api.minimaxi.com/v1/coding_plan/vlm`、`AI_PROCUREMENT_VISION_API_KEY_ENV=MINIMAX_TOKEN_PLAN_API_KEY`、`AI_PROCUREMENT_VISION_TIMEOUT_SEC=120` | 截图解析走 MiniMax VLM，长耗时识别不再被 20 秒默认文本模型超时截断 |

@@ -67,6 +67,7 @@ ai_procurement:
   vision_provider: minimax_token_plan
   vision_base_url: https://api.minimaxi.com/v1/coding_plan/vlm
   vision_api_key_env: MINIMAX_TOKEN_PLAN_API_KEY
+  vision_timeout_sec: 120
   temperature: 0.2
   top_p: 0.9
   max_tokens: 1200
