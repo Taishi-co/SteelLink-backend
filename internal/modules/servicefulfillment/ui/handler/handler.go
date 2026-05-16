@@ -425,6 +425,10 @@ func (h *Handler) AcceptLogisticsOrder(c *gin.Context) {
 		response.Error(c, ecode.ErrForbidden.WithMessage("无权承接该物流委托"))
 		return
 	}
+	if err := h.ensureLogisticsStatusDocuments(c, &item, entity.LogisticsOrderPickupScheduled); err != nil {
+		response.Error(c, err)
+		return
+	}
 	now := time.Now()
 	item.CarrierEnterpriseID = claims.EnterpriseID
 	item.DriverName = req.DriverName
@@ -606,7 +610,21 @@ func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.Logist
 }
 
 func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.LogisticsOrder, targetStatus entity.LogisticsOrderStatus) *ecode.Error {
-	required := requiredLogisticsDocTypes(targetStatus)
+	if targetStatus == entity.LogisticsOrderPickupScheduled {
+		var count int64
+		if err := h.db.WithContext(c.Request.Context()).
+			Model(&entity.FulfillmentDocument{}).
+			Where("logistics_order_id = ? AND doc_type = ? AND uploaded_role = ?", item.ID, entity.DocTypePickupInstruction, "seller").
+			Count(&count).Error; err != nil {
+			return ecode.ErrDatabase.WithMessage("查询卖方提货指令失败")
+		}
+		if count == 0 {
+			return ecode.ErrBadRequest.WithMessage("当前节点缺少卖方提货指令：pickup_instruction")
+		}
+		return nil
+	}
+	requiredGroups := requiredLogisticsDocTypeGroups(targetStatus)
+	required := flattenDocTypeGroups(requiredGroups)
 	if len(required) == 0 || item == nil || item.ID == 0 {
 		return nil
 	}
@@ -621,10 +639,17 @@ func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.Lo
 	for _, doc := range docs {
 		existing[string(doc.DocType)] = struct{}{}
 	}
-	missing := make([]string, 0, len(required))
-	for _, docType := range required {
-		if _, ok := existing[docType]; !ok {
-			missing = append(missing, docType)
+	missing := make([]string, 0, len(requiredGroups))
+	for _, group := range requiredGroups {
+		satisfied := false
+		for _, docType := range group {
+			if _, ok := existing[docType]; ok {
+				satisfied = true
+				break
+			}
+		}
+		if !satisfied {
+			missing = append(missing, strings.Join(group, "/"))
 		}
 	}
 	if len(missing) > 0 {
@@ -633,12 +658,41 @@ func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.Lo
 	return nil
 }
 
+func requiredLogisticsDocTypeGroups(status entity.LogisticsOrderStatus) [][]string {
+	required := requiredLogisticsDocTypes(status)
+	groups := make([][]string, 0, len(required))
+	for _, docType := range required {
+		groups = append(groups, []string{docType})
+	}
+	if status == entity.LogisticsOrderLoadingConfirmed {
+		return [][]string{{string(entity.DocTypeLoadingVoucher), string(entity.DocTypePickupOrder)}}
+	}
+	return groups
+}
+
+func flattenDocTypeGroups(groups [][]string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(groups))
+	for _, group := range groups {
+		for _, docType := range group {
+			if _, ok := seen[docType]; ok {
+				continue
+			}
+			seen[docType] = struct{}{}
+			result = append(result, docType)
+		}
+	}
+	return result
+}
+
 func requiredLogisticsDocTypes(status entity.LogisticsOrderStatus) []string {
 	switch status {
+	case entity.LogisticsOrderPickupScheduled:
+		return []string{string(entity.DocTypePickupInstruction)}
 	case entity.LogisticsOrderOutboundConfirmed:
 		return []string{string(entity.DocTypeOutboundOrder), string(entity.DocTypeSealPhoto)}
 	case entity.LogisticsOrderLoadingConfirmed:
-		return []string{string(entity.DocTypePickupOrder)}
+		return []string{string(entity.DocTypeLoadingVoucher)}
 	case entity.LogisticsOrderInTransit:
 		return []string{string(entity.DocTypeGPSTrack)}
 	case entity.LogisticsOrderArrivalConfirmed:
@@ -861,10 +915,10 @@ func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.Logistics
 
 func logisticsStatusRequirementDefinitions() []dto.LogisticsStatusRequirementInfo {
 	return []dto.LogisticsStatusRequirementInfo{
-		{Status: string(entity.LogisticsOrderPickupScheduled), Label: "提货预约", Actor: "logistics", Description: "物流方预约提货时间并确认司机车辆"},
+		{Status: string(entity.LogisticsOrderPickupScheduled), Label: "提货预约", Actor: "logistics", Description: "物流方查看卖方提货指令后预约提货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderPickupScheduled)},
 		{Status: string(entity.LogisticsOrderArrivalSignedIn), Label: "到场签到", Actor: "warehouse", Description: "仓储方确认车辆到场"},
 		{Status: string(entity.LogisticsOrderOutboundConfirmed), Label: "出库确认", Actor: "warehouse", Description: "仓储方上传出库单和封条照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderOutboundConfirmed)},
-		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传提货单并确认装货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
+		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传装车凭证并确认装货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
 		{Status: string(entity.LogisticsOrderInTransit), Label: "运输中", Actor: "logistics", Description: "物流方上传 GPS 或在途轨迹", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInTransit)},
 		{Status: string(entity.LogisticsOrderArrivalConfirmed), Label: "到货确认", Actor: "logistics", Description: "物流方上传到货照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderArrivalConfirmed)},
 		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "验收签收", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderReceiptSigned)},
@@ -1032,6 +1086,10 @@ func (h *Handler) UploadFulfillmentDocument(c *gin.Context) {
 		response.Error(c, actorErr)
 		return
 	}
+	if entity.FulfillmentDocType(req.DocType) == entity.DocTypePickupInstruction && role != "seller" {
+		response.Error(c, ecode.ErrForbidden.WithMessage("提货指令需由卖方上传"))
+		return
+	}
 
 	doc := entity.FulfillmentDocument{
 		LogisticsOrderID: logisticsOrderID,
@@ -1064,6 +1122,14 @@ func (h *Handler) resolveFulfillmentDocumentActor(c *gin.Context, logisticsOrder
 	if enterpriseID == logisticsOrder.BuyerEnterpriseID {
 		return "buyer", nil
 	}
+	if logisticsOrder.OrderID > 0 {
+		var order orderEntity.Order
+		if err := h.db.WithContext(c.Request.Context()).First(&order, logisticsOrder.OrderID).Error; err == nil {
+			if order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID {
+				return "seller", nil
+			}
+		}
+	}
 	if logisticsOrder.WarehouseServiceID > 0 {
 		var warehouse serviceOfferEntity.WarehouseService
 		if err := h.db.WithContext(c.Request.Context()).
@@ -1075,9 +1141,6 @@ func (h *Handler) resolveFulfillmentDocumentActor(c *gin.Context, logisticsOrder
 	if logisticsOrder.OrderID > 0 {
 		var order orderEntity.Order
 		if err := h.db.WithContext(c.Request.Context()).First(&order, logisticsOrder.OrderID).Error; err == nil {
-			if order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID {
-				return "seller", nil
-			}
 			var financing orderEntity.OrderFinancingRequest
 			if err := h.db.WithContext(c.Request.Context()).
 				Where("order_id = ? AND funding_enterprise_id = ?", logisticsOrder.OrderID, enterpriseID).

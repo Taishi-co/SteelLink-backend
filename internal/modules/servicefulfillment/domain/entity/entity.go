@@ -290,15 +290,17 @@ func (LogisticsTrackingEvent) TableName() string {
 type FulfillmentDocType string
 
 const (
-	DocTypePickupOrder      FulfillmentDocType = "pickup_order"
-	DocTypeOutboundOrder    FulfillmentDocType = "outbound_order"
-	DocTypeSealPhoto        FulfillmentDocType = "seal_photo"
-	DocTypeGPSTrack         FulfillmentDocType = "gps_track"
-	DocTypeInspectionResult FulfillmentDocType = "inspection_result"
-	DocTypeReceiptOrder     FulfillmentDocType = "receipt_order"
-	DocTypeInboundOrder     FulfillmentDocType = "inbound_order"
-	DocTypeWaybill          FulfillmentDocType = "waybill"
-	DocTypeDeliveryPhoto    FulfillmentDocType = "delivery_photo"
+	DocTypePickupInstruction FulfillmentDocType = "pickup_instruction"
+	DocTypePickupOrder       FulfillmentDocType = "pickup_order"
+	DocTypeOutboundOrder     FulfillmentDocType = "outbound_order"
+	DocTypeSealPhoto         FulfillmentDocType = "seal_photo"
+	DocTypeLoadingVoucher    FulfillmentDocType = "loading_voucher"
+	DocTypeGPSTrack          FulfillmentDocType = "gps_track"
+	DocTypeInspectionResult  FulfillmentDocType = "inspection_result"
+	DocTypeReceiptOrder      FulfillmentDocType = "receipt_order"
+	DocTypeInboundOrder      FulfillmentDocType = "inbound_order"
+	DocTypeWaybill           FulfillmentDocType = "waybill"
+	DocTypeDeliveryPhoto     FulfillmentDocType = "delivery_photo"
 )
 
 type FulfillmentDocument struct {
