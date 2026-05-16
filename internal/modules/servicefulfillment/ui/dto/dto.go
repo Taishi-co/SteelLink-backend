@@ -56,6 +56,15 @@ type UpdateStatusRequest struct {
 	Remark string `json:"remark"`
 }
 
+type LogisticsStatusRequirementInfo struct {
+	Status      string   `json:"status"`
+	Label       string   `json:"label"`
+	Actor       string   `json:"actor"`
+	Description string   `json:"description"`
+	RequiredDoc []string `json:"required_doc_types"`
+	Satisfied   bool     `json:"satisfied"`
+}
+
 type EstimateLogisticsRequest struct {
 	LogisticsServiceID uint64  `json:"logistics_service_id" binding:"required"`
 	WarehouseServiceID uint64  `json:"warehouse_service_id"`
@@ -200,39 +209,40 @@ type WarehouseInventorySnapshotInfo struct {
 }
 
 type LogisticsOrderInfo struct {
-	ID                      uint64              `json:"id"`
-	LogisticsNo             string              `json:"logistics_no"`
-	OrderID                 uint64              `json:"order_id"`
-	OrderNo                 string              `json:"order_no"`
-	BuyerEnterpriseID       uint64              `json:"buyer_enterprise_id"`
-	LogisticsServiceID      uint64              `json:"logistics_service_id"`
-	CarrierEnterpriseID     uint64              `json:"carrier_enterprise_id"`
-	WarehouseServiceID      uint64              `json:"warehouse_service_id"`
-	Origin                  string              `json:"origin"`
-	Destination             string              `json:"destination"`
-	CargoName               string              `json:"cargo_name"`
-	Weight                  float64             `json:"weight"`
-	VehicleType             string              `json:"vehicle_type"`
-	EstimatedPrice          float64             `json:"estimated_price"`
-	FinalPrice              float64             `json:"final_price"`
-	Status                  string              `json:"status"`
-	CurrentResponsibleParty string              `json:"current_responsible_party"`
-	HandoverNote            string              `json:"handover_note"`
-	DriverName              string              `json:"driver_name"`
-	DriverPhone             string              `json:"driver_phone"`
-	PlateNumber             string              `json:"plate_number"`
-	GuaranteeType           string              `json:"guarantee_type"`
-	AcceptedAt              *time.Time          `json:"accepted_at"`
-	PickupAppointmentAt     *time.Time          `json:"pickup_appointment_at,omitempty"`
-	ArrivalSignedInAt       *time.Time          `json:"arrival_signed_in_at,omitempty"`
-	OutboundConfirmedAt     *time.Time          `json:"outbound_confirmed_at,omitempty"`
-	LoadingConfirmedAt      *time.Time          `json:"loading_confirmed_at,omitempty"`
-	ArrivalConfirmedAt      *time.Time          `json:"arrival_confirmed_at,omitempty"`
-	ReceiptSignedAt         *time.Time          `json:"receipt_signed_at,omitempty"`
-	InboundCompletedAt      *time.Time          `json:"inbound_completed_at,omitempty"`
-	CreatedAt               time.Time           `json:"created_at"`
-	UpdatedAt               time.Time           `json:"updated_at"`
-	TrackingEvents          []TrackingEventInfo `json:"tracking_events,omitempty"`
+	ID                      uint64                           `json:"id"`
+	LogisticsNo             string                           `json:"logistics_no"`
+	OrderID                 uint64                           `json:"order_id"`
+	OrderNo                 string                           `json:"order_no"`
+	BuyerEnterpriseID       uint64                           `json:"buyer_enterprise_id"`
+	LogisticsServiceID      uint64                           `json:"logistics_service_id"`
+	CarrierEnterpriseID     uint64                           `json:"carrier_enterprise_id"`
+	WarehouseServiceID      uint64                           `json:"warehouse_service_id"`
+	Origin                  string                           `json:"origin"`
+	Destination             string                           `json:"destination"`
+	CargoName               string                           `json:"cargo_name"`
+	Weight                  float64                          `json:"weight"`
+	VehicleType             string                           `json:"vehicle_type"`
+	EstimatedPrice          float64                          `json:"estimated_price"`
+	FinalPrice              float64                          `json:"final_price"`
+	Status                  string                           `json:"status"`
+	CurrentResponsibleParty string                           `json:"current_responsible_party"`
+	HandoverNote            string                           `json:"handover_note"`
+	DriverName              string                           `json:"driver_name"`
+	DriverPhone             string                           `json:"driver_phone"`
+	PlateNumber             string                           `json:"plate_number"`
+	GuaranteeType           string                           `json:"guarantee_type"`
+	AcceptedAt              *time.Time                       `json:"accepted_at"`
+	PickupAppointmentAt     *time.Time                       `json:"pickup_appointment_at,omitempty"`
+	ArrivalSignedInAt       *time.Time                       `json:"arrival_signed_in_at,omitempty"`
+	OutboundConfirmedAt     *time.Time                       `json:"outbound_confirmed_at,omitempty"`
+	LoadingConfirmedAt      *time.Time                       `json:"loading_confirmed_at,omitempty"`
+	ArrivalConfirmedAt      *time.Time                       `json:"arrival_confirmed_at,omitempty"`
+	ReceiptSignedAt         *time.Time                       `json:"receipt_signed_at,omitempty"`
+	InboundCompletedAt      *time.Time                       `json:"inbound_completed_at,omitempty"`
+	CreatedAt               time.Time                        `json:"created_at"`
+	UpdatedAt               time.Time                        `json:"updated_at"`
+	TrackingEvents          []TrackingEventInfo              `json:"tracking_events,omitempty"`
+	StatusRequirements      []LogisticsStatusRequirementInfo `json:"status_requirements,omitempty"`
 }
 
 type LogisticsDriverInfo struct {
@@ -282,6 +292,7 @@ type CollateralMonitorInfo struct {
 	WarehouseServiceID uint64                           `json:"warehouse_service_id"`
 	WarehouseName      string                           `json:"warehouse_name"`
 	WarehouseAddress   string                           `json:"warehouse_address"`
+	LogisticsOrderID   uint64                           `json:"logistics_order_id"`
 	LogisticsStatus    string                           `json:"logistics_status"`
 	LastLogisticsEvent string                           `json:"last_logistics_event"`
 	PledgeVoucherURL   string                           `json:"pledge_voucher_url"`

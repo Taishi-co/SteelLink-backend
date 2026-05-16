@@ -374,8 +374,15 @@ func (h *Handler) ListLogisticsOrders(c *gin.Context) {
 		query = query.Where("carrier_enterprise_id = ? OR logistics_service_id IN (?)", claims.EnterpriseID, h.db.Model(&serviceOfferEntity.LogisticsService{}).Select("id").Where("enterprise_id = ?", claims.EnterpriseID))
 	case "buyer":
 		query = query.Where("buyer_enterprise_id = ?", claims.EnterpriseID)
+	case "warehouse":
+		query = query.Where("warehouse_service_id IN (?)", h.db.Model(&serviceOfferEntity.WarehouseService{}).Select("id").Where("enterprise_id = ?", claims.EnterpriseID))
 	default:
-		query = query.Where("buyer_enterprise_id = ? OR carrier_enterprise_id = ? OR logistics_service_id IN (?)", claims.EnterpriseID, claims.EnterpriseID, h.db.Model(&serviceOfferEntity.LogisticsService{}).Select("id").Where("enterprise_id = ?", claims.EnterpriseID))
+		query = query.Where("buyer_enterprise_id = ? OR carrier_enterprise_id = ? OR logistics_service_id IN (?) OR warehouse_service_id IN (?)",
+			claims.EnterpriseID,
+			claims.EnterpriseID,
+			h.db.Model(&serviceOfferEntity.LogisticsService{}).Select("id").Where("enterprise_id = ?", claims.EnterpriseID),
+			h.db.Model(&serviceOfferEntity.WarehouseService{}).Select("id").Where("enterprise_id = ?", claims.EnterpriseID),
+		)
 	}
 	if req.OrderID > 0 {
 		query = query.Where("order_id = ?", req.OrderID)
@@ -462,16 +469,17 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 	}
 	var item entity.LogisticsOrder
 	targetStatus := entity.NormalizeLogisticsOrderStatus(entity.LogisticsOrderStatus(req.Status))
-	if targetStatus == entity.LogisticsOrderReceiptSigned {
-		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND buyer_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
-			response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
-			return
-		}
-	} else {
-		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND carrier_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
-			response.Error(c, ecode.ErrForbidden.WithMessage("物流委托不存在或无权更新"))
-			return
-		}
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ?", id).First(&item).Error; err != nil {
+		response.NotFound(c, "物流委托不存在")
+		return
+	}
+	if err := h.ensureLogisticsStatusActor(c, &item, targetStatus, claims.EnterpriseID); err != nil {
+		response.Error(c, err)
+		return
+	}
+	if err := h.ensureLogisticsStatusDocuments(c, &item, targetStatus); err != nil {
+		response.Error(c, err)
+		return
 	}
 	currentStatus := entity.NormalizeLogisticsOrderStatus(item.Status)
 	if !entity.CanTransitionLogisticsOrderStatus(currentStatus, targetStatus) {
@@ -511,13 +519,20 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 					if err := tx.Save(&order).Error; err != nil {
 						return err
 					}
+					actorService := "procurement"
+					if item.OrderID > 0 && claims.EnterpriseID != order.BuyerID {
+						var financing orderEntity.OrderFinancingRequest
+						if err := tx.Where("order_id = ? AND funding_enterprise_id = ?", item.OrderID, claims.EnterpriseID).First(&financing).Error; err == nil {
+							actorService = "finance"
+						}
+					}
 					orderEvent := orderEntity.OrderEvent{
 						OrderID:           order.ID,
 						OrderNo:           order.OrderNo,
-						EventType:         "buyer_received",
+						EventType:         actorService + "_received",
 						ActorUserID:       claims.UserID,
 						ActorEnterpriseID: claims.EnterpriseID,
-						ActorService:      "procurement",
+						ActorService:      actorService,
 						FromStatus:        fromStatus,
 						ToStatus:          orderEntity.OrderStatusReceived,
 					}
@@ -533,6 +548,108 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 		return
 	}
 	response.Success(c, logisticsOrderToInfo(&item, nil))
+}
+
+func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.LogisticsOrder, targetStatus entity.LogisticsOrderStatus, enterpriseID uint64) *ecode.Error {
+	if item == nil {
+		return ecode.ErrNotFound.WithMessage("物流委托不存在")
+	}
+	switch targetStatus {
+	case entity.LogisticsOrderPickupScheduled, entity.LogisticsOrderLoadingConfirmed, entity.LogisticsOrderInTransit, entity.LogisticsOrderArrivalConfirmed:
+		if item.CarrierEnterpriseID != enterpriseID {
+			return ecode.ErrForbidden.WithMessage("当前节点需由物流方推进")
+		}
+	case entity.LogisticsOrderArrivalSignedIn, entity.LogisticsOrderOutboundConfirmed, entity.LogisticsOrderInboundCompleted:
+		if item.WarehouseServiceID == 0 {
+			return ecode.ErrBadRequest.WithMessage("当前物流单未绑定平台仓库，无法由仓储方执行该节点")
+		}
+		var warehouse serviceOfferEntity.WarehouseService
+		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", item.WarehouseServiceID, enterpriseID).First(&warehouse).Error; err != nil {
+			return ecode.ErrForbidden.WithMessage("当前节点需由绑定仓储方推进")
+		}
+	case entity.LogisticsOrderReceiptSigned:
+		if item.OrderID == 0 {
+			if item.BuyerEnterpriseID == enterpriseID {
+				return nil
+			}
+			return ecode.ErrForbidden.WithMessage("当前节点需由买方或资金方确认")
+		}
+		var order orderEntity.Order
+		if err := h.db.WithContext(c.Request.Context()).First(&order, item.OrderID).Error; err != nil {
+			return ecode.ErrNotFound.WithMessage("关联订单不存在")
+		}
+		if order.FinanceID > 0 {
+			var financing orderEntity.OrderFinancingRequest
+			if err := h.db.WithContext(c.Request.Context()).
+				Where("order_id = ? AND funding_enterprise_id = ? AND status IN ?", item.OrderID, enterpriseID, []string{
+					string(orderEntity.FinancingRequestStatusPledged),
+					string(orderEntity.FinancingRequestStatusReleased),
+				}).
+				First(&financing).Error; err != nil {
+				return ecode.ErrForbidden.WithMessage("托盘垫资订单需由资金方确认收货")
+			}
+			return nil
+		}
+		if order.BuyerID != enterpriseID {
+			return ecode.ErrForbidden.WithMessage("当前节点需由买方确认收货")
+		}
+	case entity.LogisticsOrderCompleted:
+		if item.CarrierEnterpriseID != enterpriseID {
+			return ecode.ErrForbidden.WithMessage("履约完成需由物流方归档")
+		}
+	default:
+		if item.CarrierEnterpriseID != enterpriseID {
+			return ecode.ErrForbidden.WithMessage("当前节点需由物流方推进")
+		}
+	}
+	return nil
+}
+
+func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.LogisticsOrder, targetStatus entity.LogisticsOrderStatus) *ecode.Error {
+	required := requiredLogisticsDocTypes(targetStatus)
+	if len(required) == 0 || item == nil || item.ID == 0 {
+		return nil
+	}
+	var docs []entity.FulfillmentDocument
+	if err := h.db.WithContext(c.Request.Context()).
+		Model(&entity.FulfillmentDocument{}).
+		Where("logistics_order_id = ? AND doc_type IN ?", item.ID, required).
+		Find(&docs).Error; err != nil {
+		return ecode.ErrDatabase.WithMessage("查询物流履约单据失败")
+	}
+	existing := make(map[string]struct{}, len(docs))
+	for _, doc := range docs {
+		existing[string(doc.DocType)] = struct{}{}
+	}
+	missing := make([]string, 0, len(required))
+	for _, docType := range required {
+		if _, ok := existing[docType]; !ok {
+			missing = append(missing, docType)
+		}
+	}
+	if len(missing) > 0 {
+		return ecode.ErrBadRequest.WithMessage("当前节点缺少必要履约单据：" + strings.Join(missing, "、"))
+	}
+	return nil
+}
+
+func requiredLogisticsDocTypes(status entity.LogisticsOrderStatus) []string {
+	switch status {
+	case entity.LogisticsOrderOutboundConfirmed:
+		return []string{string(entity.DocTypeOutboundOrder), string(entity.DocTypeSealPhoto)}
+	case entity.LogisticsOrderLoadingConfirmed:
+		return []string{string(entity.DocTypePickupOrder)}
+	case entity.LogisticsOrderInTransit:
+		return []string{string(entity.DocTypeGPSTrack)}
+	case entity.LogisticsOrderArrivalConfirmed:
+		return []string{string(entity.DocTypeDeliveryPhoto)}
+	case entity.LogisticsOrderReceiptSigned:
+		return []string{string(entity.DocTypeReceiptOrder)}
+	case entity.LogisticsOrderInboundCompleted:
+		return []string{string(entity.DocTypeInboundOrder)}
+	default:
+		return nil
+	}
 }
 
 func (h *Handler) AddTrackingEvent(c *gin.Context) {
@@ -705,6 +822,26 @@ func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.Logistics
 	for _, event := range events {
 		eventInfos = append(eventInfos, trackingEventToInfo(&event))
 	}
+	requirements := make([]dto.LogisticsStatusRequirementInfo, 0, len(logisticsStatusRequirementDefinitions()))
+	satisfiedDocs := map[string]struct{}{}
+	if item != nil && item.ID > 0 {
+		var docs []entity.FulfillmentDocument
+		database.GetDB().Where("logistics_order_id = ?", item.ID).Find(&docs)
+		for _, doc := range docs {
+			satisfiedDocs[string(doc.DocType)] = struct{}{}
+		}
+	}
+	for _, requirement := range logisticsStatusRequirementDefinitions() {
+		satisfied := true
+		for _, docType := range requirement.RequiredDoc {
+			if _, ok := satisfiedDocs[docType]; !ok {
+				satisfied = false
+				break
+			}
+		}
+		requirement.Satisfied = satisfied
+		requirements = append(requirements, requirement)
+	}
 	return dto.LogisticsOrderInfo{
 		ID: item.ID, LogisticsNo: item.LogisticsNo, OrderID: item.OrderID, OrderNo: item.OrderNo,
 		BuyerEnterpriseID: item.BuyerEnterpriseID, LogisticsServiceID: item.LogisticsServiceID,
@@ -718,7 +855,21 @@ func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.Logistics
 		OutboundConfirmedAt: item.OutboundConfirmedAt, LoadingConfirmedAt: item.LoadingConfirmedAt,
 		ArrivalConfirmedAt: item.ArrivalConfirmedAt, ReceiptSignedAt: item.ReceiptSignedAt,
 		InboundCompletedAt: item.InboundCompletedAt,
-		CreatedAt:          item.CreatedAt, UpdatedAt: item.UpdatedAt, TrackingEvents: eventInfos,
+		CreatedAt:          item.CreatedAt, UpdatedAt: item.UpdatedAt, TrackingEvents: eventInfos, StatusRequirements: requirements,
+	}
+}
+
+func logisticsStatusRequirementDefinitions() []dto.LogisticsStatusRequirementInfo {
+	return []dto.LogisticsStatusRequirementInfo{
+		{Status: string(entity.LogisticsOrderPickupScheduled), Label: "提货预约", Actor: "logistics", Description: "物流方预约提货时间并确认司机车辆"},
+		{Status: string(entity.LogisticsOrderArrivalSignedIn), Label: "到场签到", Actor: "warehouse", Description: "仓储方确认车辆到场"},
+		{Status: string(entity.LogisticsOrderOutboundConfirmed), Label: "出库确认", Actor: "warehouse", Description: "仓储方上传出库单和封条照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderOutboundConfirmed)},
+		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传提货单并确认装货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
+		{Status: string(entity.LogisticsOrderInTransit), Label: "运输中", Actor: "logistics", Description: "物流方上传 GPS 或在途轨迹", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInTransit)},
+		{Status: string(entity.LogisticsOrderArrivalConfirmed), Label: "到货确认", Actor: "logistics", Description: "物流方上传到货照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderArrivalConfirmed)},
+		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "验收签收", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderReceiptSigned)},
+		{Status: string(entity.LogisticsOrderInboundCompleted), Label: "入库完成", Actor: "warehouse", Description: "目的仓或监管仓上传入库单", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInboundCompleted)},
+		{Status: string(entity.LogisticsOrderCompleted), Label: "履约完成", Actor: "logistics", Description: "物流方归档物流履约"},
 	}
 }
 
@@ -876,13 +1027,10 @@ func (h *Handler) UploadFulfillmentDocument(c *gin.Context) {
 		return
 	}
 
-	role := ""
-	if claims.EnterpriseID == logisticsOrder.CarrierEnterpriseID {
-		role = "logistics"
-	} else if claims.EnterpriseID == logisticsOrder.BuyerEnterpriseID {
-		role = "buyer"
-	} else {
-		role = "warehouse"
+	role, actorErr := h.resolveFulfillmentDocumentActor(c, &logisticsOrder, claims.EnterpriseID)
+	if actorErr != nil {
+		response.Error(c, actorErr)
+		return
 	}
 
 	doc := entity.FulfillmentDocument{
@@ -906,10 +1054,59 @@ func (h *Handler) UploadFulfillmentDocument(c *gin.Context) {
 	response.Success(c, gin.H{"id": doc.ID, "doc_type": doc.DocType, "file_url": doc.FileURL})
 }
 
+func (h *Handler) resolveFulfillmentDocumentActor(c *gin.Context, logisticsOrder *entity.LogisticsOrder, enterpriseID uint64) (string, *ecode.Error) {
+	if logisticsOrder == nil || logisticsOrder.ID == 0 {
+		return "", ecode.ErrNotFound.WithMessage("物流委托单不存在")
+	}
+	if enterpriseID == logisticsOrder.CarrierEnterpriseID {
+		return "logistics", nil
+	}
+	if enterpriseID == logisticsOrder.BuyerEnterpriseID {
+		return "buyer", nil
+	}
+	if logisticsOrder.WarehouseServiceID > 0 {
+		var warehouse serviceOfferEntity.WarehouseService
+		if err := h.db.WithContext(c.Request.Context()).
+			Where("id = ? AND enterprise_id = ?", logisticsOrder.WarehouseServiceID, enterpriseID).
+			First(&warehouse).Error; err == nil {
+			return "warehouse", nil
+		}
+	}
+	if logisticsOrder.OrderID > 0 {
+		var order orderEntity.Order
+		if err := h.db.WithContext(c.Request.Context()).First(&order, logisticsOrder.OrderID).Error; err == nil {
+			if order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID {
+				return "seller", nil
+			}
+			var financing orderEntity.OrderFinancingRequest
+			if err := h.db.WithContext(c.Request.Context()).
+				Where("order_id = ? AND funding_enterprise_id = ?", logisticsOrder.OrderID, enterpriseID).
+				First(&financing).Error; err == nil {
+				return "finance", nil
+			}
+		}
+	}
+	return "", ecode.ErrForbidden.WithMessage("无权上传该物流委托单据")
+}
+
 func (h *Handler) ListFulfillmentDocuments(c *gin.Context) {
 	logisticsOrderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "无效的物流委托ID")
+		return
+	}
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var logisticsOrder entity.LogisticsOrder
+	if err := h.db.WithContext(c.Request.Context()).First(&logisticsOrder, logisticsOrderID).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("物流委托单不存在"))
+		return
+	}
+	if _, actorErr := h.resolveFulfillmentDocumentActor(c, &logisticsOrder, claims.EnterpriseID); actorErr != nil {
+		response.Error(c, actorErr)
 		return
 	}
 	var docs []entity.FulfillmentDocument
@@ -1369,6 +1566,7 @@ func (h *Handler) ListCollateralMonitor(c *gin.Context) {
 
 		var logisticsOrder entity.LogisticsOrder
 		if err := h.db.WithContext(c.Request.Context()).Where("order_id = ?", financing.OrderID).Order("id DESC").First(&logisticsOrder).Error; err == nil {
+			item.LogisticsOrderID = logisticsOrder.ID
 			item.LogisticsStatus = string(entity.NormalizeLogisticsOrderStatus(logisticsOrder.Status))
 			var event entity.LogisticsTrackingEvent
 			if err := h.db.WithContext(c.Request.Context()).Where("logistics_order_id = ?", logisticsOrder.ID).Order("occurred_at DESC, id DESC").First(&event).Error; err == nil {
