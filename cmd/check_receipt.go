@@ -1,13 +1,21 @@
+//go:build ignore
+
 package main
 
 import (
 	"database/sql"
 	"fmt"
+	"os"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {
-	dsn := "root:Steellink2026@tcp(117.72.123.14:3306)/steellink?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := os.Getenv("STEELLINK_CHECK_DSN")
+	if dsn == "" {
+		fmt.Println("STEELLINK_CHECK_DSN is required")
+		return
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		fmt.Printf("连接数据库失败: %v\n", err)
