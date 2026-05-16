@@ -103,13 +103,15 @@ type BuyerConfirmRequest struct {
 }
 
 type DirectPaymentRequest struct {
-	VoucherURL    string   `json:"voucher_url"`
-	TransactionNo string   `json:"transaction_no"`
-	PayerAccount  string   `json:"payer_account"`
-	PayeeAccount  string   `json:"payee_account"`
-	CapturedAt    string   `json:"captured_at"`
-	GPSLatitude   *float64 `json:"gps_latitude"`
-	GPSLongitude  *float64 `json:"gps_longitude"`
+	VoucherURL        string   `json:"voucher_url"`
+	TitleVoucherURL   string   `json:"title_voucher_url"`
+	TitleVoucherRemark string  `json:"title_voucher_remark"`
+	TransactionNo     string   `json:"transaction_no"`
+	PayerAccount      string   `json:"payer_account"`
+	PayeeAccount      string   `json:"payee_account"`
+	CapturedAt        string   `json:"captured_at"`
+	GPSLatitude       *float64 `json:"gps_latitude"`
+	GPSLongitude      *float64 `json:"gps_longitude"`
 }
 
 type CreateFinancingRequest struct {
