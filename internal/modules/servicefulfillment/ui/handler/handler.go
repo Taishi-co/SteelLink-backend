@@ -187,7 +187,13 @@ func (h *Handler) ListWarehouseStorageRequests(c *gin.Context) {
 	if req.PageSize <= 0 {
 		req.PageSize = 10
 	}
-	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseInventoryMovement{}).Where("request_enterprise_id = ?", claims.EnterpriseID)
+	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseInventoryMovement{})
+	switch req.Role {
+	case "warehouse":
+		query = query.Where("warehouse_enterprise_id = ?", claims.EnterpriseID)
+	default:
+		query = query.Where("request_enterprise_id = ?", claims.EnterpriseID)
+	}
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
 	}
@@ -233,6 +239,8 @@ func (h *Handler) ListWarehouseMovements(c *gin.Context) {
 		query = query.Where("request_enterprise_id = ?", claims.EnterpriseID)
 	case "warehouse":
 		query = query.Where("warehouse_enterprise_id = ?", claims.EnterpriseID)
+	default:
+		query = query.Where("(request_enterprise_id = ? OR warehouse_enterprise_id = ?)", claims.EnterpriseID, claims.EnterpriseID)
 	}
 	var total int64
 	query.Count(&total)
@@ -504,14 +512,14 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 						return err
 					}
 					orderEvent := orderEntity.OrderEvent{
-						OrderID:       order.ID,
-						OrderNo:       order.OrderNo,
-						EventType:     "buyer_received",
-						ActorUserID:   claims.UserID,
+						OrderID:           order.ID,
+						OrderNo:           order.OrderNo,
+						EventType:         "buyer_received",
+						ActorUserID:       claims.UserID,
 						ActorEnterpriseID: claims.EnterpriseID,
-						ActorService:  "procurement",
-						FromStatus:    fromStatus,
-						ToStatus:      orderEntity.OrderStatusReceived,
+						ActorService:      "procurement",
+						FromStatus:        fromStatus,
+						ToStatus:          orderEntity.OrderStatusReceived,
 					}
 					if err := tx.Create(&orderEvent).Error; err != nil {
 						return err

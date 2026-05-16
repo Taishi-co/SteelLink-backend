@@ -16,15 +16,15 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	}
 
 	r.GET("/warehouses/:id/products", middleware.AuthRequired(), h.ListWarehouseProducts)
-	r.GET("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "warehouse"), h.ListWarehouseStorageRequests)
-	r.POST("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "warehouse"), h.CreateWarehouseStorageRequest)
+	r.GET("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales", "warehouse"), h.ListWarehouseStorageRequests)
+	r.POST("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales"), h.CreateWarehouseStorageRequest)
 
 	movements := r.Group("/warehouse-movements")
-	movements.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("warehouse"))
+	movements.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales", "warehouse"))
 	{
 		movements.GET("", h.ListWarehouseMovements)
-		movements.POST("", h.CreateWarehouseMovement)
-		movements.PUT("/:id/status", h.UpdateWarehouseMovementStatus)
+		movements.POST("", middleware.RequireEnterpriseService("warehouse"), h.CreateWarehouseMovement)
+		movements.PUT("/:id/status", middleware.RequireEnterpriseService("warehouse"), h.UpdateWarehouseMovementStatus)
 	}
 
 	logistics := r.Group("/logistics")
