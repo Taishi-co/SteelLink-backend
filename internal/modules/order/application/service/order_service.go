@@ -1281,58 +1281,69 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 }
 
 func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, operatorID uint64, req *dto.DirectPaymentRequest) (*dto.OrderInfo, error) {
-	result, err := s.UploadPaymentVoucher(ctx, id, enterpriseID, operatorID, &dto.UploadPaymentVoucherRequest{
-		VoucherURL:    req.VoucherURL,
-		TransactionNo: req.TransactionNo,
-		PayerAccount:  req.PayerAccount,
-		PayeeAccount:  req.PayeeAccount,
-		CapturedAt:    req.CapturedAt,
-		GPSLatitude:   req.GPSLatitude,
-		GPSLongitude:  req.GPSLongitude,
-	})
-	if err != nil {
-		return nil, err
-	}
-	order, findErr := s.orderRepo.FindByID(ctx, id)
-	if findErr != nil {
-		return nil, ecode.ErrDatabase
-	}
-	if order == nil {
-		return nil, ecode.ErrNotFound.WithMessage("订单不存在")
+	db := database.GetDB()
+	var resultOrder *orderEntity.Order
+
+	voucherURL := strings.TrimSpace(req.VoucherURL)
+	if !isHTTPURL(voucherURL) {
+		return nil, ecode.ErrBadRequest.WithMessage("支付凭证地址必须是有效的 HTTP/HTTPS URL")
 	}
 
-	var titleVoucherURL string
-	var titleVoucherRemark string
-	if len(order.Items) > 0 {
-		product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
-		if prodErr == nil && product != nil {
-			titleVoucherURL = strings.TrimSpace(product.TitleVoucherURL)
-			titleVoucherRemark = strings.TrimSpace(product.TitleVoucherRemark)
-		}
-	}
-	if titleVoucherURL == "" {
-		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证")
-	}
-
-	if order.Remark == nil {
-		order.Remark = orderEntity.Remark{}
-	}
-	order.Remark["direct_title_voucher_url"] = titleVoucherURL
-	order.Remark["direct_title_remark"] = titleVoucherRemark
-	order.UpdatedBy = operatorID
-	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(order).Error; err != nil {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order orderEntity.Order
+		if err := tx.First(&order, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ecode.ErrNotFound.WithMessage("订单不存在")
+			}
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
-			"title_voucher_url": titleVoucherURL,
-			"title_remark":      titleVoucherRemark,
-			"source":            "product_certification",
-		})
+
+		if order.BuyerID != enterpriseID {
+			return ecode.ErrForbidden.WithMessage("无权上传支付凭证")
+		}
+		if order.Status != orderEntity.OrderStatusPendingPayment && order.Status != orderEntity.OrderStatusPaid {
+			return ecode.ErrBadRequest.WithMessage("当前订单状态不可上传支付凭证")
+		}
+
+		now := time.Now()
+		fromStatus := order.Status
+		order.PaymentInfo = &orderEntity.PaymentInfo{
+			PaymentMethod: "bank_transfer",
+			PaymentTime:   now,
+			TransactionNo: strings.TrimSpace(req.TransactionNo),
+			PayeeAccount:  strings.TrimSpace(req.PayeeAccount),
+			PayerAccount:  strings.TrimSpace(req.PayerAccount),
+			VoucherURL:    voucherURL,
+			UploadedBy:    operatorID,
+			UploadedAt:    now,
+			CapturedAt:    req.CapturedAt,
+			GPSLatitude:   req.GPSLatitude,
+			GPSLongitude:  req.GPSLongitude,
+		}
+		order.Status = orderEntity.OrderStatusPaid
+		order.ExpiresAt = nil
+		order.UpdatedBy = operatorID
+
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		if err := createOrderEvent(tx, ctx, &order, "direct_payment_confirmed", operatorID, enterpriseID, "procurement", fromStatus, order.Status, orderEntity.OrderEventPayload{
+			"transaction_no": strings.TrimSpace(req.TransactionNo),
+			"voucher_url":    voucherURL,
+		}); err != nil {
+			return err
+		}
+
+		resultOrder = &order
+		return nil
 	}); err != nil {
-		return nil, ecode.ErrDatabase.WithMessage("记录直采货权监管失败")
+		if e, ok := err.(*ecode.Error); ok {
+			return nil, e
+		}
+		return nil, ecode.ErrDatabase.WithMessage("上传支付凭证失败")
 	}
-	return result, nil
+
+	return toOrderInfo(resultOrder, nil), nil
 }
 
 func (s *OrderService) CreateFinancingRequest(ctx context.Context, id, buyerEnterpriseID, operatorID uint64, req *dto.CreateFinancingRequest) (*dto.FinancingRequestInfo, error) {
@@ -3703,11 +3714,9 @@ func (s *OrderService) ensureTitleControlReadyForLogistics(ctx context.Context, 
 		if len(order.Items) > 0 {
 			product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
 			if prodErr != nil || product == nil || strings.TrimSpace(product.TitleVoucherURL) == "" {
-				if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
-					return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约。请确认卖方已在商品上架时认证货权凭证")
-				}
+				return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约。请确认卖方已在商品上架时认证货权凭证")
 			}
-		} else if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
+		} else {
 			return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约")
 		}
 	}
