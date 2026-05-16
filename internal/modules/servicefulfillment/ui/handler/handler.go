@@ -677,6 +677,29 @@ func movementToInfo(item *entity.WarehouseInventoryMovement) dto.WarehouseMoveme
 	}
 }
 
+func warehouseSnapshotToInfo(item *entity.WarehouseInventorySnapshot) dto.WarehouseInventorySnapshotInfo {
+	return dto.WarehouseInventorySnapshotInfo{
+		ID:                    item.ID,
+		SnapshotNo:            item.SnapshotNo,
+		WarehouseServiceID:    item.WarehouseServiceID,
+		WarehouseEnterpriseID: item.WarehouseEnterpriseID,
+		ProductName:           item.ProductName,
+		BundleNo:              item.BundleNo,
+		BatchNo:               item.BatchNo,
+		LocationCode:          item.LocationCode,
+		Quantity:              item.Quantity,
+		FrozenQuantity:        item.FrozenQuantity,
+		QualityStatus:         item.QualityStatus,
+		PledgeStatus:          item.PledgeStatus,
+		ExternalSystem:        item.ExternalSystem,
+		ExternalRefNo:         item.ExternalRefNo,
+		SyncStatus:            item.SyncStatus,
+		Remark:                item.Remark,
+		CreatedAt:             item.CreatedAt,
+		UpdatedAt:             item.UpdatedAt,
+	}
+}
+
 func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.LogisticsTrackingEvent) dto.LogisticsOrderInfo {
 	eventInfos := make([]dto.TrackingEventInfo, 0, len(events))
 	for _, event := range events {
@@ -703,6 +726,43 @@ func trackingEventToInfo(item *entity.LogisticsTrackingEvent) dto.TrackingEventI
 	return dto.TrackingEventInfo{
 		ID: item.ID, LogisticsOrderID: item.LogisticsOrderID, EventType: item.EventType,
 		Location: item.Location, Description: item.Description, OccurredAt: item.OccurredAt, CreatedAt: item.CreatedAt,
+	}
+}
+
+func logisticsDriverToInfo(item *entity.LogisticsDriver) dto.LogisticsDriverInfo {
+	return dto.LogisticsDriverInfo{
+		ID:                    item.ID,
+		EnterpriseID:          item.EnterpriseID,
+		Name:                  item.Name,
+		Phone:                 item.Phone,
+		IDCard:                item.IDCard,
+		LicenseNo:             item.LicenseNo,
+		LicenseExpireAt:       item.LicenseExpireAt,
+		QualificationNo:       item.QualificationNo,
+		QualificationExpireAt: item.QualificationExpireAt,
+		Status:                item.Status,
+		Remark:                item.Remark,
+		CreatedAt:             item.CreatedAt,
+		UpdatedAt:             item.UpdatedAt,
+	}
+}
+
+func logisticsVehicleToInfo(item *entity.LogisticsVehicle) dto.LogisticsVehicleInfo {
+	return dto.LogisticsVehicleInfo{
+		ID:                item.ID,
+		EnterpriseID:      item.EnterpriseID,
+		PlateNumber:       item.PlateNumber,
+		VehicleType:       item.VehicleType,
+		LoadCapacity:      item.LoadCapacity,
+		VehicleLicense:    item.VehicleLicense,
+		LicenseExpireAt:   item.LicenseExpireAt,
+		InsuranceNo:       item.InsuranceNo,
+		InsuranceExpireAt: item.InsuranceExpireAt,
+		DriverID:          item.DriverID,
+		Status:            item.Status,
+		Remark:            item.Remark,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 }
 
@@ -982,4 +1042,385 @@ func (h *Handler) SubmitInspection(c *gin.Context) {
 	})
 
 	response.Success(c, gin.H{"message": "验货结果已提交", "result": req.Result, "seal_ok": req.SealOK})
+}
+
+func (h *Handler) ListWarehouseInventorySnapshots(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 20
+	}
+
+	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseInventorySnapshot{}).
+		Where("warehouse_enterprise_id = ?", claims.EnterpriseID)
+	if req.WarehouseServiceID > 0 {
+		query = query.Where("warehouse_service_id = ?", req.WarehouseServiceID)
+	}
+	if req.Status != "" {
+		query = query.Where("pledge_status = ? OR quality_status = ? OR sync_status = ?", req.Status, req.Status, req.Status)
+	}
+
+	var total int64
+	query.Count(&total)
+	var rows []entity.WarehouseInventorySnapshot
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询库存快照失败"))
+		return
+	}
+	list := make([]dto.WarehouseInventorySnapshotInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, warehouseSnapshotToInfo(&row))
+	}
+	response.Success(c, dto.PageResponse[dto.WarehouseInventorySnapshotInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+}
+
+func (h *Handler) CreateWarehouseInventorySnapshot(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.UpsertWarehouseInventorySnapshotRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var warehouse serviceOfferEntity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", req.WarehouseServiceID, claims.EnterpriseID).First(&warehouse).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("仓储资源不存在或无权维护库存"))
+		return
+	}
+
+	item := entity.WarehouseInventorySnapshot{
+		SnapshotNo:            "INV" + time.Now().Format("20060102150405") + randomDigits(4),
+		WarehouseServiceID:    warehouse.ID,
+		WarehouseEnterpriseID: warehouse.EnterpriseID,
+		ProductName:           req.ProductName,
+		BundleNo:              req.BundleNo,
+		BatchNo:               req.BatchNo,
+		LocationCode:          req.LocationCode,
+		Quantity:              req.Quantity,
+		FrozenQuantity:        req.FrozenQuantity,
+		QualityStatus:         defaultString(req.QualityStatus, "unchecked"),
+		PledgeStatus:          defaultString(req.PledgeStatus, "none"),
+		ExternalSystem:        req.ExternalSystem,
+		ExternalRefNo:         req.ExternalRefNo,
+		SyncStatus:            defaultString(req.SyncStatus, "manual"),
+		Remark:                req.Remark,
+		CreatedBy:             claims.UserID,
+		UpdatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("创建库存快照失败"))
+		return
+	}
+	response.Success(c, warehouseSnapshotToInfo(&item))
+}
+
+func (h *Handler) UpdateWarehouseInventorySnapshot(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的库存快照ID")
+		return
+	}
+	var req dto.UpsertWarehouseInventorySnapshotRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	var item entity.WarehouseInventorySnapshot
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND warehouse_enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("库存快照不存在或无权修改"))
+		return
+	}
+	if req.WarehouseServiceID != item.WarehouseServiceID {
+		var warehouse serviceOfferEntity.WarehouseService
+		if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", req.WarehouseServiceID, claims.EnterpriseID).First(&warehouse).Error; err != nil {
+			response.Error(c, ecode.ErrForbidden.WithMessage("仓储资源不存在或无权维护库存"))
+			return
+		}
+		item.WarehouseServiceID = warehouse.ID
+		item.WarehouseEnterpriseID = warehouse.EnterpriseID
+	}
+	item.ProductName = req.ProductName
+	item.BundleNo = req.BundleNo
+	item.BatchNo = req.BatchNo
+	item.LocationCode = req.LocationCode
+	item.Quantity = req.Quantity
+	item.FrozenQuantity = req.FrozenQuantity
+	item.QualityStatus = defaultString(req.QualityStatus, "unchecked")
+	item.PledgeStatus = defaultString(req.PledgeStatus, "none")
+	item.ExternalSystem = req.ExternalSystem
+	item.ExternalRefNo = req.ExternalRefNo
+	item.SyncStatus = defaultString(req.SyncStatus, "manual")
+	item.Remark = req.Remark
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新库存快照失败"))
+		return
+	}
+	response.Success(c, warehouseSnapshotToInfo(&item))
+}
+
+func (h *Handler) ListLogisticsDrivers(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var rows []entity.LogisticsDriver
+	if err := h.db.WithContext(c.Request.Context()).Where("enterprise_id = ?", claims.EnterpriseID).Order("id DESC").Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询司机档案失败"))
+		return
+	}
+	list := make([]dto.LogisticsDriverInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, logisticsDriverToInfo(&row))
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func (h *Handler) CreateLogisticsDriver(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.UpsertLogisticsDriverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	item := entity.LogisticsDriver{
+		EnterpriseID:          claims.EnterpriseID,
+		Name:                  req.Name,
+		Phone:                 req.Phone,
+		IDCard:                req.IDCard,
+		LicenseNo:             req.LicenseNo,
+		LicenseExpireAt:       req.LicenseExpireAt,
+		QualificationNo:       req.QualificationNo,
+		QualificationExpireAt: req.QualificationExpireAt,
+		Status:                defaultString(req.Status, "active"),
+		Remark:                req.Remark,
+		CreatedBy:             claims.UserID,
+		UpdatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("创建司机档案失败"))
+		return
+	}
+	response.Success(c, logisticsDriverToInfo(&item))
+}
+
+func (h *Handler) UpdateLogisticsDriver(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的司机ID")
+		return
+	}
+	var req dto.UpsertLogisticsDriverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var item entity.LogisticsDriver
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("司机档案不存在或无权修改"))
+		return
+	}
+	item.Name = req.Name
+	item.Phone = req.Phone
+	item.IDCard = req.IDCard
+	item.LicenseNo = req.LicenseNo
+	item.LicenseExpireAt = req.LicenseExpireAt
+	item.QualificationNo = req.QualificationNo
+	item.QualificationExpireAt = req.QualificationExpireAt
+	item.Status = defaultString(req.Status, "active")
+	item.Remark = req.Remark
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新司机档案失败"))
+		return
+	}
+	response.Success(c, logisticsDriverToInfo(&item))
+}
+
+func (h *Handler) ListLogisticsVehicles(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var rows []entity.LogisticsVehicle
+	if err := h.db.WithContext(c.Request.Context()).Where("enterprise_id = ?", claims.EnterpriseID).Order("id DESC").Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询车辆档案失败"))
+		return
+	}
+	list := make([]dto.LogisticsVehicleInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, logisticsVehicleToInfo(&row))
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func (h *Handler) CreateLogisticsVehicle(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.UpsertLogisticsVehicleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	item := entity.LogisticsVehicle{
+		EnterpriseID:      claims.EnterpriseID,
+		PlateNumber:       req.PlateNumber,
+		VehicleType:       req.VehicleType,
+		LoadCapacity:      req.LoadCapacity,
+		VehicleLicense:    req.VehicleLicense,
+		LicenseExpireAt:   req.LicenseExpireAt,
+		InsuranceNo:       req.InsuranceNo,
+		InsuranceExpireAt: req.InsuranceExpireAt,
+		DriverID:          req.DriverID,
+		Status:            defaultString(req.Status, "active"),
+		Remark:            req.Remark,
+		CreatedBy:         claims.UserID,
+		UpdatedBy:         claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("创建车辆档案失败"))
+		return
+	}
+	response.Success(c, logisticsVehicleToInfo(&item))
+}
+
+func (h *Handler) UpdateLogisticsVehicle(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的车辆ID")
+		return
+	}
+	var req dto.UpsertLogisticsVehicleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	var item entity.LogisticsVehicle
+	if err := h.db.WithContext(c.Request.Context()).Where("id = ? AND enterprise_id = ?", id, claims.EnterpriseID).First(&item).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("车辆档案不存在或无权修改"))
+		return
+	}
+	item.PlateNumber = req.PlateNumber
+	item.VehicleType = req.VehicleType
+	item.LoadCapacity = req.LoadCapacity
+	item.VehicleLicense = req.VehicleLicense
+	item.LicenseExpireAt = req.LicenseExpireAt
+	item.InsuranceNo = req.InsuranceNo
+	item.InsuranceExpireAt = req.InsuranceExpireAt
+	item.DriverID = req.DriverID
+	item.Status = defaultString(req.Status, "active")
+	item.Remark = req.Remark
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("更新车辆档案失败"))
+		return
+	}
+	response.Success(c, logisticsVehicleToInfo(&item))
+}
+
+func (h *Handler) ListCollateralMonitor(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var financings []orderEntity.OrderFinancingRequest
+	if err := h.db.WithContext(c.Request.Context()).
+		Where("funding_enterprise_id = ?", claims.EnterpriseID).
+		Order("id DESC").
+		Find(&financings).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询货权监控失败"))
+		return
+	}
+
+	list := make([]dto.CollateralMonitorInfo, 0, len(financings))
+	for _, financing := range financings {
+		item := dto.CollateralMonitorInfo{
+			FinancingRequestID: financing.ID,
+			OrderID:            financing.OrderID,
+			OrderNo:            financing.OrderNo,
+			BuyerEnterpriseID:  financing.BuyerEnterpriseID,
+			SellerEnterpriseID: financing.SellerEnterpriseID,
+			FinanceServiceID:   financing.FinanceServiceID,
+			RequestedAmount:    financing.RequestedAmount,
+			ApprovedAmount:     financing.ApprovedAmount,
+			FinancingStatus:    string(financing.Status),
+			PledgeVoucherURL:   financing.PledgeVoucherURL,
+			PledgeRemark:       financing.PledgeRemark,
+			PledgedAt:          financing.PledgedAt,
+			ReleaseCondition:   financing.ReleaseCondition,
+			ReleasedAt:         financing.ReleasedAt,
+		}
+
+		var order orderEntity.Order
+		if err := h.db.WithContext(c.Request.Context()).First(&order, financing.OrderID).Error; err == nil {
+			item.OrderStatus = int(order.Status)
+			if order.DeliveryInfo != nil {
+				item.WarehouseServiceID = order.DeliveryInfo.DestWarehouseServiceID
+				item.WarehouseName = order.DeliveryInfo.DestWarehouseName
+				item.WarehouseAddress = order.DeliveryInfo.DestWarehouseAddress
+				if item.WarehouseServiceID == 0 {
+					item.WarehouseServiceID = order.DeliveryInfo.WarehouseServiceID
+					item.WarehouseName = order.DeliveryInfo.WarehouseName
+					item.WarehouseAddress = order.DeliveryInfo.WarehouseAddress
+				}
+			}
+		}
+
+		var logisticsOrder entity.LogisticsOrder
+		if err := h.db.WithContext(c.Request.Context()).Where("order_id = ?", financing.OrderID).Order("id DESC").First(&logisticsOrder).Error; err == nil {
+			item.LogisticsStatus = string(entity.NormalizeLogisticsOrderStatus(logisticsOrder.Status))
+			var event entity.LogisticsTrackingEvent
+			if err := h.db.WithContext(c.Request.Context()).Where("logistics_order_id = ?", logisticsOrder.ID).Order("occurred_at DESC, id DESC").First(&event).Error; err == nil {
+				item.LastLogisticsEvent = event.Description
+			}
+			var docs []entity.FulfillmentDocument
+			h.db.WithContext(c.Request.Context()).Where("logistics_order_id = ?", logisticsOrder.ID).Order("id DESC").Limit(5).Find(&docs)
+			item.FulfillmentDocs = make([]dto.FulfillmentDocumentInfo, 0, len(docs))
+			for _, doc := range docs {
+				item.FulfillmentDocs = append(item.FulfillmentDocs, fulfillmentDocumentToInfo(&doc))
+			}
+		}
+
+		if item.WarehouseServiceID > 0 {
+			var snapshots []entity.WarehouseInventorySnapshot
+			h.db.WithContext(c.Request.Context()).
+				Where("warehouse_service_id = ?", item.WarehouseServiceID).
+				Order("id DESC").
+				Limit(5).
+				Find(&snapshots)
+			item.InventorySnapshots = make([]dto.WarehouseInventorySnapshotInfo, 0, len(snapshots))
+			for _, snapshot := range snapshots {
+				item.InventorySnapshots = append(item.InventorySnapshots, warehouseSnapshotToInfo(&snapshot))
+			}
+		}
+
+		list = append(list, item)
+	}
+	response.Success(c, gin.H{"list": list})
+}
+
+func fulfillmentDocumentToInfo(d *entity.FulfillmentDocument) dto.FulfillmentDocumentInfo {
+	return dto.FulfillmentDocumentInfo{
+		ID:               d.ID,
+		LogisticsOrderID: d.LogisticsOrderID,
+		OrderID:          d.OrderID,
+		DocType:          string(d.DocType),
+		FileURL:          d.FileURL,
+		Remark:           d.Remark,
+		GPSLatitude:      d.GPSLatitude,
+		GPSLongitude:     d.GPSLongitude,
+		CapturedAt:       d.CapturedAt,
+		UploadedBy:       d.UploadedBy,
+		EnterpriseID:     d.EnterpriseID,
+		UploadedRole:     d.UploadedRole,
+		CreatedAt:        d.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func defaultString(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }

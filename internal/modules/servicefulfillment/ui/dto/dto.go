@@ -35,6 +35,22 @@ type CreateWarehouseStorageRequest struct {
 	Remark             string  `json:"remark"`
 }
 
+type UpsertWarehouseInventorySnapshotRequest struct {
+	WarehouseServiceID uint64  `json:"warehouse_service_id" binding:"required"`
+	ProductName        string  `json:"product_name" binding:"required"`
+	BundleNo           string  `json:"bundle_no"`
+	BatchNo            string  `json:"batch_no"`
+	LocationCode       string  `json:"location_code"`
+	Quantity           float64 `json:"quantity" binding:"required,gte=0"`
+	FrozenQuantity     float64 `json:"frozen_quantity"`
+	QualityStatus      string  `json:"quality_status"`
+	PledgeStatus       string  `json:"pledge_status"`
+	ExternalSystem     string  `json:"external_system"`
+	ExternalRefNo      string  `json:"external_ref_no"`
+	SyncStatus         string  `json:"sync_status"`
+	Remark             string  `json:"remark"`
+}
+
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 	Remark string `json:"remark"`
@@ -77,6 +93,31 @@ type AcceptLogisticsOrderRequest struct {
 	DriverPhone string  `json:"driver_phone"`
 	PlateNumber string  `json:"plate_number"`
 	FinalPrice  float64 `json:"final_price"`
+}
+
+type UpsertLogisticsDriverRequest struct {
+	Name                  string `json:"name" binding:"required"`
+	Phone                 string `json:"phone" binding:"required"`
+	IDCard                string `json:"id_card"`
+	LicenseNo             string `json:"license_no"`
+	LicenseExpireAt       string `json:"license_expire_at"`
+	QualificationNo       string `json:"qualification_no"`
+	QualificationExpireAt string `json:"qualification_expire_at"`
+	Status                string `json:"status"`
+	Remark                string `json:"remark"`
+}
+
+type UpsertLogisticsVehicleRequest struct {
+	PlateNumber       string  `json:"plate_number" binding:"required"`
+	VehicleType       string  `json:"vehicle_type"`
+	LoadCapacity      float64 `json:"load_capacity"`
+	VehicleLicense    string  `json:"vehicle_license"`
+	LicenseExpireAt   string  `json:"license_expire_at"`
+	InsuranceNo       string  `json:"insurance_no"`
+	InsuranceExpireAt string  `json:"insurance_expire_at"`
+	DriverID          uint64  `json:"driver_id"`
+	Status            string  `json:"status"`
+	Remark            string  `json:"remark"`
 }
 
 type CreateTrackingEventRequest struct {
@@ -137,6 +178,27 @@ type WarehouseMovementInfo struct {
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
+type WarehouseInventorySnapshotInfo struct {
+	ID                    uint64    `json:"id"`
+	SnapshotNo            string    `json:"snapshot_no"`
+	WarehouseServiceID    uint64    `json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64    `json:"warehouse_enterprise_id"`
+	ProductName           string    `json:"product_name"`
+	BundleNo              string    `json:"bundle_no"`
+	BatchNo               string    `json:"batch_no"`
+	LocationCode          string    `json:"location_code"`
+	Quantity              float64   `json:"quantity"`
+	FrozenQuantity        float64   `json:"frozen_quantity"`
+	QualityStatus         string    `json:"quality_status"`
+	PledgeStatus          string    `json:"pledge_status"`
+	ExternalSystem        string    `json:"external_system"`
+	ExternalRefNo         string    `json:"external_ref_no"`
+	SyncStatus            string    `json:"sync_status"`
+	Remark                string    `json:"remark"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
 type LogisticsOrderInfo struct {
 	ID                      uint64              `json:"id"`
 	LogisticsNo             string              `json:"logistics_no"`
@@ -171,6 +233,64 @@ type LogisticsOrderInfo struct {
 	CreatedAt               time.Time           `json:"created_at"`
 	UpdatedAt               time.Time           `json:"updated_at"`
 	TrackingEvents          []TrackingEventInfo `json:"tracking_events,omitempty"`
+}
+
+type LogisticsDriverInfo struct {
+	ID                    uint64    `json:"id"`
+	EnterpriseID          uint64    `json:"enterprise_id"`
+	Name                  string    `json:"name"`
+	Phone                 string    `json:"phone"`
+	IDCard                string    `json:"id_card"`
+	LicenseNo             string    `json:"license_no"`
+	LicenseExpireAt       string    `json:"license_expire_at"`
+	QualificationNo       string    `json:"qualification_no"`
+	QualificationExpireAt string    `json:"qualification_expire_at"`
+	Status                string    `json:"status"`
+	Remark                string    `json:"remark"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type LogisticsVehicleInfo struct {
+	ID                uint64    `json:"id"`
+	EnterpriseID      uint64    `json:"enterprise_id"`
+	PlateNumber       string    `json:"plate_number"`
+	VehicleType       string    `json:"vehicle_type"`
+	LoadCapacity      float64   `json:"load_capacity"`
+	VehicleLicense    string    `json:"vehicle_license"`
+	LicenseExpireAt   string    `json:"license_expire_at"`
+	InsuranceNo       string    `json:"insurance_no"`
+	InsuranceExpireAt string    `json:"insurance_expire_at"`
+	DriverID          uint64    `json:"driver_id"`
+	Status            string    `json:"status"`
+	Remark            string    `json:"remark"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type CollateralMonitorInfo struct {
+	FinancingRequestID uint64                           `json:"financing_request_id"`
+	OrderID            uint64                           `json:"order_id"`
+	OrderNo            string                           `json:"order_no"`
+	BuyerEnterpriseID  uint64                           `json:"buyer_enterprise_id"`
+	SellerEnterpriseID uint64                           `json:"seller_enterprise_id"`
+	FinanceServiceID   uint64                           `json:"finance_service_id"`
+	RequestedAmount    float64                          `json:"requested_amount"`
+	ApprovedAmount     float64                          `json:"approved_amount"`
+	FinancingStatus    string                           `json:"financing_status"`
+	OrderStatus        int                              `json:"order_status"`
+	WarehouseServiceID uint64                           `json:"warehouse_service_id"`
+	WarehouseName      string                           `json:"warehouse_name"`
+	WarehouseAddress   string                           `json:"warehouse_address"`
+	LogisticsStatus    string                           `json:"logistics_status"`
+	LastLogisticsEvent string                           `json:"last_logistics_event"`
+	PledgeVoucherURL   string                           `json:"pledge_voucher_url"`
+	PledgeRemark       string                           `json:"pledge_remark"`
+	PledgedAt          *time.Time                       `json:"pledged_at,omitempty"`
+	ReleaseCondition   string                           `json:"release_condition"`
+	ReleasedAt         *time.Time                       `json:"released_at,omitempty"`
+	InventorySnapshots []WarehouseInventorySnapshotInfo `json:"inventory_snapshots,omitempty"`
+	FulfillmentDocs    []FulfillmentDocumentInfo        `json:"fulfillment_docs,omitempty"`
 }
 
 type TrackingEventInfo struct {
@@ -221,10 +341,10 @@ type SealConfirmRequest struct {
 }
 
 type InspectionRequest struct {
-	Result   string `json:"result" binding:"required"`
-	FileURL  string `json:"file_url"`
-	SealOK   bool   `json:"seal_ok"`
-	Remark   string `json:"remark"`
+	Result  string `json:"result" binding:"required"`
+	FileURL string `json:"file_url"`
+	SealOK  bool   `json:"seal_ok"`
+	Remark  string `json:"remark"`
 }
 
 type FulfillmentDocumentInfo struct {

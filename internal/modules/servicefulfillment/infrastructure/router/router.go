@@ -27,6 +27,14 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		movements.PUT("/:id/status", middleware.RequireEnterpriseService("warehouse"), h.UpdateWarehouseMovementStatus)
 	}
 
+	inventory := r.Group("/warehouse-inventory-snapshots")
+	inventory.Use(middleware.AuthRequired(), middleware.RequireProviderService("warehouse"))
+	{
+		inventory.GET("", h.ListWarehouseInventorySnapshots)
+		inventory.POST("", h.CreateWarehouseInventorySnapshot)
+		inventory.PUT("/:id", h.UpdateWarehouseInventorySnapshot)
+	}
+
 	logistics := r.Group("/logistics")
 	logistics.Use(middleware.AuthRequired())
 	{
@@ -40,6 +48,18 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		logistics.GET("/orders/:id/documents", middleware.RequireEnterpriseService("procurement", "sales", "warehouse", "logistics"), h.ListFulfillmentDocuments)
 		logistics.POST("/orders/:id/seal-confirm", middleware.RequireEnterpriseService("warehouse"), h.SealConfirm)
 		logistics.POST("/orders/:id/inspection", middleware.RequireEnterpriseService("procurement", "warehouse"), h.SubmitInspection)
+		logistics.GET("/drivers", middleware.RequireEnterpriseService("logistics"), h.ListLogisticsDrivers)
+		logistics.POST("/drivers", middleware.RequireEnterpriseService("logistics"), h.CreateLogisticsDriver)
+		logistics.PUT("/drivers/:id", middleware.RequireEnterpriseService("logistics"), h.UpdateLogisticsDriver)
+		logistics.GET("/vehicles", middleware.RequireEnterpriseService("logistics"), h.ListLogisticsVehicles)
+		logistics.POST("/vehicles", middleware.RequireEnterpriseService("logistics"), h.CreateLogisticsVehicle)
+		logistics.PUT("/vehicles/:id", middleware.RequireEnterpriseService("logistics"), h.UpdateLogisticsVehicle)
+	}
+
+	finance := r.Group("/finance")
+	finance.Use(middleware.AuthRequired(), middleware.RequireProviderService("finance"))
+	{
+		finance.GET("/collateral-monitor", h.ListCollateralMonitor)
 	}
 
 	orders := r.Group("/orders")

@@ -153,6 +153,34 @@ func (WarehouseInventoryMovement) TableName() string {
 	return "warehouse_inventory_movements"
 }
 
+type WarehouseInventorySnapshot struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	SnapshotNo            string         `gorm:"type:varchar(64);uniqueIndex;not null;comment:库存快照编号" json:"snapshot_no"`
+	WarehouseServiceID    uint64         `gorm:"index;not null;comment:仓储资源ID" json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64         `gorm:"index;not null;comment:仓储企业ID" json:"warehouse_enterprise_id"`
+	ProductName           string         `gorm:"type:varchar(200);not null;comment:商品名称" json:"product_name"`
+	BundleNo              string         `gorm:"type:varchar(100);index;comment:捆包号/批次号" json:"bundle_no"`
+	BatchNo               string         `gorm:"type:varchar(100);index;comment:批次号" json:"batch_no"`
+	LocationCode          string         `gorm:"type:varchar(100);index;comment:库位" json:"location_code"`
+	Quantity              float64        `gorm:"type:decimal(12,2);not null;comment:当前库存数量" json:"quantity"`
+	FrozenQuantity        float64        `gorm:"type:decimal(12,2);comment:质押/冻结数量" json:"frozen_quantity"`
+	QualityStatus         string         `gorm:"type:varchar(32);index;default:unchecked;comment:质检状态 unchecked/passed/failed" json:"quality_status"`
+	PledgeStatus          string         `gorm:"type:varchar(32);index;default:none;comment:质押状态 none/frozen/released" json:"pledge_status"`
+	ExternalSystem        string         `gorm:"type:varchar(64);comment:外部系统 MRP/WMS" json:"external_system"`
+	ExternalRefNo         string         `gorm:"type:varchar(128);index;comment:外部单号" json:"external_ref_no"`
+	SyncStatus            string         `gorm:"type:varchar(32);index;default:manual;comment:同步状态 manual/synced/failed" json:"sync_status"`
+	Remark                string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy             uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (WarehouseInventorySnapshot) TableName() string {
+	return "warehouse_inventory_snapshots"
+}
+
 type LogisticsOrder struct {
 	ID                      uint64               `gorm:"primaryKey;autoIncrement" json:"id"`
 	LogisticsNo             string               `gorm:"type:varchar(64);uniqueIndex;not null;comment:物流委托单号" json:"logistics_no"`
@@ -194,6 +222,53 @@ type LogisticsOrder struct {
 
 func (LogisticsOrder) TableName() string {
 	return "logistics_orders"
+}
+
+type LogisticsDriver struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnterpriseID          uint64         `gorm:"index;not null;comment:物流企业ID" json:"enterprise_id"`
+	Name                  string         `gorm:"type:varchar(100);not null;comment:司机姓名" json:"name"`
+	Phone                 string         `gorm:"type:varchar(50);not null;comment:司机电话" json:"phone"`
+	IDCard                string         `gorm:"type:varchar(50);comment:身份证号" json:"id_card"`
+	LicenseNo             string         `gorm:"type:varchar(100);comment:驾驶证号" json:"license_no"`
+	LicenseExpireAt       string         `gorm:"type:varchar(64);comment:驾驶证有效期" json:"license_expire_at"`
+	QualificationNo       string         `gorm:"type:varchar(100);comment:从业资格证号" json:"qualification_no"`
+	QualificationExpireAt string         `gorm:"type:varchar(64);comment:从业资格证有效期" json:"qualification_expire_at"`
+	Status                string         `gorm:"type:varchar(32);index;default:active;comment:状态 active/inactive" json:"status"`
+	Remark                string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy             uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (LogisticsDriver) TableName() string {
+	return "logistics_drivers"
+}
+
+type LogisticsVehicle struct {
+	ID                uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnterpriseID      uint64         `gorm:"index;not null;comment:物流企业ID" json:"enterprise_id"`
+	PlateNumber       string         `gorm:"type:varchar(50);not null;index;comment:车牌号" json:"plate_number"`
+	VehicleType       string         `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
+	LoadCapacity      float64        `gorm:"type:decimal(12,2);comment:载重能力" json:"load_capacity"`
+	VehicleLicense    string         `gorm:"type:varchar(100);comment:行驶证号" json:"vehicle_license"`
+	LicenseExpireAt   string         `gorm:"type:varchar(64);comment:行驶证有效期" json:"license_expire_at"`
+	InsuranceNo       string         `gorm:"type:varchar(100);comment:保险单号" json:"insurance_no"`
+	InsuranceExpireAt string         `gorm:"type:varchar(64);comment:保险有效期" json:"insurance_expire_at"`
+	DriverID          uint64         `gorm:"index;comment:绑定司机ID" json:"driver_id"`
+	Status            string         `gorm:"type:varchar(32);index;default:active;comment:状态 active/inactive" json:"status"`
+	Remark            string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy         uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy         uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt         time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt         time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (LogisticsVehicle) TableName() string {
+	return "logistics_vehicles"
 }
 
 type LogisticsTrackingEvent struct {

@@ -153,3 +153,37 @@ func ServiceToEnterpriseRole(service PlatformService) string {
 		return ""
 	}
 }
+
+func PlatformServiceToEnterpriseRole(service PlatformService) EnterpriseRole {
+	switch service {
+	case ServiceSales:
+		return EnterpriseRoleSeller
+	case ServiceProcurement:
+		return EnterpriseRoleBuyer
+	case ServiceLogistics:
+		return EnterpriseRoleLogistics
+	case ServiceWarehouse:
+		return EnterpriseRoleWarehouse
+	case ServiceFinance:
+		return EnterpriseRoleFund
+	default:
+		return ""
+	}
+}
+
+func EnterpriseRoleToPlatformService(role string) (PlatformService, bool) {
+	switch EnterpriseRole(role) {
+	case EnterpriseRoleBuyer:
+		return ServiceProcurement, true
+	case EnterpriseRoleSeller:
+		return ServiceSales, true
+	case EnterpriseRoleLogistics:
+		return ServiceLogistics, true
+	case EnterpriseRoleWarehouse:
+		return ServiceWarehouse, true
+	case EnterpriseRoleFund:
+		return ServiceFinance, true
+	default:
+		return "", false
+	}
+}

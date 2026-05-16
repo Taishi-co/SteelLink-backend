@@ -8,7 +8,10 @@ import (
 func AutoMigrate() error {
 	return database.GetDB().AutoMigrate(
 		&entity.WarehouseInventoryMovement{},
+		&entity.WarehouseInventorySnapshot{},
 		&entity.LogisticsOrder{},
+		&entity.LogisticsDriver{},
+		&entity.LogisticsVehicle{},
 		&entity.LogisticsTrackingEvent{},
 		&entity.FulfillmentDocument{},
 		&entity.FulfillmentGuarantee{},
