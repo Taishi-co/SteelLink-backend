@@ -1,3 +1,4 @@
+//go:build ignore
 
 package main
 
@@ -5,11 +6,17 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {
-	dsn := "root:Steellink2026@tcp(117.72.123.14:3306)/steellink?charset=utf8mb4&amp;parseTime=True&amp;loc=Local&amp;timeout=10s"
-	
+	dsn := os.Getenv("STEELLINK_RESTORE_DSN")
+	if dsn == "" {
+		log.Fatal("STEELLINK_RESTORE_DSN is required")
+	}
+
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -28,7 +35,7 @@ func main() {
 		var id int64
 		var orderNo string
 		var status int
-		if err := rows.Scan(&amp;id, &amp;orderNo, &amp;status); err != nil {
+		if err := rows.Scan(&id, &orderNo, &status); err != nil {
 			log.Printf("Scan failed: %v", err)
 			continue
 		}
@@ -48,7 +55,7 @@ func main() {
 		var id int64
 		var orderID int64
 		var status string
-		if err := loRows.Scan(&amp;id, &amp;orderID, &amp;status); err != nil {
+		if err := loRows.Scan(&id, &orderID, &status); err != nil {
 			log.Printf("Scan failed: %v", err)
 			continue
 		}
@@ -88,7 +95,7 @@ func main() {
 		}
 	}
 
-	if targetLogisticsOrderID &gt; 0 {
+	if targetLogisticsOrderID > 0 {
 		_, err = db.Exec("UPDATE logistics_orders SET status = 'arrival_confirmed', receipt_signed_at = NULL WHERE id = ?", targetLogisticsOrderID)
 		if err != nil {
 			log.Printf("Update logistics order failed: %v", err)

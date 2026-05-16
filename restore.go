@@ -1,12 +1,20 @@
+//go:build ignore
 
 package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 )
 
 func main() {
+	if os.Getenv("STEELLINK_ALLOW_RESTORE_SCRIPT") != "1" {
+		fmt.Println("Refusing to run. Set STEELLINK_ALLOW_RESTORE_SCRIPT=1 to execute this manual restore script.")
+		return
+	}
+
 	database.InitDB()
 	db := database.GetDB()
 
@@ -15,7 +23,7 @@ func main() {
 		ID     uint64 `db:"id"`
 		Status int    `db:"status"`
 	}
-	db.Raw("SELECT id, status FROM orders ORDER BY id DESC LIMIT 5").Scan(&amp;orderIDs)
+	db.Raw("SELECT id, status FROM orders ORDER BY id DESC LIMIT 5").Scan(&orderIDs)
 	fmt.Println("订单列表：")
 	for _, o := range orderIDs {
 		fmt.Printf("ID: %d, Status: %d\n", o.ID, o.Status)
@@ -27,7 +35,7 @@ func main() {
 		OrderID uint64 `db:"order_id"`
 		Status  string `db:"status"`
 	}
-	db.Raw("SELECT id, order_id, status FROM logistics_orders ORDER BY id DESC LIMIT 5").Scan(&amp;logisticsOrderIDs)
+	db.Raw("SELECT id, order_id, status FROM logistics_orders ORDER BY id DESC LIMIT 5").Scan(&logisticsOrderIDs)
 	fmt.Println("\n物流订单列表：")
 	for _, lo := range logisticsOrderIDs {
 		fmt.Printf("ID: %d, OrderID: %d, Status: %s\n", lo.ID, lo.OrderID, lo.Status)
@@ -61,7 +69,7 @@ func main() {
 		}
 	}
 
-	if logisticsOrderID &gt; 0 {
+	if logisticsOrderID > 0 {
 		db.Exec("UPDATE logistics_orders SET status = 'arrival_confirmed', receipt_signed_at = NULL WHERE id = ?", logisticsOrderID)
 	}
 
