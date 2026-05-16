@@ -1205,12 +1205,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ecode.ErrNotFound.WithMessage("订单不存在")
 			}
-			return ecode.ErrDatabase
-		}
-
-		// 预加载订单项目
-		if err := tx.Model(&order).Association("Items").Find(&order.Items); err != nil {
-			return ecode.ErrDatabase
+			return fmt.Errorf("查询订单失败: %w", err)
 		}
 
 		// 权限检查
@@ -1257,7 +1252,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 
 		// 保存订单
 		if err := tx.Save(&order).Error; err != nil {
-			return err
+			return fmt.Errorf("保存订单失败: %w", err)
 		}
 
 		// 创建订单事件
@@ -1265,7 +1260,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 			"transaction_no": strings.TrimSpace(req.TransactionNo),
 			"voucher_url":    strings.TrimSpace(req.VoucherURL),
 		}); err != nil {
-			return err
+			return fmt.Errorf("创建订单事件失败: %w", err)
 		}
 
 		resultOrder = &order
@@ -1274,7 +1269,7 @@ func (s *OrderService) UploadPaymentVoucher(ctx context.Context, id, enterpriseI
 		if e, ok := err.(*ecode.Error); ok {
 			return nil, e
 		}
-		return nil, ecode.ErrDatabase.WithMessage("上传支付凭证失败")
+		return nil, ecode.ErrDatabase.WithMessage(err.Error())
 	}
 
 	return toOrderInfo(resultOrder, nil), nil
@@ -1303,15 +1298,22 @@ func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, oper
 
 	var titleVoucherURL string
 	var titleVoucherRemark string
-	if len(order.Items) > 0 {
+	
+	// 优先使用请求中的货权凭证
+	titleVoucherURL = strings.TrimSpace(req.TitleVoucherURL)
+	titleVoucherRemark = strings.TrimSpace(req.TitleVoucherRemark)
+	
+	// 如果请求中没有，尝试从商品获取
+	if titleVoucherURL == "" && len(order.Items) > 0 {
 		product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
 		if prodErr == nil && product != nil {
 			titleVoucherURL = strings.TrimSpace(product.TitleVoucherURL)
 			titleVoucherRemark = strings.TrimSpace(product.TitleVoucherRemark)
 		}
 	}
+	
 	if titleVoucherURL == "" {
-		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证")
+		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证或在支付时上传货权凭证")
 	}
 
 	if order.Remark == nil {
@@ -1322,15 +1324,18 @@ func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, oper
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(order).Error; err != nil {
-			return err
+			return fmt.Errorf("保存订单货权监管信息失败: %w", err)
 		}
-		return createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
+		if err := createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
 			"title_voucher_url": titleVoucherURL,
 			"title_remark":      titleVoucherRemark,
 			"source":            "product_certification",
-		})
+		}); err != nil {
+			return fmt.Errorf("创建货权监管事件失败: %w", err)
+		}
+		return nil
 	}); err != nil {
-		return nil, ecode.ErrDatabase.WithMessage("记录直采货权监管失败")
+		return nil, ecode.ErrDatabase.WithMessage(err.Error())
 	}
 	return result, nil
 }
