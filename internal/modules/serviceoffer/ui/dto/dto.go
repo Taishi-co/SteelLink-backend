@@ -94,6 +94,7 @@ type WarehouseServiceInfo struct {
 	LoadingCapacity    string    `json:"loading_capacity"`
 	BusinessHours      string    `json:"business_hours"`
 	PledgeSupervision  bool      `json:"pledge_supervision"`
+	FinanceCertified   bool      `json:"finance_certified"`
 	OutboundVoucherReq string    `json:"outbound_voucher_req"`
 	Images             []string  `json:"images"`
 	Certificates       []string  `json:"certificates"`
