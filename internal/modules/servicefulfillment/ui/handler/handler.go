@@ -572,6 +572,9 @@ func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.Logist
 			return ecode.ErrForbidden.WithMessage("当前节点需由绑定仓储方推进")
 		}
 	case entity.LogisticsOrderReceiptSigned:
+		if entity.NormalizeLogisticsOrderStatus(item.Status) != entity.LogisticsOrderInboundCompleted {
+			return ecode.ErrBadRequest.WithMessage("需收货仓验货入库完成后，买方或资金方才能确认收货")
+		}
 		if item.OrderID == 0 {
 			if item.BuyerEnterpriseID == enterpriseID {
 				return nil
@@ -598,6 +601,9 @@ func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.Logist
 			return ecode.ErrForbidden.WithMessage("当前节点需由买方确认收货")
 		}
 	case entity.LogisticsOrderCompleted:
+		if entity.NormalizeLogisticsOrderStatus(item.Status) != entity.LogisticsOrderReceiptSigned {
+			return ecode.ErrBadRequest.WithMessage("需买方或资金方确认收货后，物流方才能归档")
+		}
 		if item.CarrierEnterpriseID != enterpriseID {
 			return ecode.ErrForbidden.WithMessage("履约完成需由物流方归档")
 		}
@@ -698,9 +704,9 @@ func requiredLogisticsDocTypes(status entity.LogisticsOrderStatus) []string {
 	case entity.LogisticsOrderArrivalConfirmed:
 		return []string{string(entity.DocTypeDeliveryPhoto)}
 	case entity.LogisticsOrderReceiptSigned:
-		return []string{string(entity.DocTypeReceiptOrder)}
+		return nil
 	case entity.LogisticsOrderInboundCompleted:
-		return []string{string(entity.DocTypeInboundOrder)}
+		return []string{string(entity.DocTypeSealPhoto), string(entity.DocTypeInboundOrder), string(entity.DocTypeReceiptOrder)}
 	default:
 		return nil
 	}
@@ -921,9 +927,9 @@ func logisticsStatusRequirementDefinitions() []dto.LogisticsStatusRequirementInf
 		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传装车凭证并确认装货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
 		{Status: string(entity.LogisticsOrderInTransit), Label: "运输中", Actor: "logistics", Description: "物流方上传 GPS 或在途轨迹", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInTransit)},
 		{Status: string(entity.LogisticsOrderArrivalConfirmed), Label: "到货确认", Actor: "logistics", Description: "物流方上传到货照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderArrivalConfirmed)},
-		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "验收签收", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderReceiptSigned)},
-		{Status: string(entity.LogisticsOrderInboundCompleted), Label: "入库完成", Actor: "warehouse", Description: "目的仓或监管仓上传入库单", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInboundCompleted)},
-		{Status: string(entity.LogisticsOrderCompleted), Label: "履约完成", Actor: "logistics", Description: "物流方归档物流履约"},
+		{Status: string(entity.LogisticsOrderInboundCompleted), Label: "收货仓验货入库", Actor: "warehouse", Description: "收货仓上传封条照片、入库单和收货单", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInboundCompleted)},
+		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "确认收货", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认"},
+		{Status: string(entity.LogisticsOrderCompleted), Label: "履约完成", Actor: "logistics", Description: "买方/资金方确认收货后，物流方归档物流履约"},
 	}
 }
 
@@ -1022,8 +1028,8 @@ func buildLogisticsStatusDescription(status entity.LogisticsOrderStatus, remark 
 		entity.LogisticsOrderLoadingConfirmed:  "物流方已确认装货",
 		entity.LogisticsOrderInTransit:         "货物运输中",
 		entity.LogisticsOrderArrivalConfirmed:  "货物已到货确认",
-		entity.LogisticsOrderReceiptSigned:     "买方已完成验收签收",
-		entity.LogisticsOrderInboundCompleted:  "目的地仓储已完成入库",
+		entity.LogisticsOrderInboundCompleted:  "收货仓已完成验货入库",
+		entity.LogisticsOrderReceiptSigned:     "买方/资金方已确认收货",
 		entity.LogisticsOrderCompleted:         "物流履约已完成",
 		entity.LogisticsOrderCancelled:         "物流履约已取消",
 		entity.LogisticsOrderException:         "物流履约出现异常",

@@ -72,11 +72,11 @@ func NormalizeLogisticsOrderStatus(status LogisticsOrderStatus) LogisticsOrderSt
 
 func ResponsibilityForLogisticsStatus(status LogisticsOrderStatus) ResponsibilityParty {
 	switch NormalizeLogisticsOrderStatus(status) {
-	case LogisticsOrderTaskCreated, LogisticsOrderLoadingConfirmed, LogisticsOrderInTransit:
+	case LogisticsOrderTaskCreated, LogisticsOrderLoadingConfirmed, LogisticsOrderInTransit, LogisticsOrderReceiptSigned, LogisticsOrderCompleted:
 		return ResponsibilityPartyLogistics
-	case LogisticsOrderPickupScheduled, LogisticsOrderArrivalSignedIn, LogisticsOrderOutboundConfirmed, LogisticsOrderInboundCompleted:
+	case LogisticsOrderPickupScheduled, LogisticsOrderArrivalSignedIn, LogisticsOrderOutboundConfirmed, LogisticsOrderArrivalConfirmed:
 		return ResponsibilityPartyWarehouse
-	case LogisticsOrderArrivalConfirmed, LogisticsOrderReceiptSigned, LogisticsOrderCompleted:
+	case LogisticsOrderInboundCompleted:
 		return ResponsibilityPartyBuyer
 	default:
 		return ResponsibilityPartyUnknown
@@ -99,9 +99,9 @@ func CanTransitionLogisticsOrderStatus(from, to LogisticsOrderStatus) bool {
 		LogisticsOrderOutboundConfirmed: {LogisticsOrderLoadingConfirmed},
 		LogisticsOrderLoadingConfirmed:  {LogisticsOrderInTransit},
 		LogisticsOrderInTransit:         {LogisticsOrderArrivalConfirmed},
-		LogisticsOrderArrivalConfirmed:  {LogisticsOrderReceiptSigned},
-		LogisticsOrderReceiptSigned:     {LogisticsOrderInboundCompleted},
-		LogisticsOrderInboundCompleted:  {LogisticsOrderCompleted},
+		LogisticsOrderArrivalConfirmed:  {LogisticsOrderInboundCompleted},
+		LogisticsOrderInboundCompleted:  {LogisticsOrderReceiptSigned},
+		LogisticsOrderReceiptSigned:     {LogisticsOrderCompleted},
 		LogisticsOrderCompleted:         {},
 	}
 	nextStatuses, ok := allowed[from]
