@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -209,6 +210,114 @@ func (h *Handler) ListWarehouseStorageRequests(c *gin.Context) {
 		list = append(list, movementToInfo(&row))
 	}
 	response.Success(c, dto.PageResponse[dto.WarehouseMovementInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+}
+
+func (h *Handler) CreateWarehouseReceiptPledge(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("企业用户才能申请仓单质押"))
+		return
+	}
+	var req dto.CreateWarehouseReceiptPledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if !isHTTPURL(req.ReceiptVoucherURL) {
+		response.BadRequest(c, "仓单文件URL必须是有效的HTTP/HTTPS地址")
+		return
+	}
+
+	var finance serviceOfferEntity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).
+		Where("id = ? AND status = ?", req.FinanceServiceID, serviceOfferEntity.OfferStatusApproved).
+		First(&finance).Error; err != nil {
+		response.NotFound(c, "资金产品不存在或未审核通过")
+		return
+	}
+	if req.RequestedAmount < finance.MinAmount || (finance.MaxAmount > 0 && req.RequestedAmount > finance.MaxAmount) {
+		response.BadRequest(c, "申请金额不在资金产品额度范围内")
+		return
+	}
+
+	var warehouse serviceOfferEntity.WarehouseService
+	if err := h.db.WithContext(c.Request.Context()).
+		Where("id = ? AND status = ?", req.WarehouseServiceID, serviceOfferEntity.OfferStatusApproved).
+		First(&warehouse).Error; err != nil {
+		response.NotFound(c, "监管仓库不存在或未审核通过")
+		return
+	}
+	if !warehouse.PledgeSupervision {
+		response.BadRequest(c, "所选仓库未声明支持质押监管")
+		return
+	}
+	if err := h.ensureFinanceWarehouseAuthorized(c, finance.ID, finance.EnterpriseID, warehouse.ID); err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	now := time.Now()
+	item := entity.WarehouseReceiptPledgeApplication{
+		ApplicationNo:         "WRP" + now.Format("20060102150405") + randomDigits(4),
+		ApplicantEnterpriseID: claims.EnterpriseID,
+		ApplicantUserID:       claims.UserID,
+		ApplicantRole:         resolveApplicantRole(c.GetHeader("X-Trade-Role"), claims.ServiceCapabilities),
+		FinanceServiceID:      finance.ID,
+		FundingEnterpriseID:   finance.EnterpriseID,
+		WarehouseServiceID:    warehouse.ID,
+		WarehouseEnterpriseID: warehouse.EnterpriseID,
+		WarehouseName:         warehouse.WarehouseName,
+		ReceiptNo:             strings.TrimSpace(req.ReceiptNo),
+		ReceiptVoucherURL:     strings.TrimSpace(req.ReceiptVoucherURL),
+		GoodsName:             strings.TrimSpace(req.GoodsName),
+		Quantity:              req.Quantity,
+		QualityGrade:          strings.TrimSpace(req.QualityGrade),
+		RequestedAmount:       req.RequestedAmount,
+		Status:                entity.WarehouseReceiptPledgeSubmitted,
+		SubmittedAt:           &now,
+		Remark:                strings.TrimSpace(req.Remark),
+		CreatedBy:             claims.UserID,
+		UpdatedBy:             claims.UserID,
+	}
+	if err := h.db.WithContext(c.Request.Context()).Create(&item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("创建仓单质押申请失败"))
+		return
+	}
+	response.Success(c, h.warehouseReceiptPledgeToInfo(c, &item))
+}
+
+func (h *Handler) ListMyWarehouseReceiptPledges(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("企业用户才能查看仓单质押申请"))
+		return
+	}
+	var req dto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseReceiptPledgeApplication{}).
+		Where("applicant_enterprise_id = ?", claims.EnterpriseID)
+	query = applyWarehouseReceiptPledgeFilters(query, req)
+	var total int64
+	query.Count(&total)
+	var rows []entity.WarehouseReceiptPledgeApplication
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询仓单质押申请失败"))
+		return
+	}
+	list := make([]dto.WarehouseReceiptPledgeInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, h.warehouseReceiptPledgeToInfo(c, &row))
+	}
+	response.Success(c, dto.PageResponse[dto.WarehouseReceiptPledgeInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
 }
 
 func (h *Handler) ListWarehouseMovements(c *gin.Context) {
@@ -1667,6 +1776,182 @@ func (h *Handler) ListCollateralMonitor(c *gin.Context) {
 	response.Success(c, gin.H{"list": list})
 }
 
+func (h *Handler) ListFinanceWarehouseReceiptPledges(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	var req dto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	query := h.db.WithContext(c.Request.Context()).Model(&entity.WarehouseReceiptPledgeApplication{}).
+		Where("funding_enterprise_id = ?", claims.EnterpriseID)
+	query = applyWarehouseReceiptPledgeFilters(query, req)
+	var total int64
+	query.Count(&total)
+	var rows []entity.WarehouseReceiptPledgeApplication
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&rows).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("查询仓单质押申请失败"))
+		return
+	}
+	list := make([]dto.WarehouseReceiptPledgeInfo, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, h.warehouseReceiptPledgeToInfo(c, &row))
+	}
+	response.Success(c, dto.PageResponse[dto.WarehouseReceiptPledgeInfo]{List: list, Total: total, Page: req.Page, PageSize: req.PageSize})
+}
+
+func (h *Handler) ReviewWarehouseReceiptPledge(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	item, ok := h.getFinanceWarehouseReceiptPledge(c)
+	if !ok {
+		return
+	}
+	if item.Status != entity.WarehouseReceiptPledgeSubmitted {
+		response.BadRequest(c, "当前状态不可进行风控审核")
+		return
+	}
+	var req dto.ReviewWarehouseReceiptPledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	now := time.Now()
+	if req.Approved {
+		if req.ApprovedAmount <= 0 {
+			response.BadRequest(c, "审批通过时审批金额必须大于0")
+			return
+		}
+		item.Status = entity.WarehouseReceiptPledgeRiskApproved
+		item.ApprovedAmount = req.ApprovedAmount
+		item.TermDays = req.TermDays
+		item.AnnualRate = req.AnnualRate
+	} else {
+		item.Status = entity.WarehouseReceiptPledgeRiskRejected
+	}
+	item.RiskRemark = strings.TrimSpace(req.RiskRemark)
+	item.RiskReviewedAt = &now
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("提交仓单质押风控结果失败"))
+		return
+	}
+	response.Success(c, h.warehouseReceiptPledgeToInfo(c, item))
+}
+
+func (h *Handler) SignWarehouseReceiptPledgeAgreement(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	item, ok := h.getFinanceWarehouseReceiptPledge(c)
+	if !ok {
+		return
+	}
+	if item.Status != entity.WarehouseReceiptPledgeRiskApproved {
+		response.BadRequest(c, "当前状态不可签署质押监管协议")
+		return
+	}
+	var req dto.SignWarehouseReceiptPledgeAgreementRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if !isHTTPURL(req.PledgeAgreementURL) || !isHTTPURL(req.SupervisionAgreementURL) {
+		response.BadRequest(c, "协议URL必须是有效的HTTP/HTTPS地址")
+		return
+	}
+	now := time.Now()
+	item.PledgeAgreementURL = strings.TrimSpace(req.PledgeAgreementURL)
+	item.SupervisionAgreementURL = strings.TrimSpace(req.SupervisionAgreementURL)
+	item.Status = entity.WarehouseReceiptPledgeAgreementSigned
+	item.AgreementSignedAt = &now
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Save(item).Error; err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("登记质押监管协议失败"))
+		return
+	}
+	response.Success(c, h.warehouseReceiptPledgeToInfo(c, item))
+}
+
+func (h *Handler) DisburseWarehouseReceiptPledge(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	item, ok := h.getFinanceWarehouseReceiptPledge(c)
+	if !ok {
+		return
+	}
+	if item.Status != entity.WarehouseReceiptPledgeAgreementSigned {
+		response.BadRequest(c, "当前状态不可放款")
+		return
+	}
+	var req dto.DisburseWarehouseReceiptPledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if !isHTTPURL(req.DisbursementVoucherURL) {
+		response.BadRequest(c, "放款凭证URL必须是有效的HTTP/HTTPS地址")
+		return
+	}
+	now := time.Now()
+	item.DisbursementVoucherURL = strings.TrimSpace(req.DisbursementVoucherURL)
+	if strings.TrimSpace(req.Remark) != "" {
+		item.Remark = strings.TrimSpace(req.Remark)
+	}
+	item.Status = entity.WarehouseReceiptPledgeDisbursed
+	item.DisbursedAt = &now
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(item).Error; err != nil {
+			return err
+		}
+		return h.freezeWarehouseReceiptInventory(c, tx, item, claims.UserID)
+	}); err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("确认仓单质押放款失败"))
+		return
+	}
+	response.Success(c, h.warehouseReceiptPledgeToInfo(c, item))
+}
+
+func (h *Handler) ReleaseWarehouseReceiptPledge(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	item, ok := h.getFinanceWarehouseReceiptPledge(c)
+	if !ok {
+		return
+	}
+	if item.Status != entity.WarehouseReceiptPledgeDisbursed && item.Status != entity.WarehouseReceiptPledgeReleasing {
+		response.BadRequest(c, "当前状态不可释放货权")
+		return
+	}
+	var req dto.ReleaseWarehouseReceiptPledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.ReleaseVoucherURL) != "" && !isHTTPURL(req.ReleaseVoucherURL) {
+		response.BadRequest(c, "释放凭证URL必须是有效的HTTP/HTTPS地址")
+		return
+	}
+	now := time.Now()
+	item.ReleaseVoucherURL = strings.TrimSpace(req.ReleaseVoucherURL)
+	item.ReleaseRemark = strings.TrimSpace(req.ReleaseRemark)
+	item.Status = entity.WarehouseReceiptPledgeReleased
+	item.ReleasedAt = &now
+	item.UpdatedBy = claims.UserID
+	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(item).Error; err != nil {
+			return err
+		}
+		return h.releaseWarehouseReceiptInventory(c, tx, item, claims.UserID)
+	}); err != nil {
+		response.Error(c, ecode.ErrDatabase.WithMessage("释放仓单质押货权失败"))
+		return
+	}
+	response.Success(c, h.warehouseReceiptPledgeToInfo(c, item))
+}
+
 func fulfillmentDocumentToInfo(d *entity.FulfillmentDocument) dto.FulfillmentDocumentInfo {
 	return dto.FulfillmentDocumentInfo{
 		ID:               d.ID,
@@ -1683,6 +1968,197 @@ func fulfillmentDocumentToInfo(d *entity.FulfillmentDocument) dto.FulfillmentDoc
 		UploadedRole:     d.UploadedRole,
 		CreatedAt:        d.CreatedAt.Format(time.RFC3339),
 	}
+}
+
+func (h *Handler) ensureFinanceWarehouseAuthorized(c *gin.Context, financeServiceID, financeEnterpriseID, warehouseServiceID uint64) *ecode.Error {
+	var authorizedCount int64
+	if err := h.db.WithContext(c.Request.Context()).
+		Model(&serviceOfferEntity.FinanceAuthorizedWarehouse{}).
+		Where("finance_service_id = ? AND finance_enterprise_id = ? AND status = ?", financeServiceID, financeEnterpriseID, "active").
+		Count(&authorizedCount).Error; err != nil {
+		return ecode.ErrDatabase.WithMessage("查询资方监管仓授权失败")
+	}
+	if authorizedCount == 0 {
+		return nil
+	}
+	var matchedCount int64
+	if err := h.db.WithContext(c.Request.Context()).
+		Model(&serviceOfferEntity.FinanceAuthorizedWarehouse{}).
+		Where("finance_service_id = ? AND finance_enterprise_id = ? AND warehouse_service_id = ? AND status = ?", financeServiceID, financeEnterpriseID, warehouseServiceID, "active").
+		Count(&matchedCount).Error; err != nil {
+		return ecode.ErrDatabase.WithMessage("查询资方监管仓授权失败")
+	}
+	if matchedCount == 0 {
+		return ecode.ErrBadRequest.WithMessage("所选仓库不在该资金产品认可的监管仓范围内")
+	}
+	return nil
+}
+
+func applyWarehouseReceiptPledgeFilters(query *gorm.DB, req dto.ListRequest) *gorm.DB {
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	if req.WarehouseServiceID > 0 {
+		query = query.Where("warehouse_service_id = ?", req.WarehouseServiceID)
+	}
+	if req.FinanceServiceID > 0 {
+		query = query.Where("finance_service_id = ?", req.FinanceServiceID)
+	}
+	return query
+}
+
+func (h *Handler) getFinanceWarehouseReceiptPledge(c *gin.Context) (*entity.WarehouseReceiptPledgeApplication, bool) {
+	claims := middleware.GetClaims(c)
+	if claims == nil || claims.EnterpriseID == 0 {
+		response.Error(c, ecode.ErrForbidden.WithMessage("企业用户才能处理仓单质押"))
+		return nil, false
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的仓单质押申请ID")
+		return nil, false
+	}
+	var item entity.WarehouseReceiptPledgeApplication
+	if err := h.db.WithContext(c.Request.Context()).
+		Where("id = ? AND funding_enterprise_id = ?", id, claims.EnterpriseID).
+		First(&item).Error; err != nil {
+		response.Error(c, ecode.ErrForbidden.WithMessage("仓单质押申请不存在或无权处理"))
+		return nil, false
+	}
+	return &item, true
+}
+
+func (h *Handler) freezeWarehouseReceiptInventory(c *gin.Context, tx *gorm.DB, item *entity.WarehouseReceiptPledgeApplication, operatorID uint64) error {
+	if item == nil {
+		return nil
+	}
+	var snapshots []entity.WarehouseInventorySnapshot
+	query := tx.WithContext(c.Request.Context()).
+		Where("warehouse_service_id = ? AND product_name = ?", item.WarehouseServiceID, item.GoodsName)
+	if item.ReceiptNo != "" {
+		query = query.Where("(external_ref_no = ? OR bundle_no = ? OR batch_no = ?)", item.ReceiptNo, item.ReceiptNo, item.ReceiptNo)
+	}
+	if err := query.Find(&snapshots).Error; err != nil {
+		return err
+	}
+	for i := range snapshots {
+		snapshots[i].PledgeStatus = "frozen"
+		snapshots[i].FrozenQuantity = item.Quantity
+		snapshots[i].UpdatedBy = operatorID
+		if strings.TrimSpace(snapshots[i].Remark) == "" {
+			snapshots[i].Remark = "仓单质押冻结：" + item.ApplicationNo
+		} else if !strings.Contains(snapshots[i].Remark, item.ApplicationNo) {
+			snapshots[i].Remark = strings.TrimSpace(snapshots[i].Remark) + "；仓单质押冻结：" + item.ApplicationNo
+		}
+		if err := tx.Save(&snapshots[i]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Handler) releaseWarehouseReceiptInventory(c *gin.Context, tx *gorm.DB, item *entity.WarehouseReceiptPledgeApplication, operatorID uint64) error {
+	if item == nil {
+		return nil
+	}
+	var snapshots []entity.WarehouseInventorySnapshot
+	query := tx.WithContext(c.Request.Context()).
+		Where("warehouse_service_id = ? AND product_name = ?", item.WarehouseServiceID, item.GoodsName)
+	if item.ReceiptNo != "" {
+		query = query.Where("(external_ref_no = ? OR bundle_no = ? OR batch_no = ?)", item.ReceiptNo, item.ReceiptNo, item.ReceiptNo)
+	}
+	if err := query.Find(&snapshots).Error; err != nil {
+		return err
+	}
+	for i := range snapshots {
+		snapshots[i].PledgeStatus = "released"
+		snapshots[i].FrozenQuantity = 0
+		snapshots[i].UpdatedBy = operatorID
+		if strings.TrimSpace(snapshots[i].Remark) == "" {
+			snapshots[i].Remark = "仓单质押释放：" + item.ApplicationNo
+		} else if !strings.Contains(snapshots[i].Remark, item.ApplicationNo+"释放") {
+			snapshots[i].Remark = strings.TrimSpace(snapshots[i].Remark) + "；仓单质押释放：" + item.ApplicationNo
+		}
+		if err := tx.Save(&snapshots[i]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Handler) warehouseReceiptPledgeToInfo(c *gin.Context, item *entity.WarehouseReceiptPledgeApplication) dto.WarehouseReceiptPledgeInfo {
+	if item == nil {
+		return dto.WarehouseReceiptPledgeInfo{}
+	}
+	info := dto.WarehouseReceiptPledgeInfo{
+		ID:                      item.ID,
+		ApplicationNo:           item.ApplicationNo,
+		ApplicantEnterpriseID:   item.ApplicantEnterpriseID,
+		ApplicantUserID:         item.ApplicantUserID,
+		ApplicantRole:           item.ApplicantRole,
+		FinanceServiceID:        item.FinanceServiceID,
+		FundingEnterpriseID:     item.FundingEnterpriseID,
+		WarehouseServiceID:      item.WarehouseServiceID,
+		WarehouseEnterpriseID:   item.WarehouseEnterpriseID,
+		WarehouseName:           item.WarehouseName,
+		ReceiptNo:               item.ReceiptNo,
+		ReceiptVoucherURL:       item.ReceiptVoucherURL,
+		GoodsName:               item.GoodsName,
+		Quantity:                item.Quantity,
+		QualityGrade:            item.QualityGrade,
+		RequestedAmount:         item.RequestedAmount,
+		ApprovedAmount:          item.ApprovedAmount,
+		TermDays:                item.TermDays,
+		AnnualRate:              item.AnnualRate,
+		RiskRemark:              item.RiskRemark,
+		PledgeAgreementURL:      item.PledgeAgreementURL,
+		SupervisionAgreementURL: item.SupervisionAgreementURL,
+		DisbursementVoucherURL:  item.DisbursementVoucherURL,
+		ReleaseVoucherURL:       item.ReleaseVoucherURL,
+		ReleaseRemark:           item.ReleaseRemark,
+		Status:                  string(item.Status),
+		SubmittedAt:             item.SubmittedAt,
+		RiskReviewedAt:          item.RiskReviewedAt,
+		AgreementSignedAt:       item.AgreementSignedAt,
+		DisbursedAt:             item.DisbursedAt,
+		ReleasedAt:              item.ReleasedAt,
+		Remark:                  item.Remark,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
+	}
+	var finance serviceOfferEntity.FinanceService
+	if err := h.db.WithContext(c.Request.Context()).Select("name").First(&finance, item.FinanceServiceID).Error; err == nil {
+		info.FinanceServiceName = finance.Name
+	}
+	return info
+}
+
+func resolveApplicantRole(tradeRole string, capabilities []string) string {
+	switch strings.TrimSpace(tradeRole) {
+	case "buyer":
+		return "procurement"
+	case "seller":
+		return "sales"
+	}
+	for _, capability := range capabilities {
+		if capability == "sales" {
+			return "sales"
+		}
+	}
+	for _, capability := range capabilities {
+		if capability == "procurement" {
+			return "procurement"
+		}
+	}
+	return ""
+}
+
+func isHTTPURL(value string) bool {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func defaultString(value string, fallback string) string {

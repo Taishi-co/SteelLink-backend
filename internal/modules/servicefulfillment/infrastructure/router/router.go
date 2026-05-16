@@ -19,6 +19,13 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales", "warehouse"), h.ListWarehouseStorageRequests)
 	r.POST("/warehouse-storage-requests", middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales"), h.CreateWarehouseStorageRequest)
 
+	warehouseReceiptPledges := r.Group("/warehouse-receipt-pledges")
+	warehouseReceiptPledges.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales"))
+	{
+		warehouseReceiptPledges.GET("/mine", h.ListMyWarehouseReceiptPledges)
+		warehouseReceiptPledges.POST("", h.CreateWarehouseReceiptPledge)
+	}
+
 	movements := r.Group("/warehouse-movements")
 	movements.Use(middleware.AuthRequired(), middleware.RequireEnterpriseService("procurement", "sales", "warehouse"))
 	{
@@ -60,6 +67,11 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	finance.Use(middleware.AuthRequired(), middleware.RequireProviderService("finance"))
 	{
 		finance.GET("/collateral-monitor", h.ListCollateralMonitor)
+		finance.GET("/warehouse-receipt-pledges", h.ListFinanceWarehouseReceiptPledges)
+		finance.POST("/warehouse-receipt-pledges/:id/risk-result", h.ReviewWarehouseReceiptPledge)
+		finance.POST("/warehouse-receipt-pledges/:id/agreements", h.SignWarehouseReceiptPledgeAgreement)
+		finance.POST("/warehouse-receipt-pledges/:id/disburse", h.DisburseWarehouseReceiptPledge)
+		finance.POST("/warehouse-receipt-pledges/:id/release", h.ReleaseWarehouseReceiptPledge)
 	}
 
 	orders := r.Group("/orders")

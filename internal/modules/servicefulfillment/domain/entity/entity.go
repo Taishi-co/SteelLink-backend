@@ -125,6 +125,18 @@ const (
 	GuaranteeStatusRejected   GuaranteeStatus = "rejected"
 )
 
+type WarehouseReceiptPledgeStatus string
+
+const (
+	WarehouseReceiptPledgeSubmitted       WarehouseReceiptPledgeStatus = "submitted"
+	WarehouseReceiptPledgeRiskApproved    WarehouseReceiptPledgeStatus = "risk_approved"
+	WarehouseReceiptPledgeRiskRejected    WarehouseReceiptPledgeStatus = "risk_rejected"
+	WarehouseReceiptPledgeAgreementSigned WarehouseReceiptPledgeStatus = "agreement_signed"
+	WarehouseReceiptPledgeDisbursed       WarehouseReceiptPledgeStatus = "disbursed"
+	WarehouseReceiptPledgeReleasing       WarehouseReceiptPledgeStatus = "releasing"
+	WarehouseReceiptPledgeReleased        WarehouseReceiptPledgeStatus = "released"
+)
+
 type WarehouseInventoryMovement struct {
 	ID                    uint64                  `gorm:"primaryKey;autoIncrement" json:"id"`
 	MovementNo            string                  `gorm:"type:varchar(64);uniqueIndex;not null;comment:出入库记录号" json:"movement_no"`
@@ -344,4 +356,48 @@ type FulfillmentGuarantee struct {
 
 func (FulfillmentGuarantee) TableName() string {
 	return "fulfillment_guarantees"
+}
+
+type WarehouseReceiptPledgeApplication struct {
+	ID                      uint64                       `gorm:"primaryKey;autoIncrement" json:"id"`
+	ApplicationNo           string                       `gorm:"type:varchar(64);uniqueIndex;not null;comment:仓单质押申请号" json:"application_no"`
+	ApplicantEnterpriseID   uint64                       `gorm:"index;not null;comment:申请企业ID" json:"applicant_enterprise_id"`
+	ApplicantUserID         uint64                       `gorm:"index;not null;comment:申请人ID" json:"applicant_user_id"`
+	ApplicantRole           string                       `gorm:"type:varchar(32);index;comment:申请方角色 procurement/sales" json:"applicant_role"`
+	FinanceServiceID        uint64                       `gorm:"index;not null;comment:资金产品ID" json:"finance_service_id"`
+	FundingEnterpriseID     uint64                       `gorm:"index;not null;comment:资金方企业ID" json:"funding_enterprise_id"`
+	WarehouseServiceID      uint64                       `gorm:"index;not null;comment:监管仓库服务ID" json:"warehouse_service_id"`
+	WarehouseEnterpriseID   uint64                       `gorm:"index;not null;comment:仓储企业ID" json:"warehouse_enterprise_id"`
+	WarehouseName           string                       `gorm:"type:varchar(200);comment:监管仓库名称" json:"warehouse_name"`
+	ReceiptNo               string                       `gorm:"type:varchar(100);index;not null;comment:仓单编号" json:"receipt_no"`
+	ReceiptVoucherURL       string                       `gorm:"type:varchar(500);not null;comment:仓单文件URL" json:"receipt_voucher_url"`
+	GoodsName               string                       `gorm:"type:varchar(200);not null;comment:货物名称" json:"goods_name"`
+	Quantity                float64                      `gorm:"type:decimal(12,2);not null;comment:数量吨" json:"quantity"`
+	QualityGrade            string                       `gorm:"type:varchar(100);comment:品质/牌号" json:"quality_grade"`
+	RequestedAmount         float64                      `gorm:"type:decimal(14,2);not null;comment:申请金额" json:"requested_amount"`
+	ApprovedAmount          float64                      `gorm:"type:decimal(14,2);comment:审批金额" json:"approved_amount"`
+	TermDays                int                          `gorm:"comment:账期天数" json:"term_days"`
+	AnnualRate              float64                      `gorm:"type:decimal(8,4);comment:年化费率" json:"annual_rate"`
+	RiskRemark              string                       `gorm:"type:varchar(1000);comment:风控备注" json:"risk_remark"`
+	PledgeAgreementURL      string                       `gorm:"type:varchar(500);comment:仓单质押协议URL" json:"pledge_agreement_url"`
+	SupervisionAgreementURL string                       `gorm:"type:varchar(500);comment:监管协议URL" json:"supervision_agreement_url"`
+	DisbursementVoucherURL  string                       `gorm:"type:varchar(500);comment:放款凭证URL" json:"disbursement_voucher_url"`
+	ReleaseVoucherURL       string                       `gorm:"type:varchar(500);comment:货权释放凭证URL" json:"release_voucher_url"`
+	ReleaseRemark           string                       `gorm:"type:varchar(1000);comment:释放备注" json:"release_remark"`
+	Status                  WarehouseReceiptPledgeStatus `gorm:"type:varchar(40);index;not null;default:submitted;comment:状态" json:"status"`
+	SubmittedAt             *time.Time                   `gorm:"comment:提交时间" json:"submitted_at"`
+	RiskReviewedAt          *time.Time                   `gorm:"comment:风控时间" json:"risk_reviewed_at"`
+	AgreementSignedAt       *time.Time                   `gorm:"comment:协议签署时间" json:"agreement_signed_at"`
+	DisbursedAt             *time.Time                   `gorm:"comment:放款时间" json:"disbursed_at"`
+	ReleasedAt              *time.Time                   `gorm:"comment:释放时间" json:"released_at"`
+	Remark                  string                       `gorm:"type:varchar(1000);comment:申请备注" json:"remark"`
+	CreatedBy               uint64                       `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy               uint64                       `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt               time.Time                    `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt               time.Time                    `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt               gorm.DeletedAt               `gorm:"index" json:"-"`
+}
+
+func (WarehouseReceiptPledgeApplication) TableName() string {
+	return "warehouse_receipt_pledge_applications"
 }

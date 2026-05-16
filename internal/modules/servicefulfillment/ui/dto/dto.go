@@ -149,12 +149,48 @@ type UpdateGuaranteeStatusRequest struct {
 	Resolution string `json:"resolution"`
 }
 
+type CreateWarehouseReceiptPledgeRequest struct {
+	FinanceServiceID   uint64  `json:"finance_service_id" binding:"required"`
+	WarehouseServiceID uint64  `json:"warehouse_service_id" binding:"required"`
+	ReceiptNo          string  `json:"receipt_no" binding:"required"`
+	ReceiptVoucherURL  string  `json:"receipt_voucher_url" binding:"required"`
+	GoodsName          string  `json:"goods_name" binding:"required"`
+	Quantity           float64 `json:"quantity" binding:"required,gt=0"`
+	QualityGrade       string  `json:"quality_grade"`
+	RequestedAmount    float64 `json:"requested_amount" binding:"required,gt=0"`
+	Remark             string  `json:"remark"`
+}
+
+type ReviewWarehouseReceiptPledgeRequest struct {
+	Approved       bool    `json:"approved"`
+	ApprovedAmount float64 `json:"approved_amount"`
+	TermDays       int     `json:"term_days"`
+	AnnualRate     float64 `json:"annual_rate"`
+	RiskRemark     string  `json:"risk_remark"`
+}
+
+type SignWarehouseReceiptPledgeAgreementRequest struct {
+	PledgeAgreementURL      string `json:"pledge_agreement_url" binding:"required"`
+	SupervisionAgreementURL string `json:"supervision_agreement_url" binding:"required"`
+}
+
+type DisburseWarehouseReceiptPledgeRequest struct {
+	DisbursementVoucherURL string `json:"disbursement_voucher_url" binding:"required"`
+	Remark                 string `json:"remark"`
+}
+
+type ReleaseWarehouseReceiptPledgeRequest struct {
+	ReleaseVoucherURL string `json:"release_voucher_url"`
+	ReleaseRemark     string `json:"release_remark" binding:"required"`
+}
+
 type ListRequest struct {
 	Page               int    `form:"page"`
 	PageSize           int    `form:"page_size"`
 	OrderID            uint64 `form:"order_id"`
 	WarehouseServiceID uint64 `form:"warehouse_service_id"`
 	LogisticsServiceID uint64 `form:"logistics_service_id"`
+	FinanceServiceID   uint64 `form:"finance_service_id"`
 	Status             string `form:"status"`
 	Role               string `form:"role"`
 }
@@ -372,4 +408,42 @@ type FulfillmentDocumentInfo struct {
 	EnterpriseID     uint64   `json:"enterprise_id"`
 	UploadedRole     string   `json:"uploaded_role"`
 	CreatedAt        string   `json:"created_at"`
+}
+
+type WarehouseReceiptPledgeInfo struct {
+	ID                      uint64     `json:"id"`
+	ApplicationNo           string     `json:"application_no"`
+	ApplicantEnterpriseID   uint64     `json:"applicant_enterprise_id"`
+	ApplicantUserID         uint64     `json:"applicant_user_id"`
+	ApplicantRole           string     `json:"applicant_role"`
+	FinanceServiceID        uint64     `json:"finance_service_id"`
+	FinanceServiceName      string     `json:"finance_service_name"`
+	FundingEnterpriseID     uint64     `json:"funding_enterprise_id"`
+	WarehouseServiceID      uint64     `json:"warehouse_service_id"`
+	WarehouseEnterpriseID   uint64     `json:"warehouse_enterprise_id"`
+	WarehouseName           string     `json:"warehouse_name"`
+	ReceiptNo               string     `json:"receipt_no"`
+	ReceiptVoucherURL       string     `json:"receipt_voucher_url"`
+	GoodsName               string     `json:"goods_name"`
+	Quantity                float64    `json:"quantity"`
+	QualityGrade            string     `json:"quality_grade"`
+	RequestedAmount         float64    `json:"requested_amount"`
+	ApprovedAmount          float64    `json:"approved_amount"`
+	TermDays                int        `json:"term_days"`
+	AnnualRate              float64    `json:"annual_rate"`
+	RiskRemark              string     `json:"risk_remark"`
+	PledgeAgreementURL      string     `json:"pledge_agreement_url"`
+	SupervisionAgreementURL string     `json:"supervision_agreement_url"`
+	DisbursementVoucherURL  string     `json:"disbursement_voucher_url"`
+	ReleaseVoucherURL       string     `json:"release_voucher_url"`
+	ReleaseRemark           string     `json:"release_remark"`
+	Status                  string     `json:"status"`
+	SubmittedAt             *time.Time `json:"submitted_at,omitempty"`
+	RiskReviewedAt          *time.Time `json:"risk_reviewed_at,omitempty"`
+	AgreementSignedAt       *time.Time `json:"agreement_signed_at,omitempty"`
+	DisbursedAt             *time.Time `json:"disbursed_at,omitempty"`
+	ReleasedAt              *time.Time `json:"released_at,omitempty"`
+	Remark                  string     `json:"remark"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }

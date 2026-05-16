@@ -15,5 +15,6 @@ func AutoMigrate() error {
 		&entity.LogisticsTrackingEvent{},
 		&entity.FulfillmentDocument{},
 		&entity.FulfillmentGuarantee{},
+		&entity.WarehouseReceiptPledgeApplication{},
 	)
 }
