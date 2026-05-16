@@ -1298,22 +1298,17 @@ func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, oper
 
 	var titleVoucherURL string
 	var titleVoucherRemark string
-	
-	// 优先使用请求中的货权凭证
-	titleVoucherURL = strings.TrimSpace(req.TitleVoucherURL)
-	titleVoucherRemark = strings.TrimSpace(req.TitleVoucherRemark)
-	
-	// 如果请求中没有，尝试从商品获取
-	if titleVoucherURL == "" && len(order.Items) > 0 {
+
+	if len(order.Items) > 0 {
 		product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
 		if prodErr == nil && product != nil {
 			titleVoucherURL = strings.TrimSpace(product.TitleVoucherURL)
 			titleVoucherRemark = strings.TrimSpace(product.TitleVoucherRemark)
 		}
 	}
-	
+
 	if titleVoucherURL == "" {
-		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证或在支付时上传货权凭证")
+		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证")
 	}
 
 	if order.Remark == nil {

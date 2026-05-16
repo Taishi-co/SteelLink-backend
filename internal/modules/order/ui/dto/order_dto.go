@@ -103,15 +103,13 @@ type BuyerConfirmRequest struct {
 }
 
 type DirectPaymentRequest struct {
-	VoucherURL        string   `json:"voucher_url"`
-	TitleVoucherURL   string   `json:"title_voucher_url"`
-	TitleVoucherRemark string  `json:"title_voucher_remark"`
-	TransactionNo     string   `json:"transaction_no"`
-	PayerAccount      string   `json:"payer_account"`
-	PayeeAccount      string   `json:"payee_account"`
-	CapturedAt        string   `json:"captured_at"`
-	GPSLatitude       *float64 `json:"gps_latitude"`
-	GPSLongitude      *float64 `json:"gps_longitude"`
+	VoucherURL    string   `json:"voucher_url"`
+	TransactionNo string   `json:"transaction_no"`
+	PayerAccount  string   `json:"payer_account"`
+	PayeeAccount  string   `json:"payee_account"`
+	CapturedAt    string   `json:"captured_at"`
+	GPSLatitude   *float64 `json:"gps_latitude"`
+	GPSLongitude  *float64 `json:"gps_longitude"`
 }
 
 type CreateFinancingRequest struct {
@@ -234,37 +232,37 @@ type OrderItemInfo struct {
 }
 
 type OrderInfo struct {
-	ID               uint64                 `json:"id"`
-	OrderNo          string                 `json:"order_no"`
-	BuyerID          uint64                 `json:"buyer_id"`
-	BuyerName        string                 `json:"buyer_name"`
-	SellerID         uint64                 `json:"seller_id"`
-	SellerName       string                 `json:"seller_name"`
-	Items            []OrderItemInfo        `json:"items"`
-	TotalQuantity    float64                `json:"total_quantity"`
-	TotalAmount      float64                `json:"total_amount"`
-	TaxTotalAmount   float64                `json:"tax_total_amount"`
-	Currency         string                 `json:"currency"`
-	Status           int                    `json:"status"`
-	Expired          bool                   `json:"expired"`
-	ExpiresAt        *time.Time             `json:"expires_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	ContractInfo     *ContractInfo          `json:"contract_info,omitempty"`
-	PaymentInfo      *PaymentInfo           `json:"payment_info,omitempty"`
-	DeliveryInfo     *DeliveryInfo          `json:"delivery_info,omitempty"`
-	ReceiptVoucher   string                 `json:"receipt_voucher,omitempty"`
-	ReceiptInfo      *VoucherEvidence       `json:"receipt_info,omitempty"`
-	ReceiptAt        *time.Time             `json:"receipt_at,omitempty"`
-	Timeline         []TimelineItem         `json:"timeline"`
-	Events           []OrderEventInfo       `json:"events,omitempty"`
-	Remark           map[string]interface{} `json:"remark,omitempty"`
-	FinancingInfo    *FinancingRequestInfo  `json:"financing_info,omitempty"`
-	LogisticsBidding *LogisticsBiddingInfo  `json:"logistics_bidding,omitempty"`
-	LogisticsQuotes  []LogisticsQuoteInfo   `json:"logistics_quotes,omitempty"`
-	ShipmentTask         *ShipmentTaskInfo         `json:"shipment_task,omitempty"`
-	LogisticsContractDTO *LogisticsContractInfo    `json:"logistics_contract,omitempty"`
-	LogisticsSettlement  *LogisticsSettlementInfo  `json:"logistics_settlement,omitempty"`
-	PledgeEvents         []PledgeEventInfo         `json:"pledge_events,omitempty"`
+	ID                   uint64                   `json:"id"`
+	OrderNo              string                   `json:"order_no"`
+	BuyerID              uint64                   `json:"buyer_id"`
+	BuyerName            string                   `json:"buyer_name"`
+	SellerID             uint64                   `json:"seller_id"`
+	SellerName           string                   `json:"seller_name"`
+	Items                []OrderItemInfo          `json:"items"`
+	TotalQuantity        float64                  `json:"total_quantity"`
+	TotalAmount          float64                  `json:"total_amount"`
+	TaxTotalAmount       float64                  `json:"tax_total_amount"`
+	Currency             string                   `json:"currency"`
+	Status               int                      `json:"status"`
+	Expired              bool                     `json:"expired"`
+	ExpiresAt            *time.Time               `json:"expires_at,omitempty"`
+	CreatedAt            time.Time                `json:"created_at"`
+	ContractInfo         *ContractInfo            `json:"contract_info,omitempty"`
+	PaymentInfo          *PaymentInfo             `json:"payment_info,omitempty"`
+	DeliveryInfo         *DeliveryInfo            `json:"delivery_info,omitempty"`
+	ReceiptVoucher       string                   `json:"receipt_voucher,omitempty"`
+	ReceiptInfo          *VoucherEvidence         `json:"receipt_info,omitempty"`
+	ReceiptAt            *time.Time               `json:"receipt_at,omitempty"`
+	Timeline             []TimelineItem           `json:"timeline"`
+	Events               []OrderEventInfo         `json:"events,omitempty"`
+	Remark               map[string]interface{}   `json:"remark,omitempty"`
+	FinancingInfo        *FinancingRequestInfo    `json:"financing_info,omitempty"`
+	LogisticsBidding     *LogisticsBiddingInfo    `json:"logistics_bidding,omitempty"`
+	LogisticsQuotes      []LogisticsQuoteInfo     `json:"logistics_quotes,omitempty"`
+	ShipmentTask         *ShipmentTaskInfo        `json:"shipment_task,omitempty"`
+	LogisticsContractDTO *LogisticsContractInfo   `json:"logistics_contract,omitempty"`
+	LogisticsSettlement  *LogisticsSettlementInfo `json:"logistics_settlement,omitempty"`
+	PledgeEvents         []PledgeEventInfo        `json:"pledge_events,omitempty"`
 }
 
 type OrderListResponse struct {
@@ -425,7 +423,7 @@ type ShipmentTaskInfo struct {
 	Status                string     `json:"status"`
 	PickupVoucher         string     `json:"pickup_voucher"`
 	DeliveryVoucher       string     `json:"delivery_voucher"`
-	SignatureVoucher       string     `json:"signature_voucher"`
+	SignatureVoucher      string     `json:"signature_voucher"`
 	PickedUpAt            *time.Time `json:"picked_up_at,omitempty"`
 	DeliveredAt           *time.Time `json:"delivered_at,omitempty"`
 	SignedAt              *time.Time `json:"signed_at,omitempty"`
