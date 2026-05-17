@@ -151,6 +151,91 @@ func (h *UserHandler) GetDashboard(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *UserHandler) ListPersonalInquiryDrafts(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	result, err := h.userService.ListPersonalInquiryDrafts(c.Request.Context(), userID)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *UserHandler) CreatePersonalInquiryDraft(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+
+	var req dto.UpsertPersonalInquiryDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.userService.CreatePersonalInquiryDraft(c.Request.Context(), userID, &req)
+	if err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *UserHandler) UpdatePersonalInquiryDraft(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	draftID, err := strconv.ParseUint(c.Param("draft_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的草稿ID")
+		return
+	}
+
+	var req dto.UpsertPersonalInquiryDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, serviceErr := h.userService.UpdatePersonalInquiryDraft(c.Request.Context(), userID, draftID, &req)
+	if serviceErr != nil {
+		response.Error(c, serviceErr.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *UserHandler) DeletePersonalInquiryDraft(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == 0 {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	draftID, err := strconv.ParseUint(c.Param("draft_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的草稿ID")
+		return
+	}
+
+	if err := h.userService.DeletePersonalInquiryDraft(c.Request.Context(), userID, draftID); err != nil {
+		response.Error(c, err.(*ecode.Error))
+		return
+	}
+
+	response.Success(c, gin.H{"message": "删除成功"})
+}
+
 func (h *UserHandler) CreateSubAccount(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == 0 {

@@ -16,6 +16,7 @@ func AutoMigrate() error {
 		&entity.Enterprise{},
 		&entity.Role{},
 		&entity.UserRole{},
+		&entity.PersonalInquiryDraft{},
 		&entity.EnterpriseServicePermission{},
 		&entity.EnterpriseServiceApplication{},
 		&entity.EnterpriseApplicationDocument{},

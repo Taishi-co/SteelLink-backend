@@ -4,26 +4,28 @@ import "time"
 
 // CreateEnterpriseRequest 创建企业请求
 type CreateEnterpriseRequest struct {
-	Name           string                       `json:"name" binding:"required,max=200"`
-	CreditCode     string                       `json:"credit_code" binding:"required,max=50"`
-	EnterpriseRole string                       `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
-	ContactName    string                       `json:"contact_name" binding:"required"`
-	ContactPhone   string                       `json:"contact_phone" binding:"required,len=11"`
-	Address        string                       `json:"address"`
-	Documents      []ApplicationDocumentRequest `json:"documents" binding:"required,min=1,dive"`
+	Name                string                       `json:"name" binding:"required,max=200"`
+	CreditCode          string                       `json:"credit_code" binding:"required,max=50"`
+	EnterpriseRole      string                       `json:"enterprise_role" binding:"required,oneof=buyer seller logistics warehouse fund"`
+	ServiceCapabilities []string                     `json:"service_capabilities" binding:"omitempty,dive,oneof=sales procurement logistics warehouse finance"`
+	ContactName         string                       `json:"contact_name" binding:"required"`
+	ContactPhone        string                       `json:"contact_phone" binding:"required,len=11"`
+	Address             string                       `json:"address"`
+	Documents           []ApplicationDocumentRequest `json:"documents" binding:"required,min=1,dive"`
 }
 
 // EnterpriseInfo 企业信息响应
 type EnterpriseInfo struct {
-	ID               uint64            `json:"id"`
-	EnterpriseCode   string            `json:"enterprise_code"`
-	Name             string            `json:"name"`
-	CreditCode       string            `json:"credit_code"`
-	EnterpriseRole   string            `json:"enterprise_role"`
-	Status           int               `json:"status"`
-	VerificationInfo *VerificationInfo `json:"verification_info,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	ID                  uint64            `json:"id"`
+	EnterpriseCode      string            `json:"enterprise_code"`
+	Name                string            `json:"name"`
+	CreditCode          string            `json:"credit_code"`
+	EnterpriseRole      string            `json:"enterprise_role"`
+	ServiceCapabilities []string          `json:"service_capabilities,omitempty"`
+	Status              int               `json:"status"`
+	VerificationInfo    *VerificationInfo `json:"verification_info,omitempty"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 // VerificationInfo 认证信息
@@ -48,15 +50,16 @@ type UpdateEnterpriseRequest struct {
 
 // VerifyEnterpriseRequest 企业认证请求
 type VerifyEnterpriseRequest struct {
-	LegalPerson     string                       `json:"legal_person" binding:"required"`
-	LegalIdCard     string                       `json:"legal_id_card" binding:"required"`
-	BusinessLicense string                       `json:"business_license" binding:"required"`
-	BankAccount     string                       `json:"bank_account" binding:"required"`
-	BankName        string                       `json:"bank_name" binding:"required"`
-	ContactName     string                       `json:"contact_name" binding:"required"`
-	ContactPhone    string                       `json:"contact_phone" binding:"required,len=11"`
-	Address         string                       `json:"address" binding:"required"`
-	Documents       []ApplicationDocumentRequest `json:"documents" binding:"omitempty,dive"`
+	LegalPerson         string                       `json:"legal_person" binding:"required"`
+	LegalIdCard         string                       `json:"legal_id_card" binding:"required"`
+	BusinessLicense     string                       `json:"business_license" binding:"required"`
+	BankAccount         string                       `json:"bank_account" binding:"required"`
+	BankName            string                       `json:"bank_name" binding:"required"`
+	ContactName         string                       `json:"contact_name" binding:"required"`
+	ContactPhone        string                       `json:"contact_phone" binding:"required,len=11"`
+	Address             string                       `json:"address" binding:"required"`
+	ServiceCapabilities []string                     `json:"service_capabilities" binding:"omitempty,dive,oneof=sales procurement logistics warehouse finance"`
+	Documents           []ApplicationDocumentRequest `json:"documents" binding:"omitempty,dive"`
 }
 
 // EnterpriseListRequest 企业列表请求

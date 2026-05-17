@@ -35,9 +35,34 @@ type CreateWarehouseStorageRequest struct {
 	Remark             string  `json:"remark"`
 }
 
+type UpsertWarehouseInventorySnapshotRequest struct {
+	WarehouseServiceID uint64  `json:"warehouse_service_id" binding:"required"`
+	ProductName        string  `json:"product_name" binding:"required"`
+	BundleNo           string  `json:"bundle_no"`
+	BatchNo            string  `json:"batch_no"`
+	LocationCode       string  `json:"location_code"`
+	Quantity           float64 `json:"quantity" binding:"required,gte=0"`
+	FrozenQuantity     float64 `json:"frozen_quantity"`
+	QualityStatus      string  `json:"quality_status"`
+	PledgeStatus       string  `json:"pledge_status"`
+	ExternalSystem     string  `json:"external_system"`
+	ExternalRefNo      string  `json:"external_ref_no"`
+	SyncStatus         string  `json:"sync_status"`
+	Remark             string  `json:"remark"`
+}
+
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 	Remark string `json:"remark"`
+}
+
+type LogisticsStatusRequirementInfo struct {
+	Status      string   `json:"status"`
+	Label       string   `json:"label"`
+	Actor       string   `json:"actor"`
+	Description string   `json:"description"`
+	RequiredDoc []string `json:"required_doc_types"`
+	Satisfied   bool     `json:"satisfied"`
 }
 
 type EstimateLogisticsRequest struct {
@@ -79,6 +104,31 @@ type AcceptLogisticsOrderRequest struct {
 	FinalPrice  float64 `json:"final_price"`
 }
 
+type UpsertLogisticsDriverRequest struct {
+	Name                  string `json:"name" binding:"required"`
+	Phone                 string `json:"phone" binding:"required"`
+	IDCard                string `json:"id_card"`
+	LicenseNo             string `json:"license_no"`
+	LicenseExpireAt       string `json:"license_expire_at"`
+	QualificationNo       string `json:"qualification_no"`
+	QualificationExpireAt string `json:"qualification_expire_at"`
+	Status                string `json:"status"`
+	Remark                string `json:"remark"`
+}
+
+type UpsertLogisticsVehicleRequest struct {
+	PlateNumber       string  `json:"plate_number" binding:"required"`
+	VehicleType       string  `json:"vehicle_type"`
+	LoadCapacity      float64 `json:"load_capacity"`
+	VehicleLicense    string  `json:"vehicle_license"`
+	LicenseExpireAt   string  `json:"license_expire_at"`
+	InsuranceNo       string  `json:"insurance_no"`
+	InsuranceExpireAt string  `json:"insurance_expire_at"`
+	DriverID          uint64  `json:"driver_id"`
+	Status            string  `json:"status"`
+	Remark            string  `json:"remark"`
+}
+
 type CreateTrackingEventRequest struct {
 	EventType   string `json:"event_type" binding:"required"`
 	Location    string `json:"location"`
@@ -99,12 +149,48 @@ type UpdateGuaranteeStatusRequest struct {
 	Resolution string `json:"resolution"`
 }
 
+type CreateWarehouseReceiptPledgeRequest struct {
+	FinanceServiceID   uint64  `json:"finance_service_id" binding:"required"`
+	WarehouseServiceID uint64  `json:"warehouse_service_id" binding:"required"`
+	ReceiptNo          string  `json:"receipt_no" binding:"required"`
+	ReceiptVoucherURL  string  `json:"receipt_voucher_url" binding:"required"`
+	GoodsName          string  `json:"goods_name" binding:"required"`
+	Quantity           float64 `json:"quantity" binding:"required,gt=0"`
+	QualityGrade       string  `json:"quality_grade"`
+	RequestedAmount    float64 `json:"requested_amount" binding:"required,gt=0"`
+	Remark             string  `json:"remark"`
+}
+
+type ReviewWarehouseReceiptPledgeRequest struct {
+	Approved       bool    `json:"approved"`
+	ApprovedAmount float64 `json:"approved_amount"`
+	TermDays       int     `json:"term_days"`
+	AnnualRate     float64 `json:"annual_rate"`
+	RiskRemark     string  `json:"risk_remark"`
+}
+
+type SignWarehouseReceiptPledgeAgreementRequest struct {
+	PledgeAgreementURL      string `json:"pledge_agreement_url" binding:"required"`
+	SupervisionAgreementURL string `json:"supervision_agreement_url" binding:"required"`
+}
+
+type DisburseWarehouseReceiptPledgeRequest struct {
+	DisbursementVoucherURL string `json:"disbursement_voucher_url" binding:"required"`
+	Remark                 string `json:"remark"`
+}
+
+type ReleaseWarehouseReceiptPledgeRequest struct {
+	ReleaseVoucherURL string `json:"release_voucher_url"`
+	ReleaseRemark     string `json:"release_remark" binding:"required"`
+}
+
 type ListRequest struct {
 	Page               int    `form:"page"`
 	PageSize           int    `form:"page_size"`
 	OrderID            uint64 `form:"order_id"`
 	WarehouseServiceID uint64 `form:"warehouse_service_id"`
 	LogisticsServiceID uint64 `form:"logistics_service_id"`
+	FinanceServiceID   uint64 `form:"finance_service_id"`
 	Status             string `form:"status"`
 	Role               string `form:"role"`
 }
@@ -137,40 +223,121 @@ type WarehouseMovementInfo struct {
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
+type WarehouseInventorySnapshotInfo struct {
+	ID                    uint64    `json:"id"`
+	SnapshotNo            string    `json:"snapshot_no"`
+	WarehouseServiceID    uint64    `json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64    `json:"warehouse_enterprise_id"`
+	ProductName           string    `json:"product_name"`
+	BundleNo              string    `json:"bundle_no"`
+	BatchNo               string    `json:"batch_no"`
+	LocationCode          string    `json:"location_code"`
+	Quantity              float64   `json:"quantity"`
+	FrozenQuantity        float64   `json:"frozen_quantity"`
+	QualityStatus         string    `json:"quality_status"`
+	PledgeStatus          string    `json:"pledge_status"`
+	ExternalSystem        string    `json:"external_system"`
+	ExternalRefNo         string    `json:"external_ref_no"`
+	SyncStatus            string    `json:"sync_status"`
+	Remark                string    `json:"remark"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
 type LogisticsOrderInfo struct {
-	ID                      uint64              `json:"id"`
-	LogisticsNo             string              `json:"logistics_no"`
-	OrderID                 uint64              `json:"order_id"`
-	OrderNo                 string              `json:"order_no"`
-	BuyerEnterpriseID       uint64              `json:"buyer_enterprise_id"`
-	LogisticsServiceID      uint64              `json:"logistics_service_id"`
-	CarrierEnterpriseID     uint64              `json:"carrier_enterprise_id"`
-	WarehouseServiceID      uint64              `json:"warehouse_service_id"`
-	Origin                  string              `json:"origin"`
-	Destination             string              `json:"destination"`
-	CargoName               string              `json:"cargo_name"`
-	Weight                  float64             `json:"weight"`
-	VehicleType             string              `json:"vehicle_type"`
-	EstimatedPrice          float64             `json:"estimated_price"`
-	FinalPrice              float64             `json:"final_price"`
-	Status                  string              `json:"status"`
-	CurrentResponsibleParty string              `json:"current_responsible_party"`
-	HandoverNote            string              `json:"handover_note"`
-	DriverName              string              `json:"driver_name"`
-	DriverPhone             string              `json:"driver_phone"`
-	PlateNumber             string              `json:"plate_number"`
-	GuaranteeType           string              `json:"guarantee_type"`
-	AcceptedAt              *time.Time          `json:"accepted_at"`
-	PickupAppointmentAt     *time.Time          `json:"pickup_appointment_at,omitempty"`
-	ArrivalSignedInAt       *time.Time          `json:"arrival_signed_in_at,omitempty"`
-	OutboundConfirmedAt     *time.Time          `json:"outbound_confirmed_at,omitempty"`
-	LoadingConfirmedAt      *time.Time          `json:"loading_confirmed_at,omitempty"`
-	ArrivalConfirmedAt      *time.Time          `json:"arrival_confirmed_at,omitempty"`
-	ReceiptSignedAt         *time.Time          `json:"receipt_signed_at,omitempty"`
-	InboundCompletedAt      *time.Time          `json:"inbound_completed_at,omitempty"`
-	CreatedAt               time.Time           `json:"created_at"`
-	UpdatedAt               time.Time           `json:"updated_at"`
-	TrackingEvents          []TrackingEventInfo `json:"tracking_events,omitempty"`
+	ID                      uint64                           `json:"id"`
+	LogisticsNo             string                           `json:"logistics_no"`
+	OrderID                 uint64                           `json:"order_id"`
+	OrderNo                 string                           `json:"order_no"`
+	BuyerEnterpriseID       uint64                           `json:"buyer_enterprise_id"`
+	LogisticsServiceID      uint64                           `json:"logistics_service_id"`
+	CarrierEnterpriseID     uint64                           `json:"carrier_enterprise_id"`
+	WarehouseServiceID      uint64                           `json:"warehouse_service_id"`
+	Origin                  string                           `json:"origin"`
+	Destination             string                           `json:"destination"`
+	CargoName               string                           `json:"cargo_name"`
+	Weight                  float64                          `json:"weight"`
+	VehicleType             string                           `json:"vehicle_type"`
+	EstimatedPrice          float64                          `json:"estimated_price"`
+	FinalPrice              float64                          `json:"final_price"`
+	Status                  string                           `json:"status"`
+	CurrentResponsibleParty string                           `json:"current_responsible_party"`
+	HandoverNote            string                           `json:"handover_note"`
+	DriverName              string                           `json:"driver_name"`
+	DriverPhone             string                           `json:"driver_phone"`
+	PlateNumber             string                           `json:"plate_number"`
+	GuaranteeType           string                           `json:"guarantee_type"`
+	AcceptedAt              *time.Time                       `json:"accepted_at"`
+	PickupAppointmentAt     *time.Time                       `json:"pickup_appointment_at,omitempty"`
+	ArrivalSignedInAt       *time.Time                       `json:"arrival_signed_in_at,omitempty"`
+	OutboundConfirmedAt     *time.Time                       `json:"outbound_confirmed_at,omitempty"`
+	LoadingConfirmedAt      *time.Time                       `json:"loading_confirmed_at,omitempty"`
+	ArrivalConfirmedAt      *time.Time                       `json:"arrival_confirmed_at,omitempty"`
+	ReceiptSignedAt         *time.Time                       `json:"receipt_signed_at,omitempty"`
+	InboundCompletedAt      *time.Time                       `json:"inbound_completed_at,omitempty"`
+	CreatedAt               time.Time                        `json:"created_at"`
+	UpdatedAt               time.Time                        `json:"updated_at"`
+	TrackingEvents          []TrackingEventInfo              `json:"tracking_events,omitempty"`
+	StatusRequirements      []LogisticsStatusRequirementInfo `json:"status_requirements,omitempty"`
+}
+
+type LogisticsDriverInfo struct {
+	ID                    uint64    `json:"id"`
+	EnterpriseID          uint64    `json:"enterprise_id"`
+	Name                  string    `json:"name"`
+	Phone                 string    `json:"phone"`
+	IDCard                string    `json:"id_card"`
+	LicenseNo             string    `json:"license_no"`
+	LicenseExpireAt       string    `json:"license_expire_at"`
+	QualificationNo       string    `json:"qualification_no"`
+	QualificationExpireAt string    `json:"qualification_expire_at"`
+	Status                string    `json:"status"`
+	Remark                string    `json:"remark"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type LogisticsVehicleInfo struct {
+	ID                uint64    `json:"id"`
+	EnterpriseID      uint64    `json:"enterprise_id"`
+	PlateNumber       string    `json:"plate_number"`
+	VehicleType       string    `json:"vehicle_type"`
+	LoadCapacity      float64   `json:"load_capacity"`
+	VehicleLicense    string    `json:"vehicle_license"`
+	LicenseExpireAt   string    `json:"license_expire_at"`
+	InsuranceNo       string    `json:"insurance_no"`
+	InsuranceExpireAt string    `json:"insurance_expire_at"`
+	DriverID          uint64    `json:"driver_id"`
+	Status            string    `json:"status"`
+	Remark            string    `json:"remark"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type CollateralMonitorInfo struct {
+	FinancingRequestID uint64                           `json:"financing_request_id"`
+	OrderID            uint64                           `json:"order_id"`
+	OrderNo            string                           `json:"order_no"`
+	BuyerEnterpriseID  uint64                           `json:"buyer_enterprise_id"`
+	SellerEnterpriseID uint64                           `json:"seller_enterprise_id"`
+	FinanceServiceID   uint64                           `json:"finance_service_id"`
+	RequestedAmount    float64                          `json:"requested_amount"`
+	ApprovedAmount     float64                          `json:"approved_amount"`
+	FinancingStatus    string                           `json:"financing_status"`
+	OrderStatus        int                              `json:"order_status"`
+	WarehouseServiceID uint64                           `json:"warehouse_service_id"`
+	WarehouseName      string                           `json:"warehouse_name"`
+	WarehouseAddress   string                           `json:"warehouse_address"`
+	LogisticsOrderID   uint64                           `json:"logistics_order_id"`
+	LogisticsStatus    string                           `json:"logistics_status"`
+	LastLogisticsEvent string                           `json:"last_logistics_event"`
+	PledgeVoucherURL   string                           `json:"pledge_voucher_url"`
+	PledgeRemark       string                           `json:"pledge_remark"`
+	PledgedAt          *time.Time                       `json:"pledged_at,omitempty"`
+	ReleaseCondition   string                           `json:"release_condition"`
+	ReleasedAt         *time.Time                       `json:"released_at,omitempty"`
+	InventorySnapshots []WarehouseInventorySnapshotInfo `json:"inventory_snapshots,omitempty"`
+	FulfillmentDocs    []FulfillmentDocumentInfo        `json:"fulfillment_docs,omitempty"`
 }
 
 type TrackingEventInfo struct {
@@ -221,10 +388,10 @@ type SealConfirmRequest struct {
 }
 
 type InspectionRequest struct {
-	Result   string `json:"result" binding:"required"`
-	FileURL  string `json:"file_url"`
-	SealOK   bool   `json:"seal_ok"`
-	Remark   string `json:"remark"`
+	Result  string `json:"result" binding:"required"`
+	FileURL string `json:"file_url"`
+	SealOK  bool   `json:"seal_ok"`
+	Remark  string `json:"remark"`
 }
 
 type FulfillmentDocumentInfo struct {
@@ -241,4 +408,42 @@ type FulfillmentDocumentInfo struct {
 	EnterpriseID     uint64   `json:"enterprise_id"`
 	UploadedRole     string   `json:"uploaded_role"`
 	CreatedAt        string   `json:"created_at"`
+}
+
+type WarehouseReceiptPledgeInfo struct {
+	ID                      uint64     `json:"id"`
+	ApplicationNo           string     `json:"application_no"`
+	ApplicantEnterpriseID   uint64     `json:"applicant_enterprise_id"`
+	ApplicantUserID         uint64     `json:"applicant_user_id"`
+	ApplicantRole           string     `json:"applicant_role"`
+	FinanceServiceID        uint64     `json:"finance_service_id"`
+	FinanceServiceName      string     `json:"finance_service_name"`
+	FundingEnterpriseID     uint64     `json:"funding_enterprise_id"`
+	WarehouseServiceID      uint64     `json:"warehouse_service_id"`
+	WarehouseEnterpriseID   uint64     `json:"warehouse_enterprise_id"`
+	WarehouseName           string     `json:"warehouse_name"`
+	ReceiptNo               string     `json:"receipt_no"`
+	ReceiptVoucherURL       string     `json:"receipt_voucher_url"`
+	GoodsName               string     `json:"goods_name"`
+	Quantity                float64    `json:"quantity"`
+	QualityGrade            string     `json:"quality_grade"`
+	RequestedAmount         float64    `json:"requested_amount"`
+	ApprovedAmount          float64    `json:"approved_amount"`
+	TermDays                int        `json:"term_days"`
+	AnnualRate              float64    `json:"annual_rate"`
+	RiskRemark              string     `json:"risk_remark"`
+	PledgeAgreementURL      string     `json:"pledge_agreement_url"`
+	SupervisionAgreementURL string     `json:"supervision_agreement_url"`
+	DisbursementVoucherURL  string     `json:"disbursement_voucher_url"`
+	ReleaseVoucherURL       string     `json:"release_voucher_url"`
+	ReleaseRemark           string     `json:"release_remark"`
+	Status                  string     `json:"status"`
+	SubmittedAt             *time.Time `json:"submitted_at,omitempty"`
+	RiskReviewedAt          *time.Time `json:"risk_reviewed_at,omitempty"`
+	AgreementSignedAt       *time.Time `json:"agreement_signed_at,omitempty"`
+	DisbursedAt             *time.Time `json:"disbursed_at,omitempty"`
+	ReleasedAt              *time.Time `json:"released_at,omitempty"`
+	Remark                  string     `json:"remark"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }

@@ -58,6 +58,10 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		users.GET("/me/identity", userHandler.GetIdentityStatus)
 
 		users.GET("/me/dashboard", userHandler.GetDashboard)
+		users.GET("/me/inquiry-drafts", userHandler.ListPersonalInquiryDrafts)
+		users.POST("/me/inquiry-drafts", userHandler.CreatePersonalInquiryDraft)
+		users.PUT("/me/inquiry-drafts/:draft_id", userHandler.UpdatePersonalInquiryDraft)
+		users.DELETE("/me/inquiry-drafts/:draft_id", userHandler.DeletePersonalInquiryDraft)
 
 		subAccounts := users.Group("")
 		subAccounts.Use(middleware.RequireUserType("enterprise"))

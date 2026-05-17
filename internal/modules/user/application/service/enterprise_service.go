@@ -68,7 +68,7 @@ func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpris
 		UpdatedBy: operatorID,
 	}
 
-	primaryService := enterpriseRoleToService(req.EnterpriseRole)
+	initialServices := requestedInitialServices(req.EnterpriseRole, req.ServiceCapabilities)
 
 	db := database.GetDB()
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -82,7 +82,7 @@ func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpris
 			return ecode.ErrDatabase.WithMessage("更新用户企业绑定失败")
 		}
 
-		if err := ensureInitialServiceApplication(tx, enterprise, primaryService, req.Documents, operatorID); err != nil {
+		if err := ensureInitialServiceApplications(tx, enterprise, initialServices, req.Documents, operatorID); err != nil {
 			return err
 		}
 
@@ -99,20 +99,28 @@ func (s *EnterpriseService) Create(ctx context.Context, req *dto.CreateEnterpris
 }
 
 func enterpriseRoleToService(role string) entity.PlatformService {
-	switch role {
-	case "buyer":
-		return entity.ServiceProcurement
-	case "seller":
-		return entity.ServiceSales
-	case "logistics":
-		return entity.ServiceLogistics
-	case "warehouse":
-		return entity.ServiceWarehouse
-	case "fund":
-		return entity.ServiceFinance
-	default:
-		return entity.ServiceProcurement
+	if service, ok := entity.EnterpriseRoleToPlatformService(role); ok {
+		return service
 	}
+	return entity.ServiceProcurement
+}
+
+func requestedInitialServices(role string, requested []string) []entity.PlatformService {
+	seen := map[entity.PlatformService]bool{}
+	result := make([]entity.PlatformService, 0, len(requested)+1)
+	if service, ok := entity.EnterpriseRoleToPlatformService(role); ok {
+		seen[service] = true
+		result = append(result, service)
+	}
+	for _, value := range requested {
+		service := entity.PlatformService(value)
+		if !entity.ValidPlatformService(value) || seen[service] {
+			continue
+		}
+		seen[service] = true
+		result = append(result, service)
+	}
+	return result
 }
 
 func ensureInitialServiceApplication(tx *gorm.DB, enterprise *entity.Enterprise, service entity.PlatformService, documents []dto.ApplicationDocumentRequest, operatorID uint64) error {
@@ -189,6 +197,15 @@ func ensureInitialServiceApplication(tx *gorm.DB, enterprise *entity.Enterprise,
 	return nil
 }
 
+func ensureInitialServiceApplications(tx *gorm.DB, enterprise *entity.Enterprise, services []entity.PlatformService, documents []dto.ApplicationDocumentRequest, operatorID uint64) error {
+	for _, service := range services {
+		if err := ensureInitialServiceApplication(tx, enterprise, service, documents, operatorID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Verify 提交企业认证材料
 func (s *EnterpriseService) Verify(ctx context.Context, id uint64, req *dto.VerifyEnterpriseRequest, operatorID uint64) (*dto.EnterpriseInfo, error) {
 	enterprise, err := s.enterpriseRepo.FindByID(ctx, id)
@@ -212,14 +229,14 @@ func (s *EnterpriseService) Verify(ctx context.Context, id uint64, req *dto.Veri
 	enterprise.Status = entity.EnterpriseStatusPending
 	enterprise.UpdatedBy = operatorID
 
-	primaryService := enterpriseRoleToService(enterprise.EnterpriseRole)
+	initialServices := requestedInitialServices(enterprise.EnterpriseRole, req.ServiceCapabilities)
 	db := database.GetDB()
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(enterprise).Error; err != nil {
 			return ecode.ErrDatabase.WithMessage("提交企业认证失败")
 		}
 		if len(req.Documents) > 0 {
-			return ensureInitialServiceApplication(tx, enterprise, primaryService, req.Documents, operatorID)
+			return ensureInitialServiceApplications(tx, enterprise, initialServices, req.Documents, operatorID)
 		}
 		return nil
 	})
@@ -327,8 +344,7 @@ func (s *EnterpriseService) Audit(ctx context.Context, id uint64, req *dto.Audit
 			return ecode.ErrDatabase.WithMessage("更新用户角色失败")
 		}
 
-		primaryService := enterpriseRoleToService(enterprise.EnterpriseRole)
-		return auditInitialService(tx, enterprise, primaryService, permissionStatus, applicationStatus, auditReason, operatorID)
+		return auditPendingInitialServices(tx, enterprise, permissionStatus, applicationStatus, auditReason, operatorID)
 	})
 	if err != nil {
 		if coded, ok := err.(*ecode.Error); ok {
@@ -337,6 +353,35 @@ func (s *EnterpriseService) Audit(ctx context.Context, id uint64, req *dto.Audit
 		return ecode.ErrDatabase.WithMessage("审核企业失败")
 	}
 
+	return nil
+}
+
+func auditPendingInitialServices(tx *gorm.DB, enterprise *entity.Enterprise, permissionStatus entity.ServicePermissionStatus, applicationStatus entity.ApplicationStatus, reason string, operatorID uint64) error {
+	var applications []entity.EnterpriseServiceApplication
+	if err := tx.Where("enterprise_id = ? AND status = ?", enterprise.ID, entity.ApplicationPending).Find(&applications).Error; err != nil {
+		return ecode.ErrDatabase.WithMessage("查询初始服务申请失败")
+	}
+
+	seen := map[entity.PlatformService]bool{}
+	services := make([]entity.PlatformService, 0, len(applications)+1)
+	for _, application := range applications {
+		if seen[application.Service] {
+			continue
+		}
+		seen[application.Service] = true
+		services = append(services, application.Service)
+	}
+
+	primaryService := enterpriseRoleToService(enterprise.EnterpriseRole)
+	if !seen[primaryService] {
+		services = append(services, primaryService)
+	}
+
+	for _, service := range services {
+		if err := auditInitialService(tx, enterprise, service, permissionStatus, applicationStatus, reason, operatorID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -422,7 +467,7 @@ func toEnterpriseInfo(enterprise *entity.Enterprise) *dto.EnterpriseInfo {
 		}
 	}
 
-	return &dto.EnterpriseInfo{
+	info := &dto.EnterpriseInfo{
 		ID:               enterprise.ID,
 		EnterpriseCode:   enterprise.EnterpriseCode,
 		Name:             enterprise.Name,
@@ -433,4 +478,29 @@ func toEnterpriseInfo(enterprise *entity.Enterprise) *dto.EnterpriseInfo {
 		CreatedAt:        enterprise.CreatedAt,
 		UpdatedAt:        enterprise.UpdatedAt,
 	}
+	db := database.GetDB()
+	if db != nil && enterprise.ID > 0 {
+		info.ServiceCapabilities = approvedEnterpriseServices(context.Background(), db, enterprise.ID)
+	}
+	return info
+}
+
+func approvedEnterpriseServices(ctx context.Context, db *gorm.DB, enterpriseID uint64) []string {
+	services := make([]string, 0, 5)
+	for _, table := range []string{entity.TradeCapabilityPermissionTable, entity.ProviderServicePermissionTable} {
+		var rows []struct {
+			Service string
+		}
+		if err := db.WithContext(ctx).
+			Table(table).
+			Select("service").
+			Where("enterprise_id = ? AND status = ? AND deleted_at IS NULL", enterpriseID, entity.ServicePermissionApproved).
+			Find(&rows).Error; err != nil {
+			return services
+		}
+		for _, row := range rows {
+			services = append(services, row.Service)
+		}
+	}
+	return services
 }

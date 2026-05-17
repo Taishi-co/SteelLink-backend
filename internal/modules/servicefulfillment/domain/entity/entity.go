@@ -72,11 +72,11 @@ func NormalizeLogisticsOrderStatus(status LogisticsOrderStatus) LogisticsOrderSt
 
 func ResponsibilityForLogisticsStatus(status LogisticsOrderStatus) ResponsibilityParty {
 	switch NormalizeLogisticsOrderStatus(status) {
-	case LogisticsOrderTaskCreated, LogisticsOrderLoadingConfirmed, LogisticsOrderInTransit:
+	case LogisticsOrderTaskCreated, LogisticsOrderLoadingConfirmed, LogisticsOrderInTransit, LogisticsOrderReceiptSigned, LogisticsOrderCompleted:
 		return ResponsibilityPartyLogistics
-	case LogisticsOrderPickupScheduled, LogisticsOrderArrivalSignedIn, LogisticsOrderOutboundConfirmed, LogisticsOrderInboundCompleted:
+	case LogisticsOrderPickupScheduled, LogisticsOrderArrivalSignedIn, LogisticsOrderOutboundConfirmed, LogisticsOrderArrivalConfirmed:
 		return ResponsibilityPartyWarehouse
-	case LogisticsOrderArrivalConfirmed, LogisticsOrderReceiptSigned, LogisticsOrderCompleted:
+	case LogisticsOrderInboundCompleted:
 		return ResponsibilityPartyBuyer
 	default:
 		return ResponsibilityPartyUnknown
@@ -99,9 +99,9 @@ func CanTransitionLogisticsOrderStatus(from, to LogisticsOrderStatus) bool {
 		LogisticsOrderOutboundConfirmed: {LogisticsOrderLoadingConfirmed},
 		LogisticsOrderLoadingConfirmed:  {LogisticsOrderInTransit},
 		LogisticsOrderInTransit:         {LogisticsOrderArrivalConfirmed},
-		LogisticsOrderArrivalConfirmed:  {LogisticsOrderReceiptSigned},
-		LogisticsOrderReceiptSigned:     {LogisticsOrderInboundCompleted},
-		LogisticsOrderInboundCompleted:  {LogisticsOrderCompleted},
+		LogisticsOrderArrivalConfirmed:  {LogisticsOrderInboundCompleted},
+		LogisticsOrderInboundCompleted:  {LogisticsOrderReceiptSigned},
+		LogisticsOrderReceiptSigned:     {LogisticsOrderCompleted},
 		LogisticsOrderCompleted:         {},
 	}
 	nextStatuses, ok := allowed[from]
@@ -123,6 +123,18 @@ const (
 	GuaranteeStatusProcessing GuaranteeStatus = "processing"
 	GuaranteeStatusResolved   GuaranteeStatus = "resolved"
 	GuaranteeStatusRejected   GuaranteeStatus = "rejected"
+)
+
+type WarehouseReceiptPledgeStatus string
+
+const (
+	WarehouseReceiptPledgeSubmitted       WarehouseReceiptPledgeStatus = "submitted"
+	WarehouseReceiptPledgeRiskApproved    WarehouseReceiptPledgeStatus = "risk_approved"
+	WarehouseReceiptPledgeRiskRejected    WarehouseReceiptPledgeStatus = "risk_rejected"
+	WarehouseReceiptPledgeAgreementSigned WarehouseReceiptPledgeStatus = "agreement_signed"
+	WarehouseReceiptPledgeDisbursed       WarehouseReceiptPledgeStatus = "disbursed"
+	WarehouseReceiptPledgeReleasing       WarehouseReceiptPledgeStatus = "releasing"
+	WarehouseReceiptPledgeReleased        WarehouseReceiptPledgeStatus = "released"
 )
 
 type WarehouseInventoryMovement struct {
@@ -151,6 +163,34 @@ type WarehouseInventoryMovement struct {
 
 func (WarehouseInventoryMovement) TableName() string {
 	return "warehouse_inventory_movements"
+}
+
+type WarehouseInventorySnapshot struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	SnapshotNo            string         `gorm:"type:varchar(64);uniqueIndex;not null;comment:库存快照编号" json:"snapshot_no"`
+	WarehouseServiceID    uint64         `gorm:"index;not null;comment:仓储资源ID" json:"warehouse_service_id"`
+	WarehouseEnterpriseID uint64         `gorm:"index;not null;comment:仓储企业ID" json:"warehouse_enterprise_id"`
+	ProductName           string         `gorm:"type:varchar(200);not null;comment:商品名称" json:"product_name"`
+	BundleNo              string         `gorm:"type:varchar(100);index;comment:捆包号/批次号" json:"bundle_no"`
+	BatchNo               string         `gorm:"type:varchar(100);index;comment:批次号" json:"batch_no"`
+	LocationCode          string         `gorm:"type:varchar(100);index;comment:库位" json:"location_code"`
+	Quantity              float64        `gorm:"type:decimal(12,2);not null;comment:当前库存数量" json:"quantity"`
+	FrozenQuantity        float64        `gorm:"type:decimal(12,2);comment:质押/冻结数量" json:"frozen_quantity"`
+	QualityStatus         string         `gorm:"type:varchar(32);index;default:unchecked;comment:质检状态 unchecked/passed/failed" json:"quality_status"`
+	PledgeStatus          string         `gorm:"type:varchar(32);index;default:none;comment:质押状态 none/frozen/released" json:"pledge_status"`
+	ExternalSystem        string         `gorm:"type:varchar(64);comment:外部系统 MRP/WMS" json:"external_system"`
+	ExternalRefNo         string         `gorm:"type:varchar(128);index;comment:外部单号" json:"external_ref_no"`
+	SyncStatus            string         `gorm:"type:varchar(32);index;default:manual;comment:同步状态 manual/synced/failed" json:"sync_status"`
+	Remark                string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy             uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (WarehouseInventorySnapshot) TableName() string {
+	return "warehouse_inventory_snapshots"
 }
 
 type LogisticsOrder struct {
@@ -196,6 +236,53 @@ func (LogisticsOrder) TableName() string {
 	return "logistics_orders"
 }
 
+type LogisticsDriver struct {
+	ID                    uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnterpriseID          uint64         `gorm:"index;not null;comment:物流企业ID" json:"enterprise_id"`
+	Name                  string         `gorm:"type:varchar(100);not null;comment:司机姓名" json:"name"`
+	Phone                 string         `gorm:"type:varchar(50);not null;comment:司机电话" json:"phone"`
+	IDCard                string         `gorm:"type:varchar(50);comment:身份证号" json:"id_card"`
+	LicenseNo             string         `gorm:"type:varchar(100);comment:驾驶证号" json:"license_no"`
+	LicenseExpireAt       string         `gorm:"type:varchar(64);comment:驾驶证有效期" json:"license_expire_at"`
+	QualificationNo       string         `gorm:"type:varchar(100);comment:从业资格证号" json:"qualification_no"`
+	QualificationExpireAt string         `gorm:"type:varchar(64);comment:从业资格证有效期" json:"qualification_expire_at"`
+	Status                string         `gorm:"type:varchar(32);index;default:active;comment:状态 active/inactive" json:"status"`
+	Remark                string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy             uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy             uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt             time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (LogisticsDriver) TableName() string {
+	return "logistics_drivers"
+}
+
+type LogisticsVehicle struct {
+	ID                uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnterpriseID      uint64         `gorm:"index;not null;comment:物流企业ID" json:"enterprise_id"`
+	PlateNumber       string         `gorm:"type:varchar(50);not null;index;comment:车牌号" json:"plate_number"`
+	VehicleType       string         `gorm:"type:varchar(100);comment:车型" json:"vehicle_type"`
+	LoadCapacity      float64        `gorm:"type:decimal(12,2);comment:载重能力" json:"load_capacity"`
+	VehicleLicense    string         `gorm:"type:varchar(100);comment:行驶证号" json:"vehicle_license"`
+	LicenseExpireAt   string         `gorm:"type:varchar(64);comment:行驶证有效期" json:"license_expire_at"`
+	InsuranceNo       string         `gorm:"type:varchar(100);comment:保险单号" json:"insurance_no"`
+	InsuranceExpireAt string         `gorm:"type:varchar(64);comment:保险有效期" json:"insurance_expire_at"`
+	DriverID          uint64         `gorm:"index;comment:绑定司机ID" json:"driver_id"`
+	Status            string         `gorm:"type:varchar(32);index;default:active;comment:状态 active/inactive" json:"status"`
+	Remark            string         `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedBy         uint64         `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy         uint64         `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt         time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt         time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (LogisticsVehicle) TableName() string {
+	return "logistics_vehicles"
+}
+
 type LogisticsTrackingEvent struct {
 	ID               uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
 	LogisticsOrderID uint64    `gorm:"index;not null;comment:物流委托ID" json:"logistics_order_id"`
@@ -215,15 +302,17 @@ func (LogisticsTrackingEvent) TableName() string {
 type FulfillmentDocType string
 
 const (
-	DocTypePickupOrder      FulfillmentDocType = "pickup_order"
-	DocTypeOutboundOrder    FulfillmentDocType = "outbound_order"
-	DocTypeSealPhoto        FulfillmentDocType = "seal_photo"
-	DocTypeGPSTrack         FulfillmentDocType = "gps_track"
-	DocTypeInspectionResult FulfillmentDocType = "inspection_result"
-	DocTypeReceiptOrder     FulfillmentDocType = "receipt_order"
-	DocTypeInboundOrder     FulfillmentDocType = "inbound_order"
-	DocTypeWaybill          FulfillmentDocType = "waybill"
-	DocTypeDeliveryPhoto    FulfillmentDocType = "delivery_photo"
+	DocTypePickupInstruction FulfillmentDocType = "pickup_instruction"
+	DocTypePickupOrder       FulfillmentDocType = "pickup_order"
+	DocTypeOutboundOrder     FulfillmentDocType = "outbound_order"
+	DocTypeSealPhoto         FulfillmentDocType = "seal_photo"
+	DocTypeLoadingVoucher    FulfillmentDocType = "loading_voucher"
+	DocTypeGPSTrack          FulfillmentDocType = "gps_track"
+	DocTypeInspectionResult  FulfillmentDocType = "inspection_result"
+	DocTypeReceiptOrder      FulfillmentDocType = "receipt_order"
+	DocTypeInboundOrder      FulfillmentDocType = "inbound_order"
+	DocTypeWaybill           FulfillmentDocType = "waybill"
+	DocTypeDeliveryPhoto     FulfillmentDocType = "delivery_photo"
 )
 
 type FulfillmentDocument struct {
@@ -267,4 +356,48 @@ type FulfillmentGuarantee struct {
 
 func (FulfillmentGuarantee) TableName() string {
 	return "fulfillment_guarantees"
+}
+
+type WarehouseReceiptPledgeApplication struct {
+	ID                      uint64                       `gorm:"primaryKey;autoIncrement" json:"id"`
+	ApplicationNo           string                       `gorm:"type:varchar(64);uniqueIndex;not null;comment:仓单质押申请号" json:"application_no"`
+	ApplicantEnterpriseID   uint64                       `gorm:"index;not null;comment:申请企业ID" json:"applicant_enterprise_id"`
+	ApplicantUserID         uint64                       `gorm:"index;not null;comment:申请人ID" json:"applicant_user_id"`
+	ApplicantRole           string                       `gorm:"type:varchar(32);index;comment:申请方角色 procurement/sales" json:"applicant_role"`
+	FinanceServiceID        uint64                       `gorm:"index;not null;comment:资金产品ID" json:"finance_service_id"`
+	FundingEnterpriseID     uint64                       `gorm:"index;not null;comment:资金方企业ID" json:"funding_enterprise_id"`
+	WarehouseServiceID      uint64                       `gorm:"index;not null;comment:监管仓库服务ID" json:"warehouse_service_id"`
+	WarehouseEnterpriseID   uint64                       `gorm:"index;not null;comment:仓储企业ID" json:"warehouse_enterprise_id"`
+	WarehouseName           string                       `gorm:"type:varchar(200);comment:监管仓库名称" json:"warehouse_name"`
+	ReceiptNo               string                       `gorm:"type:varchar(100);index;not null;comment:仓单编号" json:"receipt_no"`
+	ReceiptVoucherURL       string                       `gorm:"type:varchar(500);not null;comment:仓单文件URL" json:"receipt_voucher_url"`
+	GoodsName               string                       `gorm:"type:varchar(200);not null;comment:货物名称" json:"goods_name"`
+	Quantity                float64                      `gorm:"type:decimal(12,2);not null;comment:数量吨" json:"quantity"`
+	QualityGrade            string                       `gorm:"type:varchar(100);comment:品质/牌号" json:"quality_grade"`
+	RequestedAmount         float64                      `gorm:"type:decimal(14,2);not null;comment:申请金额" json:"requested_amount"`
+	ApprovedAmount          float64                      `gorm:"type:decimal(14,2);comment:审批金额" json:"approved_amount"`
+	TermDays                int                          `gorm:"comment:账期天数" json:"term_days"`
+	AnnualRate              float64                      `gorm:"type:decimal(8,4);comment:年化费率" json:"annual_rate"`
+	RiskRemark              string                       `gorm:"type:varchar(1000);comment:风控备注" json:"risk_remark"`
+	PledgeAgreementURL      string                       `gorm:"type:varchar(500);comment:仓单质押协议URL" json:"pledge_agreement_url"`
+	SupervisionAgreementURL string                       `gorm:"type:varchar(500);comment:监管协议URL" json:"supervision_agreement_url"`
+	DisbursementVoucherURL  string                       `gorm:"type:varchar(500);comment:放款凭证URL" json:"disbursement_voucher_url"`
+	ReleaseVoucherURL       string                       `gorm:"type:varchar(500);comment:货权释放凭证URL" json:"release_voucher_url"`
+	ReleaseRemark           string                       `gorm:"type:varchar(1000);comment:释放备注" json:"release_remark"`
+	Status                  WarehouseReceiptPledgeStatus `gorm:"type:varchar(40);index;not null;default:submitted;comment:状态" json:"status"`
+	SubmittedAt             *time.Time                   `gorm:"comment:提交时间" json:"submitted_at"`
+	RiskReviewedAt          *time.Time                   `gorm:"comment:风控时间" json:"risk_reviewed_at"`
+	AgreementSignedAt       *time.Time                   `gorm:"comment:协议签署时间" json:"agreement_signed_at"`
+	DisbursedAt             *time.Time                   `gorm:"comment:放款时间" json:"disbursed_at"`
+	ReleasedAt              *time.Time                   `gorm:"comment:释放时间" json:"released_at"`
+	Remark                  string                       `gorm:"type:varchar(1000);comment:申请备注" json:"remark"`
+	CreatedBy               uint64                       `gorm:"comment:创建者" json:"created_by"`
+	UpdatedBy               uint64                       `gorm:"comment:更新者" json:"updated_by"`
+	CreatedAt               time.Time                    `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt               time.Time                    `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt               gorm.DeletedAt               `gorm:"index" json:"-"`
+}
+
+func (WarehouseReceiptPledgeApplication) TableName() string {
+	return "warehouse_receipt_pledge_applications"
 }

@@ -121,6 +121,42 @@ type DashboardResponse struct {
 	RecentOrders []RecentOrder  `json:"recent_orders"`
 }
 
+type UpsertPersonalInquiryDraftRequest struct {
+	Title           string  `json:"title" binding:"required"`
+	ProductName     string  `json:"product_name"`
+	Category        string  `json:"category"`
+	Material        string  `json:"material"`
+	Spec            string  `json:"spec"`
+	Quantity        float64 `json:"quantity"`
+	Unit            string  `json:"unit"`
+	TargetPrice     float64 `json:"target_price"`
+	DeliveryAddress string  `json:"delivery_address"`
+	Requirement     string  `json:"requirement"`
+}
+
+type PersonalInquiryDraftInfo struct {
+	ID              uint64    `json:"id"`
+	DraftNo         string    `json:"draft_no"`
+	UserID          uint64    `json:"user_id"`
+	Title           string    `json:"title"`
+	ProductName     string    `json:"product_name"`
+	Category        string    `json:"category"`
+	Material        string    `json:"material"`
+	Spec            string    `json:"spec"`
+	Quantity        float64   `json:"quantity"`
+	Unit            string    `json:"unit"`
+	TargetPrice     float64   `json:"target_price"`
+	DeliveryAddress string    `json:"delivery_address"`
+	Requirement     string    `json:"requirement"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type PersonalInquiryDraftListResponse struct {
+	List []PersonalInquiryDraftInfo `json:"list"`
+}
+
 func ToUserInfo(user interface{}) *UserInfo {
 	return nil
 }

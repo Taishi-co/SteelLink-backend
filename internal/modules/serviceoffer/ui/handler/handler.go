@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/ui/dto"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
@@ -699,10 +700,22 @@ func warehouseToInfo(item *entity.WarehouseService) dto.WarehouseServiceInfo {
 		Capacity: item.Capacity, AvailableCapacity: item.AvailableCapacity, ServiceTypes: []string(item.ServiceTypes),
 		PriceRule: item.PriceRule, LoadingCapacity: item.LoadingCapacity, BusinessHours: item.BusinessHours,
 		PledgeSupervision: item.PledgeSupervision, OutboundVoucherReq: item.OutboundVoucherReq,
-		Images: []string(item.Images), Certificates: []string(item.Certificates), Description: item.Description,
+		FinanceCertified: isFinanceCertifiedWarehouse(item.ID),
+		Images:           []string(item.Images), Certificates: []string(item.Certificates), Description: item.Description,
 		Status: int(item.Status), AuditRemark: item.AuditRemark,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func isFinanceCertifiedWarehouse(warehouseServiceID uint64) bool {
+	if warehouseServiceID == 0 {
+		return false
+	}
+	var count int64
+	database.GetDB().WithContext(context.Background()).Model(&entity.FinanceAuthorizedWarehouse{}).
+		Where("warehouse_service_id = ? AND status = ?", warehouseServiceID, "active").
+		Count(&count)
+	return count > 0
 }
 
 func logisticsToInfo(item *entity.LogisticsService) dto.LogisticsServiceInfo {
@@ -1020,11 +1033,21 @@ func (h *Handler) ListFinanceAvailableForOrder(c *gin.Context) {
 		return
 	}
 
+	var order orderEntity.Order
+	if err := h.db.WithContext(c.Request.Context()).First(&order, orderID).Error; err != nil {
+		response.Error(c, ecode.ErrNotFound.WithMessage("订单不存在"))
+		return
+	}
+
+	query := h.db.WithContext(c.Request.Context()).
+		Model(&entity.FinanceService{}).
+		Where("finance_services.status = ?", entity.OfferStatusApproved)
+	if order.DeliveryInfo != nil && order.DeliveryInfo.DestWarehouseServiceID > 0 {
+		query = query.Joins("JOIN finance_authorized_warehouses faw ON faw.finance_service_id = finance_services.id AND faw.finance_enterprise_id = finance_services.enterprise_id AND faw.status = ?", "active").
+			Where("faw.warehouse_service_id = ?", order.DeliveryInfo.DestWarehouseServiceID)
+	}
 	var financeServices []entity.FinanceService
-	h.db.WithContext(c.Request.Context()).
-		Where("status = ?", entity.OfferStatusApproved).
-		Order("id DESC").
-		Find(&financeServices)
+	query.Order("finance_services.id DESC").Find(&financeServices)
 
 	list := make([]dto.FinanceServiceInfo, 0, len(financeServices))
 	for _, fs := range financeServices {

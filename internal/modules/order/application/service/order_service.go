@@ -1298,40 +1298,36 @@ func (s *OrderService) DirectPayment(ctx context.Context, id, enterpriseID, oper
 
 	var titleVoucherURL string
 	var titleVoucherRemark string
-	
-	// 优先使用请求中的货权凭证
-	titleVoucherURL = strings.TrimSpace(req.TitleVoucherURL)
-	titleVoucherRemark = strings.TrimSpace(req.TitleVoucherRemark)
-	
-	// 如果请求中没有，尝试从商品获取
-	if titleVoucherURL == "" && len(order.Items) > 0 {
+
+	if len(order.Items) > 0 {
 		product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
 		if prodErr == nil && product != nil {
 			titleVoucherURL = strings.TrimSpace(product.TitleVoucherURL)
 			titleVoucherRemark = strings.TrimSpace(product.TitleVoucherRemark)
 		}
 	}
-	
-	if titleVoucherURL == "" {
-		return nil, ecode.ErrBadRequest.WithMessage("商品未上传货权/仓单监管凭证，无法完成直采支付。请联系卖方在商品上架时认证货权凭证或在支付时上传货权凭证")
-	}
 
 	if order.Remark == nil {
 		order.Remark = orderEntity.Remark{}
 	}
-	order.Remark["direct_title_voucher_url"] = titleVoucherURL
-	order.Remark["direct_title_remark"] = titleVoucherRemark
+	order.Remark["direct_title_confirmed"] = titleVoucherURL != ""
+	if titleVoucherURL != "" {
+		order.Remark["direct_title_voucher_url"] = titleVoucherURL
+		order.Remark["direct_title_remark"] = titleVoucherRemark
+	}
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(order).Error; err != nil {
 			return fmt.Errorf("保存订单货权监管信息失败: %w", err)
 		}
-		if err := createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
-			"title_voucher_url": titleVoucherURL,
-			"title_remark":      titleVoucherRemark,
-			"source":            "product_certification",
-		}); err != nil {
-			return fmt.Errorf("创建货权监管事件失败: %w", err)
+		if titleVoucherURL != "" {
+			if err := createOrderEvent(tx, ctx, order, "direct_title_control_recorded", operatorID, enterpriseID, "procurement", order.Status, order.Status, orderEntity.OrderEventPayload{
+				"title_voucher_url": titleVoucherURL,
+				"title_remark":      titleVoucherRemark,
+				"source":            "product_certification",
+			}); err != nil {
+				return fmt.Errorf("创建货权监管事件失败: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -1388,6 +1384,19 @@ func (s *OrderService) CreateFinancingRequest(ctx context.Context, id, buyerEnte
 		if !matched {
 			return nil, ecode.ErrBadRequest.WithMessage("该融资产品不适用于当前订单商品品类")
 		}
+	}
+	if order.DeliveryInfo == nil || order.DeliveryInfo.DestWarehouseServiceID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("托盘融资订单必须先选择资金方认证监管仓")
+	}
+	var authCount int64
+	if err := db.WithContext(ctx).Model(&offerEntity.FinanceAuthorizedWarehouse{}).
+		Where("finance_service_id = ? AND finance_enterprise_id = ? AND warehouse_service_id = ? AND status = ?",
+			financeService.ID, financeService.EnterpriseID, order.DeliveryInfo.DestWarehouseServiceID, "active").
+		Count(&authCount).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("校验资金方认证监管仓失败")
+	}
+	if authCount == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("所选目的仓不是该资金方认证监管仓，请重新选择监管仓或更换金融产品")
 	}
 	financing := &orderEntity.OrderFinancingRequest{
 		OrderID:             order.ID,
@@ -3703,18 +3712,6 @@ func (s *OrderService) ensureTitleControlReadyForLogistics(ctx context.Context, 
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return ecode.ErrDatabase.WithMessage("查询融资质押状态失败")
-	}
-	if order.PaymentInfo != nil && order.PaymentInfo.VoucherURL != "" {
-		if len(order.Items) > 0 {
-			product, prodErr := s.productRepo.FindByID(ctx, order.Items[0].ProductID)
-			if prodErr != nil || product == nil || strings.TrimSpace(product.TitleVoucherURL) == "" {
-				if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
-					return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约。请确认卖方已在商品上架时认证货权凭证")
-				}
-			}
-		} else if order.Remark == nil || strings.TrimSpace(fmt.Sprint(order.Remark["direct_title_voucher_url"])) == "" {
-			return ecode.ErrBadRequest.WithMessage("直采订单必须先记录货权/仓单监管凭证，才能进入物流履约")
-		}
 	}
 	return nil
 }

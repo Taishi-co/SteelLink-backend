@@ -244,6 +244,147 @@ func (s *UserService) UpdateStatus(ctx context.Context, id uint64, status int, o
 	return nil
 }
 
+func (s *UserService) ListPersonalInquiryDrafts(ctx context.Context, userID uint64) (*dto.PersonalInquiryDraftListResponse, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.IsIdentityVerified() {
+		return nil, ecode.ErrBadRequest.WithMessage("请先完成实名认证后再使用询价草稿")
+	}
+
+	var drafts []entity.PersonalInquiryDraft
+	if err := database.GetDB().WithContext(ctx).
+		Where("user_id = ? AND status = ?", userID, "draft").
+		Order("updated_at DESC, id DESC").
+		Find(&drafts).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("查询询价草稿失败")
+	}
+
+	list := make([]dto.PersonalInquiryDraftInfo, 0, len(drafts))
+	for _, draft := range drafts {
+		list = append(list, personalInquiryDraftToInfo(&draft))
+	}
+	return &dto.PersonalInquiryDraftListResponse{List: list}, nil
+}
+
+func (s *UserService) CreatePersonalInquiryDraft(ctx context.Context, userID uint64, req *dto.UpsertPersonalInquiryDraftRequest) (*dto.PersonalInquiryDraftInfo, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.IsIdentityVerified() {
+		return nil, ecode.ErrBadRequest.WithMessage("请先完成实名认证后再保存询价草稿")
+	}
+
+	draft := entity.PersonalInquiryDraft{
+		UserID:          userID,
+		Title:           req.Title,
+		ProductName:     req.ProductName,
+		Category:        req.Category,
+		Material:        req.Material,
+		Spec:            req.Spec,
+		Quantity:        req.Quantity,
+		Unit:            req.Unit,
+		TargetPrice:     req.TargetPrice,
+		DeliveryAddress: req.DeliveryAddress,
+		Requirement:     req.Requirement,
+		Status:          "draft",
+		CreatedBy:       userID,
+		UpdatedBy:       userID,
+	}
+	if err := database.GetDB().WithContext(ctx).Create(&draft).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("保存询价草稿失败")
+	}
+	info := personalInquiryDraftToInfo(&draft)
+	return &info, nil
+}
+
+func (s *UserService) UpdatePersonalInquiryDraft(ctx context.Context, userID, draftID uint64, req *dto.UpsertPersonalInquiryDraftRequest) (*dto.PersonalInquiryDraftInfo, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if user == nil {
+		return nil, ecode.ErrUserNotFound
+	}
+	if !user.IsIdentityVerified() {
+		return nil, ecode.ErrBadRequest.WithMessage("请先完成实名认证后再更新询价草稿")
+	}
+
+	var draft entity.PersonalInquiryDraft
+	if err := database.GetDB().WithContext(ctx).Where("id = ? AND user_id = ? AND status = ?", draftID, userID, "draft").First(&draft).Error; err != nil {
+		return nil, ecode.ErrNotFound.WithMessage("询价草稿不存在")
+	}
+	draft.Title = req.Title
+	draft.ProductName = req.ProductName
+	draft.Category = req.Category
+	draft.Material = req.Material
+	draft.Spec = req.Spec
+	draft.Quantity = req.Quantity
+	draft.Unit = req.Unit
+	draft.TargetPrice = req.TargetPrice
+	draft.DeliveryAddress = req.DeliveryAddress
+	draft.Requirement = req.Requirement
+	draft.UpdatedBy = userID
+	if err := database.GetDB().WithContext(ctx).Save(&draft).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新询价草稿失败")
+	}
+	info := personalInquiryDraftToInfo(&draft)
+	return &info, nil
+}
+
+func (s *UserService) DeletePersonalInquiryDraft(ctx context.Context, userID, draftID uint64) error {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return ecode.ErrDatabase
+	}
+	if user == nil {
+		return ecode.ErrUserNotFound
+	}
+	if !user.IsIdentityVerified() {
+		return ecode.ErrBadRequest.WithMessage("请先完成实名认证后再删除询价草稿")
+	}
+	result := database.GetDB().WithContext(ctx).
+		Model(&entity.PersonalInquiryDraft{}).
+		Where("id = ? AND user_id = ? AND status = ?", draftID, userID, "draft").
+		Updates(map[string]interface{}{"status": "archived", "updated_by": userID})
+	if result.Error != nil {
+		return ecode.ErrDatabase.WithMessage("删除询价草稿失败")
+	}
+	if result.RowsAffected == 0 {
+		return ecode.ErrNotFound.WithMessage("询价草稿不存在")
+	}
+	return nil
+}
+
+func personalInquiryDraftToInfo(draft *entity.PersonalInquiryDraft) dto.PersonalInquiryDraftInfo {
+	return dto.PersonalInquiryDraftInfo{
+		ID:              draft.ID,
+		DraftNo:         draft.DraftNo,
+		UserID:          draft.UserID,
+		Title:           draft.Title,
+		ProductName:     draft.ProductName,
+		Category:        draft.Category,
+		Material:        draft.Material,
+		Spec:            draft.Spec,
+		Quantity:        draft.Quantity,
+		Unit:            draft.Unit,
+		TargetPrice:     draft.TargetPrice,
+		DeliveryAddress: draft.DeliveryAddress,
+		Requirement:     draft.Requirement,
+		Status:          draft.Status,
+		CreatedAt:       draft.CreatedAt,
+		UpdatedAt:       draft.UpdatedAt,
+	}
+}
+
 func (s *UserService) SubmitIdentityVerification(ctx context.Context, userID uint64, req *dto.SubmitIdentityRequest) error {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
