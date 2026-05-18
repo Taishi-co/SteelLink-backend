@@ -161,6 +161,13 @@ type PledgeReleaseRequest struct {
 	ReleaseAmount float64 `json:"release_amount"`
 }
 
+type SellerPledgeReleaseRequest struct {
+	ReleaseAmount       float64 `json:"release_amount" binding:"required,gt=0"`
+	OrderVoucherURL     string  `json:"order_voucher_url" binding:"required"`
+	RepaymentVoucherURL string  `json:"repayment_voucher_url" binding:"required"`
+	Reason              string  `json:"reason"`
+}
+
 type CreateLogisticsBiddingRequest struct {
 	PickupAddress      string `json:"pickup_address"`
 	DestinationAddress string `json:"destination_address"`
@@ -474,18 +481,20 @@ type LogisticsSettlementInfo struct {
 }
 
 type PledgeEventInfo struct {
-	ID                 uint64    `json:"id"`
-	FinancingRequestID uint64    `json:"financing_request_id"`
-	OrderID            uint64    `json:"order_id"`
-	OrderNo            string    `json:"order_no"`
-	EventType          string    `json:"event_type"`
-	ReleaseAmount      float64   `json:"release_amount"`
-	Condition          string    `json:"condition"`
-	Reason             string    `json:"reason"`
-	VoucherURL         string    `json:"voucher_url"`
-	ActorUserID        uint64    `json:"actor_user_id"`
-	ActorEnterpriseID  uint64    `json:"actor_enterprise_id"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                  uint64    `json:"id"`
+	FinancingRequestID  uint64    `json:"financing_request_id"`
+	OrderID             uint64    `json:"order_id"`
+	OrderNo             string    `json:"order_no"`
+	EventType           string    `json:"event_type"`
+	ReleaseAmount       float64   `json:"release_amount"`
+	Condition           string    `json:"condition"`
+	Reason              string    `json:"reason"`
+	OrderVoucherURL     string    `json:"order_voucher_url"`
+	RepaymentVoucherURL string    `json:"repayment_voucher_url"`
+	VoucherURL          string    `json:"voucher_url"`
+	ActorUserID         uint64    `json:"actor_user_id"`
+	ActorEnterpriseID   uint64    `json:"actor_enterprise_id"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type ReportBreachRequest struct {

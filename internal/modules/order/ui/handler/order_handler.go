@@ -607,6 +607,30 @@ func (h *OrderHandler) ConfirmPayment(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OrderHandler) RequestPledgeRelease(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的订单ID")
+		return
+	}
+	var req dto.SellerPledgeReleaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, svcErr := h.orderService.RequestPledgeRelease(c.Request.Context(), id, claims.EnterpriseID, claims.UserID, &req)
+	if svcErr != nil {
+		response.Error(c, svcErr.(*ecode.Error))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *OrderHandler) SetDeliveryInfo(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {
