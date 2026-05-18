@@ -48,6 +48,7 @@ func RegisterRoutes(r *gin.RouterGroup) {
 		orders.POST("/:id/financing-requests/disburse", financeService, orderHandler.DisburseFinancing)
 		orders.POST("/:id/pledges", financeService, orderHandler.RecordPledge)
 		orders.POST("/:id/pledges/release", financeService, orderHandler.ReleasePledge)
+		orders.POST("/:id/pledges/release-requests", sellerService, orderHandler.RequestPledgeRelease)
 		orders.POST("/:id/confirm-payment", sellerService, orderHandler.ConfirmPayment)
 		orders.POST("/:id/logistics-biddings", buyerOrSellerService, orderHandler.CreateLogisticsBidding)
 		orders.POST("/:id/logistics-biddings/close", buyerOrSellerService, orderHandler.CloseLogisticsBidding)

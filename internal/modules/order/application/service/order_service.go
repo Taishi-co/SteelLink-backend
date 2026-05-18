@@ -1783,13 +1783,9 @@ func (s *OrderService) ReleasePledge(ctx context.Context, id, fundingEnterpriseI
 	if releaseAmount < 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("释放金额不能小于0")
 	}
-	var releasedTotal float64
-	if err := database.GetDB().WithContext(ctx).
-		Model(&orderEntity.PledgeReleaseEvent{}).
-		Where("financing_request_id = ?", financing.ID).
-		Select("COALESCE(SUM(release_amount), 0)").
-		Scan(&releasedTotal).Error; err != nil {
-		return nil, ecode.ErrDatabase.WithMessage("查询已释放金额失败")
+	releasedTotal, err := sumConfirmedPledgeReleaseAmount(ctx, financing.ID)
+	if err != nil {
+		return nil, err
 	}
 	if releaseAmount == 0 {
 		releaseAmount = financing.ApprovedAmount - releasedTotal
@@ -1841,6 +1837,81 @@ func (s *OrderService) ReleasePledge(ctx context.Context, id, fundingEnterpriseI
 		return nil, ecode.ErrDatabase.WithMessage("释放货权质押失败")
 	}
 	return toFinancingRequestInfo(financing), nil
+}
+
+func (s *OrderService) RequestPledgeRelease(ctx context.Context, id, sellerEnterpriseID, operatorID uint64, req *dto.SellerPledgeReleaseRequest) (*dto.PledgeEventInfo, error) {
+	order, financing, err := s.getOrderFinancing(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !isOrderSeller(order, sellerEnterpriseID) {
+		return nil, ecode.ErrForbidden.WithMessage("无权申请释放该订单货权质押")
+	}
+	if financing.Status != orderEntity.FinancingRequestStatusPledged {
+		return nil, ecode.ErrBadRequest.WithMessage("当前融资质押状态不可申请释放")
+	}
+	if req.ReleaseAmount <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("申请释放金额必须大于0")
+	}
+	if !isHTTPURL(req.OrderVoucherURL) {
+		return nil, ecode.ErrBadRequest.WithMessage("销售订单URL必须是有效的HTTP/HTTPS地址")
+	}
+	if !isHTTPURL(req.RepaymentVoucherURL) {
+		return nil, ecode.ErrBadRequest.WithMessage("还款凭证URL必须是有效的HTTP/HTTPS地址")
+	}
+	releasedTotal, err := sumConfirmedPledgeReleaseAmount(ctx, financing.ID)
+	if err != nil {
+		return nil, err
+	}
+	if financing.ApprovedAmount > 0 && releasedTotal+req.ReleaseAmount > financing.ApprovedAmount {
+		return nil, ecode.ErrBadRequest.WithMessage("申请释放金额超过剩余可释放金额")
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "卖方上传销售订单并提交还款凭证，申请释放对应货权"
+	}
+	event := orderEntity.PledgeReleaseEvent{
+		FinancingRequestID:  financing.ID,
+		OrderID:             order.ID,
+		OrderNo:             order.OrderNo,
+		EventType:           "pledge_release_requested",
+		ReleaseAmount:       req.ReleaseAmount,
+		Condition:           financing.ReleaseCondition,
+		Reason:              reason,
+		OrderVoucherURL:     strings.TrimSpace(req.OrderVoucherURL),
+		RepaymentVoucherURL: strings.TrimSpace(req.RepaymentVoucherURL),
+		ActorUserID:         operatorID,
+		ActorEnterpriseID:   sellerEnterpriseID,
+	}
+	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&event).Error; err != nil {
+			return err
+		}
+		return createOrderEvent(tx, ctx, order, "ownership_pledge_release_requested", operatorID, sellerEnterpriseID, "sales", order.Status, order.Status, orderEntity.OrderEventPayload{
+			"release_amount":        event.ReleaseAmount,
+			"released_total":        releasedTotal,
+			"remaining_amount":      financing.ApprovedAmount - releasedTotal,
+			"order_voucher_url":     event.OrderVoucherURL,
+			"repayment_voucher_url": event.RepaymentVoucherURL,
+			"reason":                event.Reason,
+		})
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("提交质押释放申请失败")
+	}
+	info := toPledgeEventInfo(event)
+	return &info, nil
+}
+
+func sumConfirmedPledgeReleaseAmount(ctx context.Context, financingRequestID uint64) (float64, *ecode.Error) {
+	var total float64
+	if err := database.GetDB().WithContext(ctx).
+		Model(&orderEntity.PledgeReleaseEvent{}).
+		Where("financing_request_id = ? AND event_type IN ?", financingRequestID, []string{"pledge_released", "pledge_partially_released"}).
+		Select("COALESCE(SUM(release_amount), 0)").
+		Scan(&total).Error; err != nil {
+		return 0, ecode.ErrDatabase.WithMessage("查询已释放金额失败")
+	}
+	return total, nil
 }
 
 func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, operatorID uint64) (*dto.OrderInfo, error) {
@@ -3934,18 +4005,20 @@ func toShipmentTaskInfo(task *orderEntity.ShipmentTask) *dto.ShipmentTaskInfo {
 
 func toPledgeEventInfo(event orderEntity.PledgeReleaseEvent) dto.PledgeEventInfo {
 	return dto.PledgeEventInfo{
-		ID:                 event.ID,
-		FinancingRequestID: event.FinancingRequestID,
-		OrderID:            event.OrderID,
-		OrderNo:            event.OrderNo,
-		EventType:          event.EventType,
-		ReleaseAmount:      event.ReleaseAmount,
-		Condition:          event.Condition,
-		Reason:             event.Reason,
-		VoucherURL:         event.VoucherURL,
-		ActorUserID:        event.ActorUserID,
-		ActorEnterpriseID:  event.ActorEnterpriseID,
-		CreatedAt:          event.CreatedAt,
+		ID:                  event.ID,
+		FinancingRequestID:  event.FinancingRequestID,
+		OrderID:             event.OrderID,
+		OrderNo:             event.OrderNo,
+		EventType:           event.EventType,
+		ReleaseAmount:       event.ReleaseAmount,
+		Condition:           event.Condition,
+		Reason:              event.Reason,
+		OrderVoucherURL:     event.OrderVoucherURL,
+		RepaymentVoucherURL: event.RepaymentVoucherURL,
+		VoucherURL:          event.VoucherURL,
+		ActorUserID:         event.ActorUserID,
+		ActorEnterpriseID:   event.ActorEnterpriseID,
+		CreatedAt:           event.CreatedAt,
 	}
 }
 

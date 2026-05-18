@@ -619,18 +619,20 @@ func (OrderFinancingRequest) TableName() string {
 }
 
 type PledgeReleaseEvent struct {
-	ID                 uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	FinancingRequestID uint64    `gorm:"index;not null;comment:融资申请ID" json:"financing_request_id"`
-	OrderID            uint64    `gorm:"index;not null;comment:订单ID" json:"order_id"`
-	OrderNo            string    `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
-	EventType          string    `gorm:"type:varchar(64);index;comment:事件类型" json:"event_type"`
-	ReleaseAmount      float64   `gorm:"type:decimal(14,2);comment:本次释放金额" json:"release_amount"`
-	Condition          string    `gorm:"type:varchar(1000);comment:释放条件" json:"condition"`
-	Reason             string    `gorm:"type:varchar(1000);comment:释放原因" json:"reason"`
-	VoucherURL         string    `gorm:"type:varchar(500);comment:凭证" json:"voucher_url"`
-	ActorUserID        uint64    `gorm:"index;comment:操作者用户ID" json:"actor_user_id"`
-	ActorEnterpriseID  uint64    `gorm:"index;comment:操作者企业ID" json:"actor_enterprise_id"`
-	CreatedAt          time.Time `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
+	ID                  uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	FinancingRequestID  uint64    `gorm:"index;not null;comment:融资申请ID" json:"financing_request_id"`
+	OrderID             uint64    `gorm:"index;not null;comment:订单ID" json:"order_id"`
+	OrderNo             string    `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
+	EventType           string    `gorm:"type:varchar(64);index;comment:事件类型" json:"event_type"`
+	ReleaseAmount       float64   `gorm:"type:decimal(14,2);comment:本次释放金额" json:"release_amount"`
+	Condition           string    `gorm:"type:varchar(1000);comment:释放条件" json:"condition"`
+	Reason              string    `gorm:"type:varchar(1000);comment:释放原因" json:"reason"`
+	OrderVoucherURL     string    `gorm:"type:varchar(500);comment:卖方申请释放所附订单URL" json:"order_voucher_url"`
+	RepaymentVoucherURL string    `gorm:"type:varchar(500);comment:卖方还款凭证URL" json:"repayment_voucher_url"`
+	VoucherURL          string    `gorm:"type:varchar(500);comment:凭证" json:"voucher_url"`
+	ActorUserID         uint64    `gorm:"index;comment:操作者用户ID" json:"actor_user_id"`
+	ActorEnterpriseID   uint64    `gorm:"index;comment:操作者企业ID" json:"actor_enterprise_id"`
+	CreatedAt           time.Time `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
 }
 
 func (PledgeReleaseEvent) TableName() string {
