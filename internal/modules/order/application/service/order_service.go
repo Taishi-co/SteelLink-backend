@@ -960,7 +960,7 @@ func (s *OrderService) SignContract(ctx context.Context, id, enterpriseID, opera
 	}
 	order.UpdatedBy = operatorID
 	if order.ContractInfo.BuyerSigned && order.ContractInfo.SellerSigned {
-		order.ContractInfo.SignedAt = signResult.SignedAt
+		order.ContractInfo.SignedAt = &signResult.SignedAt
 		order.Status = orderEntity.OrderStatusPendingPayment
 		// 设置过期时间
 		expiresAt := time.Now().Add(24 * time.Hour)
@@ -1678,6 +1678,16 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	financing.DisbursementVoucher = strings.TrimSpace(req.DisbursementVoucher)
 	financing.DisbursedAt = &now
 	financing.UpdatedBy = operatorID
+	order.PaymentInfo = &orderEntity.PaymentInfo{
+		PaymentMethod: "financing_disbursement",
+		PaymentTime:   now,
+		TransactionNo: fmt.Sprintf("FIN-%d", financing.ID),
+		PayeeAccount:  order.SellerName,
+		PayerAccount:  fmt.Sprintf("funding_enterprise_%d", fundingEnterpriseID),
+		VoucherURL:    financing.DisbursementVoucher,
+		UploadedBy:    operatorID,
+		UploadedAt:    now,
+	}
 	order.Status = orderEntity.OrderStatusPaid
 	order.ExpiresAt = nil // 清除过期时间
 	order.UpdatedBy = operatorID
@@ -1769,20 +1779,45 @@ func (s *OrderService) ReleasePledge(ctx context.Context, id, fundingEnterpriseI
 		return nil, ecode.ErrBadRequest.WithMessage("当前融资申请状态不可释放货权质押")
 	}
 	now := time.Now()
-	financing.Status = orderEntity.FinancingRequestStatusReleased
+	releaseAmount := req.ReleaseAmount
+	if releaseAmount < 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("释放金额不能小于0")
+	}
+	var releasedTotal float64
+	if err := database.GetDB().WithContext(ctx).
+		Model(&orderEntity.PledgeReleaseEvent{}).
+		Where("financing_request_id = ?", financing.ID).
+		Select("COALESCE(SUM(release_amount), 0)").
+		Scan(&releasedTotal).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("查询已释放金额失败")
+	}
+	if releaseAmount == 0 {
+		releaseAmount = financing.ApprovedAmount - releasedTotal
+	}
+	if releaseAmount <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("释放金额必须大于0")
+	}
+	fullyReleased := financing.ApprovedAmount <= 0 || releasedTotal+releaseAmount >= financing.ApprovedAmount
+	if fullyReleased {
+		financing.Status = orderEntity.FinancingRequestStatusReleased
+		financing.ReleasedAt = &now
+	}
 	financing.ReleaseReason = strings.TrimSpace(req.Reason)
-	financing.ReleasedAt = &now
 	financing.UpdatedBy = operatorID
 	releaseEvent := &orderEntity.PledgeReleaseEvent{
 		FinancingRequestID: financing.ID,
 		OrderID:            order.ID,
 		OrderNo:            order.OrderNo,
-		EventType:          "pledge_released",
+		EventType:          "pledge_partially_released",
+		ReleaseAmount:      releaseAmount,
 		Condition:          financing.ReleaseCondition,
 		Reason:             financing.ReleaseReason,
 		VoucherURL:         strings.TrimSpace(req.VoucherURL),
 		ActorUserID:        operatorID,
 		ActorEnterpriseID:  fundingEnterpriseID,
+	}
+	if fullyReleased {
+		releaseEvent.EventType = "pledge_released"
 	}
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(financing).Error; err != nil {
@@ -1791,7 +1826,13 @@ func (s *OrderService) ReleasePledge(ctx context.Context, id, fundingEnterpriseI
 		if err := tx.Create(releaseEvent).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "ownership_pledge_released", operatorID, fundingEnterpriseID, "finance", order.Status, order.Status, orderEntity.OrderEventPayload{
+		eventType := "ownership_pledge_partially_released"
+		if fullyReleased {
+			eventType = "ownership_pledge_released"
+		}
+		return createOrderEvent(tx, ctx, order, eventType, operatorID, fundingEnterpriseID, "finance", order.Status, order.Status, orderEntity.OrderEventPayload{
+			"release_amount":    releaseAmount,
+			"released_total":    releasedTotal + releaseAmount,
 			"release_condition": financing.ReleaseCondition,
 			"release_reason":    financing.ReleaseReason,
 			"voucher_url":       releaseEvent.VoucherURL,
@@ -2079,6 +2120,9 @@ func (s *OrderService) CreateLogisticsBidding(ctx context.Context, id, enterpris
 	if freightPayer == "" {
 		freightPayer = initiatorRole
 	}
+	if freightPayer != initiatorRole {
+		return nil, ecode.ErrForbidden.WithMessage("需由运费承担方发起物流竞价")
+	}
 	bidding := &orderEntity.LogisticsBidding{
 		OrderID:               order.ID,
 		OrderNo:               order.OrderNo,
@@ -2110,7 +2154,11 @@ func (s *OrderService) CreateLogisticsBidding(ctx context.Context, id, enterpris
 		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
-		return createOrderEvent(tx, ctx, order, "logistics_bidding_created", operatorID, enterpriseID, "sales", fromStatus, order.Status, orderEntity.OrderEventPayload{
+		actorService := "sales"
+		if initiatorRole == "buyer" {
+			actorService = "procurement"
+		}
+		return createOrderEvent(tx, ctx, order, "logistics_bidding_created", operatorID, enterpriseID, actorService, fromStatus, order.Status, orderEntity.OrderEventPayload{
 			"bidding_id":      bidding.ID,
 			"freight_payer":   bidding.FreightPayer,
 			"previous_status": int(fromStatus),
@@ -3051,10 +3099,6 @@ func toOrderInfo(order *orderEntity.Order, events []orderEntity.OrderEvent) *dto
 	}
 	var contractInfo *dto.ContractInfo
 	if order.ContractInfo != nil {
-		var signedAt *time.Time
-		if !order.ContractInfo.SignedAt.IsZero() {
-			signedAt = &order.ContractInfo.SignedAt
-		}
 		contractInfo = &dto.ContractInfo{
 			ContractNo:   order.ContractInfo.ContractNo,
 			ContractURL:  order.ContractInfo.ContractURL,
@@ -3062,7 +3106,7 @@ func toOrderInfo(order *orderEntity.Order, events []orderEntity.OrderEvent) *dto
 			SignStatus:   contractSignStatus(order.ContractInfo),
 			BuyerSigned:  order.ContractInfo.BuyerSigned,
 			SellerSigned: order.ContractInfo.SellerSigned,
-			SignedAt:     signedAt,
+			SignedAt:     order.ContractInfo.SignedAt,
 		}
 	}
 	var receiptInfo *dto.VoucherEvidence
@@ -3209,7 +3253,7 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 		if t, ok := eventTimeMap[eventType]; ok {
 			return &t
 		}
-		return &order.UpdatedAt
+		return nil
 	}
 
 	addItem := func(key, label, desc string, reached bool, eventType string) {
@@ -3705,8 +3749,10 @@ func (s *OrderService) ensureTitleControlReadyForLogistics(ctx context.Context, 
 	}
 	err := query.Order("id desc").First(&financing).Error
 	if err == nil {
-		if financing.Status != orderEntity.FinancingRequestStatusPledged && financing.Status != orderEntity.FinancingRequestStatusReleased {
-			return ecode.ErrBadRequest.WithMessage("托盘垫资订单必须先记录货权质押，才能进入物流履约")
+		if financing.Status != orderEntity.FinancingRequestStatusDisbursed &&
+			financing.Status != orderEntity.FinancingRequestStatusPledged &&
+			financing.Status != orderEntity.FinancingRequestStatusReleased {
+			return ecode.ErrBadRequest.WithMessage("托盘垫资订单必须先完成资方放款，才能进入物流履约")
 		}
 		return nil
 	}
@@ -3893,6 +3939,7 @@ func toPledgeEventInfo(event orderEntity.PledgeReleaseEvent) dto.PledgeEventInfo
 		OrderID:            event.OrderID,
 		OrderNo:            event.OrderNo,
 		EventType:          event.EventType,
+		ReleaseAmount:      event.ReleaseAmount,
 		Condition:          event.Condition,
 		Reason:             event.Reason,
 		VoucherURL:         event.VoucherURL,
