@@ -1201,9 +1201,17 @@ func (h *Handler) UploadFulfillmentDocument(c *gin.Context) {
 		response.Error(c, actorErr)
 		return
 	}
-	if entity.FulfillmentDocType(req.DocType) == entity.DocTypePickupInstruction && role != "seller" {
-		response.Error(c, ecode.ErrForbidden.WithMessage("提货指令需由卖方上传"))
-		return
+	if entity.FulfillmentDocType(req.DocType) == entity.DocTypePickupInstruction {
+		isSeller, sellerErr := h.isLogisticsOrderSeller(c, &logisticsOrder, claims.EnterpriseID)
+		if sellerErr != nil {
+			response.Error(c, sellerErr)
+			return
+		}
+		if !isSeller {
+			response.Error(c, ecode.ErrForbidden.WithMessage("提货指令需由卖方上传"))
+			return
+		}
+		role = "seller"
 	}
 
 	doc := entity.FulfillmentDocument{
@@ -1265,6 +1273,20 @@ func (h *Handler) resolveFulfillmentDocumentActor(c *gin.Context, logisticsOrder
 		}
 	}
 	return "", ecode.ErrForbidden.WithMessage("无权上传该物流委托单据")
+}
+
+func (h *Handler) isLogisticsOrderSeller(c *gin.Context, logisticsOrder *entity.LogisticsOrder, enterpriseID uint64) (bool, *ecode.Error) {
+	if logisticsOrder == nil || logisticsOrder.ID == 0 {
+		return false, ecode.ErrNotFound.WithMessage("物流委托单不存在")
+	}
+	if logisticsOrder.OrderID == 0 {
+		return false, nil
+	}
+	var order orderEntity.Order
+	if err := h.db.WithContext(c.Request.Context()).First(&order, logisticsOrder.OrderID).Error; err != nil {
+		return false, ecode.ErrNotFound.WithMessage("关联交易订单不存在")
+	}
+	return order.SellerID == enterpriseID || order.SellerEnterpriseID == enterpriseID, nil
 }
 
 func (h *Handler) ListFulfillmentDocuments(c *gin.Context) {
