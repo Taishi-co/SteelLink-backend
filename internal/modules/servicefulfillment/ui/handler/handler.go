@@ -621,6 +621,9 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 		if err := tx.Create(&event).Error; err != nil {
 			return err
 		}
+		if err := syncOrderShipmentFromLogisticsStatusTx(tx, c, &item, targetStatus, claims.UserID, claims.EnterpriseID, now); err != nil {
+			return err
+		}
 		if targetStatus == entity.LogisticsOrderReceiptSigned && item.OrderID > 0 {
 			var order orderEntity.Order
 			if err := tx.Where("id = ?", item.OrderID).First(&order).Error; err == nil {
@@ -663,6 +666,89 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 	response.Success(c, logisticsOrderToInfo(&item, nil))
 }
 
+func syncOrderShipmentFromLogisticsStatusTx(tx *gorm.DB, c *gin.Context, item *entity.LogisticsOrder, targetStatus entity.LogisticsOrderStatus, operatorID, enterpriseID uint64, now time.Time) error {
+	if item == nil || item.OrderID == 0 {
+		return nil
+	}
+	normalized := entity.NormalizeLogisticsOrderStatus(targetStatus)
+	var task orderEntity.ShipmentTask
+	if err := tx.WithContext(c.Request.Context()).Where("order_id = ?", item.OrderID).Order("id DESC").First(&task).Error; err == nil {
+		switch normalized {
+		case entity.LogisticsOrderLoadingConfirmed, entity.LogisticsOrderInTransit:
+			task.Status = orderEntity.ShipmentStatusPickedUp
+			if task.PickedUpAt == nil {
+				task.PickedUpAt = &now
+			}
+		case entity.LogisticsOrderArrivalConfirmed, entity.LogisticsOrderInboundCompleted:
+			task.Status = orderEntity.ShipmentStatusDelivered
+			if task.DeliveredAt == nil {
+				task.DeliveredAt = &now
+			}
+		case entity.LogisticsOrderReceiptSigned:
+			task.Status = orderEntity.ShipmentStatusSigned
+			if task.SignedAt == nil {
+				task.SignedAt = &now
+			}
+		}
+		if err := tx.WithContext(c.Request.Context()).Save(&task).Error; err != nil {
+			return err
+		}
+	}
+
+	var order orderEntity.Order
+	if err := tx.WithContext(c.Request.Context()).First(&order, item.OrderID).Error; err != nil {
+		return nil
+	}
+	fromStatus := order.Status
+	switch normalized {
+	case entity.LogisticsOrderLoadingConfirmed, entity.LogisticsOrderInTransit:
+		if order.Status == orderEntity.OrderStatusPendingDelivery || order.Status == orderEntity.OrderStatusPendingLogisticsContract {
+			order.Status = orderEntity.OrderStatusShipping
+		}
+	case entity.LogisticsOrderArrivalConfirmed, entity.LogisticsOrderInboundCompleted:
+		if order.Status != orderEntity.OrderStatusReceived && order.Status != orderEntity.OrderStatusReconciled && order.Status != orderEntity.OrderStatusArchived {
+			order.Status = orderEntity.OrderStatusDelivered
+		}
+	case entity.LogisticsOrderReceiptSigned:
+		if order.FinanceID > 0 {
+			var financing orderEntity.OrderFinancingRequest
+			if err := tx.WithContext(c.Request.Context()).
+				Where("order_id = ? AND funding_enterprise_id = ? AND status = ?", item.OrderID, enterpriseID, orderEntity.FinancingRequestStatusDisbursed).
+				Order("id DESC").
+				First(&financing).Error; err == nil {
+				financing.Status = orderEntity.FinancingRequestStatusPledged
+				financing.PledgedAt = &now
+				financing.PledgeRemark = defaultString(financing.PledgeRemark, "资方确认监管仓收货后完成货权质押")
+				financing.UpdatedBy = operatorID
+				if err := tx.WithContext(c.Request.Context()).Save(&financing).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if order.Status == fromStatus {
+		return nil
+	}
+	order.UpdatedBy = operatorID
+	if err := tx.WithContext(c.Request.Context()).Save(&order).Error; err != nil {
+		return err
+	}
+	return tx.WithContext(c.Request.Context()).Create(&orderEntity.OrderEvent{
+		OrderID:           order.ID,
+		OrderNo:           order.OrderNo,
+		EventType:         "logistics_status_synced",
+		ActorUserID:       operatorID,
+		ActorEnterpriseID: enterpriseID,
+		ActorService:      string(entity.ResponsibilityForLogisticsStatus(targetStatus)),
+		FromStatus:        fromStatus,
+		ToStatus:          order.Status,
+		Payload: orderEntity.OrderEventPayload{
+			"logistics_order_id": item.ID,
+			"logistics_status":   string(targetStatus),
+		},
+	}).Error
+}
+
 func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.LogisticsOrder, targetStatus entity.LogisticsOrderStatus, enterpriseID uint64) *ecode.Error {
 	if item == nil {
 		return ecode.ErrNotFound.WithMessage("物流委托不存在")
@@ -698,6 +784,7 @@ func (h *Handler) ensureLogisticsStatusActor(c *gin.Context, item *entity.Logist
 			var financing orderEntity.OrderFinancingRequest
 			if err := h.db.WithContext(c.Request.Context()).
 				Where("order_id = ? AND funding_enterprise_id = ? AND status IN ?", item.OrderID, enterpriseID, []string{
+					string(orderEntity.FinancingRequestStatusDisbursed),
 					string(orderEntity.FinancingRequestStatusPledged),
 					string(orderEntity.FinancingRequestStatusReleased),
 				}).

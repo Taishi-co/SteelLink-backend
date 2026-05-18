@@ -243,12 +243,12 @@ func (p *PaymentInfo) Scan(value interface{}) error {
 
 // ContractInfo 合同信息
 type ContractInfo struct {
-	ContractNo   string    `json:"contract_no"`   // 合同编号
-	ContractURL  string    `json:"contract_url"`  // 合同文件URL
-	ContractHash string    `json:"contract_hash"` // 合同哈希值
-	SignedAt     time.Time `json:"signed_at"`     // 签署时间
-	BuyerSigned  bool      `json:"buyer_signed"`  // 买方已签
-	SellerSigned bool      `json:"seller_signed"` // 卖方已签
+	ContractNo   string     `json:"contract_no"`         // 合同编号
+	ContractURL  string     `json:"contract_url"`        // 合同文件URL
+	ContractHash string     `json:"contract_hash"`       // 合同哈希值
+	SignedAt     *time.Time `json:"signed_at,omitempty"` // 签署时间
+	BuyerSigned  bool       `json:"buyer_signed"`        // 买方已签
+	SellerSigned bool       `json:"seller_signed"`       // 卖方已签
 }
 
 // Value 实现driver.Valuer接口
@@ -624,6 +624,7 @@ type PledgeReleaseEvent struct {
 	OrderID            uint64    `gorm:"index;not null;comment:订单ID" json:"order_id"`
 	OrderNo            string    `gorm:"type:varchar(32);index;comment:订单编号" json:"order_no"`
 	EventType          string    `gorm:"type:varchar(64);index;comment:事件类型" json:"event_type"`
+	ReleaseAmount      float64   `gorm:"type:decimal(14,2);comment:本次释放金额" json:"release_amount"`
 	Condition          string    `gorm:"type:varchar(1000);comment:释放条件" json:"condition"`
 	Reason             string    `gorm:"type:varchar(1000);comment:释放原因" json:"reason"`
 	VoucherURL         string    `gorm:"type:varchar(500);comment:凭证" json:"voucher_url"`
@@ -801,17 +802,17 @@ var OrderStatusFlow = map[OrderStatus]int{
 	OrderStatusPendingLogisticsContract: 14,
 	OrderStatusPendingDelivery:          15,
 	OrderStatusDelivering:               16,
-	OrderStatusShipping:                17,
-	OrderStatusDelivered:               18,
-	OrderStatusReceived:                19,
-	OrderStatusCompleted:               20,
-	OrderStatusReconciled:              21,
-	OrderStatusArchived:                22,
+	OrderStatusShipping:                 17,
+	OrderStatusDelivered:                18,
+	OrderStatusReceived:                 19,
+	OrderStatusCompleted:                20,
+	OrderStatusReconciled:               21,
+	OrderStatusArchived:                 22,
 	OrderStatusPendingWarehouseSelect:   23,
 	OrderStatusPendingWarehouseReselect: 24,
-	OrderStatusFrozen:                  25,
-	OrderStatusException:               26,
-	OrderStatusCancelled:               27,
+	OrderStatusFrozen:                   25,
+	OrderStatusException:                26,
+	OrderStatusCancelled:                27,
 }
 
 func OrderStatusReached(current, target OrderStatus) bool {

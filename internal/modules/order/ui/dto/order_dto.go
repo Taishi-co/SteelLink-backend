@@ -156,8 +156,9 @@ type PledgeRecordRequest struct {
 }
 
 type PledgeReleaseRequest struct {
-	Reason     string `json:"reason" binding:"required"`
-	VoucherURL string `json:"voucher_url"`
+	Reason        string  `json:"reason" binding:"required"`
+	VoucherURL    string  `json:"voucher_url"`
+	ReleaseAmount float64 `json:"release_amount"`
 }
 
 type CreateLogisticsBiddingRequest struct {
@@ -478,6 +479,7 @@ type PledgeEventInfo struct {
 	OrderID            uint64    `json:"order_id"`
 	OrderNo            string    `json:"order_no"`
 	EventType          string    `json:"event_type"`
+	ReleaseAmount      float64   `json:"release_amount"`
 	Condition          string    `json:"condition"`
 	Reason             string    `json:"reason"`
 	VoucherURL         string    `json:"voucher_url"`
