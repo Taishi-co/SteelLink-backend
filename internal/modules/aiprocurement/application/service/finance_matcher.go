@@ -20,22 +20,25 @@ func (s *ProcurementService) matchFinancePlans(ctx context.Context, parsed entit
 	if !parsed.FinancingRequired {
 		return entity.FinancePlans{}
 	}
+	deliveryWarehouseID := parsed.DeliveryWarehouseID
 	cfg := config.GetAIProcurement().VectorSearch
 	logAIProcurementInfo("AI procurement finance matching started",
 		zap.Float64("amount", amount),
 		zap.String("usage", parsed.Usage),
+		zap.Uint64("delivery_warehouse_id", deliveryWarehouseID),
 		zap.Bool("vector_enabled", cfg.Enabled),
 		zap.String("vector_provider", cfg.Provider),
 		zap.String("finance_product_collection", cfg.FinanceProductCollection),
 		zap.Uint64("selected_finance_service_id", selectedFinanceServiceID),
 	)
 	services := s.matchFinanceByVector(ctx, parsed, amount, cfg)
+	services = filterFinanceServicesByWarehouse(ctx, services, deliveryWarehouseID)
 	if len(services) == 0 {
 		services = s.matchFinanceByRule(ctx, parsed, amount)
 	}
 	plans := financePlansFromServices(services, parsed, amount, selectedFinanceServiceID)
 	if selectedFinanceServiceID > 0 {
-		plans = ensureSelectedFinancePlan(ctx, plans, selectedFinanceServiceID, parsed, amount)
+		plans = ensureSelectedFinancePlan(ctx, plans, selectedFinanceServiceID, parsed, amount, deliveryWarehouseID)
 	}
 	sort.SliceStable(plans, func(i, j int) bool {
 		if plans[i].Selected != plans[j].Selected {
@@ -93,8 +96,13 @@ func (s *ProcurementService) matchFinanceByRule(ctx context.Context, parsed enti
 	}
 	var services []*serviceOfferEntity.FinanceService
 	query := db.WithContext(ctx).
-		Where("status = ?", serviceOfferEntity.OfferStatusApproved).
+		Model(&serviceOfferEntity.FinanceService{}).
+		Where("finance_services.status = ?", serviceOfferEntity.OfferStatusApproved).
 		Where("(min_amount = 0 OR min_amount <= ?) AND (max_amount = 0 OR max_amount >= ?)", amount, amount)
+	if parsed.DeliveryWarehouseID > 0 {
+		query = query.Joins("JOIN finance_authorized_warehouses faw ON faw.finance_service_id = finance_services.id AND faw.finance_enterprise_id = finance_services.enterprise_id AND faw.status = ?", "active").
+			Where("faw.warehouse_service_id = ?", parsed.DeliveryWarehouseID)
+	}
 	if err := query.Order("annual_rate ASC, term_days DESC, id ASC").Limit(10).Find(&services).Error; err != nil {
 		logAIProcurementWarn("AI procurement finance rule query failed", zap.Error(err))
 		return nil
@@ -144,7 +152,7 @@ func financePlansFromServices(services []*serviceOfferEntity.FinanceService, par
 	return plans
 }
 
-func ensureSelectedFinancePlan(ctx context.Context, plans entity.FinancePlans, selectedFinanceServiceID uint64, parsed entity.ParsedInstruction, amount float64) entity.FinancePlans {
+func ensureSelectedFinancePlan(ctx context.Context, plans entity.FinancePlans, selectedFinanceServiceID uint64, parsed entity.ParsedInstruction, amount float64, deliveryWarehouseID uint64) entity.FinancePlans {
 	for idx := range plans {
 		if plans[idx].FinanceServiceID == selectedFinanceServiceID {
 			plans[idx].Selected = true
@@ -153,11 +161,53 @@ func ensureSelectedFinancePlan(ctx context.Context, plans entity.FinancePlans, s
 		}
 	}
 	services := loadApprovedFinanceServicesByIDs(ctx, []uint64{selectedFinanceServiceID})
+	services = filterFinanceServicesByWarehouse(ctx, services, deliveryWarehouseID)
 	if len(services) == 0 {
 		return plans
 	}
 	selected := financePlansFromServices(services, parsed, amount, selectedFinanceServiceID)
 	return append(selected, plans...)
+}
+
+func filterFinanceServicesByWarehouse(ctx context.Context, services []*serviceOfferEntity.FinanceService, warehouseServiceID uint64) []*serviceOfferEntity.FinanceService {
+	if warehouseServiceID == 0 || len(services) == 0 {
+		return services
+	}
+	ids := make([]uint64, 0, len(services))
+	for _, service := range services {
+		if service != nil && service.ID > 0 {
+			ids = append(ids, service.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	db := database.GetDB()
+	if db == nil {
+		return nil
+	}
+	var authorizedIDs []uint64
+	if err := db.WithContext(ctx).
+		Model(&serviceOfferEntity.FinanceAuthorizedWarehouse{}).
+		Where("finance_service_id IN ? AND warehouse_service_id = ? AND status = ?", ids, warehouseServiceID, "active").
+		Pluck("finance_service_id", &authorizedIDs).Error; err != nil {
+		logAIProcurementWarn("AI procurement finance warehouse authorization lookup failed", zap.Error(err))
+		return nil
+	}
+	authorized := make(map[uint64]struct{}, len(authorizedIDs))
+	for _, id := range authorizedIDs {
+		authorized[id] = struct{}{}
+	}
+	filtered := make([]*serviceOfferEntity.FinanceService, 0, len(services))
+	for _, service := range services {
+		if service == nil {
+			continue
+		}
+		if _, ok := authorized[service.ID]; ok {
+			filtered = append(filtered, service)
+		}
+	}
+	return filtered
 }
 
 func loadApprovedFinanceServicesByIDs(ctx context.Context, ids []uint64) []*serviceOfferEntity.FinanceService {

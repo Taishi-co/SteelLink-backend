@@ -446,7 +446,7 @@ func (h *Handler) ListMyFinance(c *gin.Context) {
 	}
 	list := make([]dto.FinanceServiceInfo, 0, len(rows))
 	for _, row := range rows {
-		list = append(list, financeToInfo(&row))
+		list = append(list, h.enrichFinanceInfo(&row))
 	}
 	response.Success(c, list)
 }
