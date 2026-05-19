@@ -494,6 +494,9 @@ func (s *OrderService) ListByEnterprise(ctx context.Context, enterpriseID uint64
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		if err := s.fillFinancingPaymentInfo(ctx, order); err != nil {
+			return nil, err
+		}
 		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
@@ -532,6 +535,9 @@ func (s *OrderService) ListAll(ctx context.Context, keyword string, status *int,
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		if err := s.fillFinancingPaymentInfo(ctx, order); err != nil {
+			return nil, err
+		}
 		result = append(result, toOrderInfo(order, nil))
 	}
 	return &dto.OrderListResponse{List: result, Total: total, Page: page, PageSize: pageSize}, nil
@@ -1072,6 +1078,9 @@ func (s *OrderService) ListByBuyer(ctx context.Context, buyerID uint64) ([]*dto.
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		if err := s.fillFinancingPaymentInfo(ctx, order); err != nil {
+			return nil, err
+		}
 		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
@@ -1087,6 +1096,9 @@ func (s *OrderService) ListBySeller(ctx context.Context, sellerID uint64) ([]*dt
 	}
 	result := make([]*dto.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		if err := s.fillFinancingPaymentInfo(ctx, order); err != nil {
+			return nil, err
+		}
 		result = append(result, toOrderInfo(order, nil))
 	}
 	return result, nil
@@ -1678,16 +1690,7 @@ func (s *OrderService) DisburseFinancing(ctx context.Context, id, fundingEnterpr
 	financing.DisbursementVoucher = strings.TrimSpace(req.DisbursementVoucher)
 	financing.DisbursedAt = &now
 	financing.UpdatedBy = operatorID
-	order.PaymentInfo = &orderEntity.PaymentInfo{
-		PaymentMethod: "financing_disbursement",
-		PaymentTime:   now,
-		TransactionNo: fmt.Sprintf("FIN-%d", financing.ID),
-		PayeeAccount:  order.SellerName,
-		PayerAccount:  fmt.Sprintf("funding_enterprise_%d", fundingEnterpriseID),
-		VoucherURL:    financing.DisbursementVoucher,
-		UploadedBy:    operatorID,
-		UploadedAt:    now,
-	}
+	order.PaymentInfo = buildFinancingPaymentInfo(order, financing)
 	order.Status = orderEntity.OrderStatusPaid
 	order.ExpiresAt = nil // 清除过期时间
 	order.UpdatedBy = operatorID
@@ -1737,6 +1740,12 @@ func (s *OrderService) RecordPledge(ctx context.Context, id, fundingEnterpriseID
 	if financing.Status != orderEntity.FinancingRequestStatusDisbursed {
 		return nil, ecode.ErrBadRequest.WithMessage("当前融资申请状态不可记录货权质押")
 	}
+	if order.Status != orderEntity.OrderStatusDelivered &&
+		order.Status != orderEntity.OrderStatusReceived &&
+		order.Status != orderEntity.OrderStatusReconciled &&
+		order.Status != orderEntity.OrderStatusArchived {
+		return nil, ecode.ErrBadRequest.WithMessage("请等待物流送达监管仓后，由资金方确认收货并完成货权质押")
+	}
 	if !isHTTPURL(req.PledgeVoucherURL) {
 		return nil, ecode.ErrBadRequest.WithMessage("货权质押凭证URL必须是有效的HTTP/HTTPS地址")
 	}
@@ -1748,7 +1757,10 @@ func (s *OrderService) RecordPledge(ctx context.Context, id, fundingEnterpriseID
 	financing.ReleaseCondition = strings.TrimSpace(req.ReleaseCondition)
 	financing.PledgedAt = &now
 	financing.UpdatedBy = operatorID
-	order.Status = orderEntity.OrderStatusPendingDelivery
+	if order.Status == orderEntity.OrderStatusDelivered {
+		order.Status = orderEntity.OrderStatusReceived
+		order.ReceiptAt = &now
+	}
 	order.UpdatedBy = operatorID
 	if err := database.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(financing).Error; err != nil {
@@ -1937,6 +1949,9 @@ func (s *OrderService) ConfirmPayment(ctx context.Context, id, enterpriseID, ope
 	currentStatus := order.Status
 	if currentStatus != orderEntity.OrderStatusPendingPayment && currentStatus != orderEntity.OrderStatusPaid {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收款")
+	}
+	if err := s.fillFinancingPaymentInfo(ctx, order); err != nil {
+		return nil, err
 	}
 	if order.PaymentInfo == nil || order.PaymentInfo.VoucherURL == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("买家尚未上传支付凭证")
@@ -3131,22 +3146,7 @@ func toOrderInfo(order *orderEntity.Order, events []orderEntity.OrderEvent) *dto
 			TaxAmount:   item.TaxAmount,
 		})
 	}
-	var paymentInfo *dto.PaymentInfo
-	if order.PaymentInfo != nil {
-		paymentInfo = &dto.PaymentInfo{
-			PaymentMethod: order.PaymentInfo.PaymentMethod,
-			PaymentTime:   order.PaymentInfo.PaymentTime,
-			TransactionNo: order.PaymentInfo.TransactionNo,
-			PayeeAccount:  order.PaymentInfo.PayeeAccount,
-			PayerAccount:  order.PaymentInfo.PayerAccount,
-			VoucherURL:    order.PaymentInfo.VoucherURL,
-			UploadedBy:    order.PaymentInfo.UploadedBy,
-			UploadedAt:    order.PaymentInfo.UploadedAt,
-			CapturedAt:    order.PaymentInfo.CapturedAt,
-			GPSLatitude:   order.PaymentInfo.GPSLatitude,
-			GPSLongitude:  order.PaymentInfo.GPSLongitude,
-		}
-	}
+	paymentInfo := toPaymentInfoDTO(order.PaymentInfo)
 	var deliveryInfo *dto.DeliveryInfo
 	if order.DeliveryInfo != nil {
 		deliveryInfo = &dto.DeliveryInfo{
@@ -3236,6 +3236,9 @@ func (s *OrderService) toOrderDetailInfo(ctx context.Context, order *orderEntity
 	}
 	if err := financingQuery.Order("id desc").First(&financing).Error; err == nil {
 		info.FinancingInfo = toFinancingRequestInfo(&financing)
+		if info.PaymentInfo == nil || strings.TrimSpace(info.PaymentInfo.VoucherURL) == "" {
+			info.PaymentInfo = toPaymentInfoDTO(buildFinancingPaymentInfo(order, &financing))
+		}
 
 		var pledgeEvents []orderEntity.PledgeReleaseEvent
 		if err := db.Where("order_id = ?", order.ID).Order("id asc").Find(&pledgeEvents).Error; err == nil {
@@ -3309,6 +3312,22 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 	for _, event := range events {
 		eventTimeMap[event.EventType] = event.CreatedAt
 	}
+	hasEvent := func(eventType string) bool {
+		for _, e := range events {
+			if e.EventType == eventType {
+				return true
+			}
+		}
+		return false
+	}
+	hasAnyEvent := func(eventTypes ...string) bool {
+		for _, eventType := range eventTypes {
+			if hasEvent(eventType) {
+				return true
+			}
+		}
+		return false
+	}
 
 	skippedOrPending := func(reached bool) string {
 		if isCancelled || isException {
@@ -3323,6 +3342,14 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 	getEventTime := func(eventType string) *time.Time {
 		if t, ok := eventTimeMap[eventType]; ok {
 			return &t
+		}
+		return nil
+	}
+	getAnyEventTime := func(eventTypes ...string) *time.Time {
+		for _, eventType := range eventTypes {
+			if t := getEventTime(eventType); t != nil {
+				return t
+			}
 		}
 		return nil
 	}
@@ -3430,6 +3457,12 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 		addItem("contract_signed", "双方签署合同", "买卖双方已签署合同。", contractReached, "contract_signed")
 	}
 
+	isFinancingOrder := order.FinanceID > 0
+	financeDisbursed := isFinancingOrder && (hasEvent("financing_disbursed") || (order.PaymentInfo != nil &&
+		order.PaymentInfo.PaymentMethod == "financing_disbursement" &&
+		strings.TrimSpace(order.PaymentInfo.VoucherURL) != ""))
+	financePledged := isFinancingOrder && hasAnyEvent("ownership_pledge_recorded", "finance_received")
+
 	paymentReached := orderStatusReached(status, orderEntity.OrderStatusPaid)
 	if status == orderEntity.OrderStatusPendingPayment {
 		items = append(items, dto.TimelineItem{
@@ -3447,13 +3480,18 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 		})
 	} else {
 		paymentDesc := "已完成支付。"
+		paymentEventType := "direct_payment_confirmed"
+		if financeDisbursed {
+			paymentDesc = "资金方付款已完成，付款凭证已同步给卖方。"
+			paymentEventType = "financing_disbursed"
+		}
 		if !paymentReached && !isCancelled && !isException {
 			paymentDesc = "等待买方支付或申请托盘融资。"
 		}
-		addItem("payment", "支付/融资", paymentDesc, paymentReached, "direct_payment_confirmed")
+		addItem("payment", "支付/融资", paymentDesc, paymentReached, paymentEventType)
 	}
 
-	if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract || orderStatusReached(status, orderEntity.OrderStatusPaid) {
+	if status == orderEntity.OrderStatusFinancingReview || status == orderEntity.OrderStatusPendingFinancingContract || isFinancingOrder {
 		financingReached := orderStatusReached(status, orderEntity.OrderStatusPaid)
 		if status == orderEntity.OrderStatusFinancingReview {
 			items = append(items, dto.TimelineItem{
@@ -3475,21 +3513,11 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 				Status:      "current",
 				Description: "请签署债务合同并上传手续费支付凭证。",
 			})
-		} else if financingReached && order.FinanceID > 0 {
-			hasEvent := func(eventType string) bool {
-				for _, e := range events {
-					if e.EventType == eventType {
-						return true
-					}
-				}
-				return false
-			}
-
+		} else if isFinancingOrder {
 			riskApproved := hasEvent("financing_risk_approved")
 			contractGenerated := hasEvent("financing_debt_contract_generated")
 			feePaid := hasEvent("financing_buyer_signed_fee_paid")
-			disbursed := hasEvent("financing_disbursed")
-			pledged := hasEvent("pledge_recorded")
+			disbursed := financeDisbursed
 
 			if riskApproved {
 				items = append(items, dto.TimelineItem{Key: "financing_review", Label: "风控审批通过", Status: "completed", Description: "资金方风控审批已通过。"})
@@ -3505,14 +3533,9 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 				items = append(items, dto.TimelineItem{Key: "financing_fee_paid", Label: "待买方签署并支付手续费", Status: "current", Description: "请买方签署债务合同并上传手续费支付凭证。"})
 			}
 			if disbursed {
-				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "资金方已放款", Status: "completed", Description: "资金方已完成放款。"})
+				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "资金方付款完成", Status: "completed", Time: getEventTime("financing_disbursed"), Description: "资金方已付款，付款凭证已同步给卖方，可进入物流履约。"})
 			} else if feePaid {
 				items = append(items, dto.TimelineItem{Key: "financing_disburse", Label: "待资金方放款", Status: "current", Description: "等待资金方确认放款。"})
-			}
-			if pledged {
-				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "货权质押已记录", Status: "completed", Description: "资金方已记录货权质押，可进入物流履约。"})
-			} else if disbursed {
-				items = append(items, dto.TimelineItem{Key: "financing_pledge", Label: "待记录货权质押", Status: "current", Description: "资金方需记录货权质押后，卖方才能发起物流。"})
 			}
 		} else if financingReached {
 			addItem("financing", "托盘融资", "融资已完成。", financingReached, "financing_disbursed")
@@ -3520,7 +3543,18 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 	}
 
 	logisticsReached := orderStatusReached(status, orderEntity.OrderStatusShipping)
-	if status == orderEntity.OrderStatusLogisticsBidding {
+	if status == orderEntity.OrderStatusPaid {
+		description := "支付已完成，请按合同约定发起物流竞价。"
+		if financeDisbursed {
+			description = "资金方付款已完成，付款凭证已同步给卖方，可由运费承担方发起物流竞价。"
+		}
+		items = append(items, dto.TimelineItem{
+			Key:         "logistics_ready",
+			Label:       "可发起物流竞价",
+			Status:      "current",
+			Description: description,
+		})
+	} else if status == orderEntity.OrderStatusLogisticsBidding {
 		items = append(items, dto.TimelineItem{
 			Key:         "logistics_bidding",
 			Label:       "物流竞价",
@@ -3555,40 +3589,74 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 
 	shippingReached := orderStatusReached(status, orderEntity.OrderStatusDelivered)
 	if status == orderEntity.OrderStatusShipping {
+		description := "物流方已提货，正在运输途中。"
+		if isFinancingOrder {
+			description = "物流方正在运输至资金方认证监管仓。"
+		}
 		items = append(items, dto.TimelineItem{
 			Key:         "shipping",
 			Label:       "运输中",
 			Status:      "current",
-			Description: "物流方已提货，正在运输途中。",
+			Description: description,
 		})
 	} else if status == orderEntity.OrderStatusDelivered {
+		description := "物流方已送达，等待买方签收确认。"
+		if isFinancingOrder {
+			description = "物流方已送达监管仓，等待资金方确认收货并完成货权质押。"
+		}
 		items = append(items, dto.TimelineItem{
 			Key:         "shipping",
 			Label:       "运输中",
 			Status:      "completed",
 			Time:        &order.UpdatedAt,
-			Description: "物流方已送达，等待买方签收确认。",
+			Description: description,
 		})
 	} else {
-		addItem("shipping", "运输交付", "物流方已送达货物。", shippingReached, "logistics_delivered")
+		label := "运输交付"
+		description := "物流方已送达货物。"
+		if isFinancingOrder {
+			label = "运输至监管仓"
+			description = "物流方已送达资金方认证监管仓。"
+		}
+		addItem("shipping", label, description, shippingReached, "logistics_delivered")
 	}
 
 	receiptReached := orderStatusReached(status, orderEntity.OrderStatusReceived)
+	receiptLabel := "买家确认收货"
+	receiptCurrentDesc := "等待买家确认收货并上传签收凭证。"
+	receiptCompletedDesc := "买家已确认收货。"
+	receiptPendingDesc := "等待买家确认收货。"
+	receiptEventType := "buyer_received"
+	if isFinancingOrder {
+		receiptLabel = "资方确认监管收货并质押"
+		receiptCurrentDesc = "等待资金方确认监管仓收货，确认后完成货权质押。"
+		receiptCompletedDesc = "资金方已确认监管仓收货，货权质押已完成。"
+		receiptPendingDesc = "等待物流送达监管仓后，由资金方确认收货并完成质押。"
+		receiptEventType = "finance_received"
+	}
 	if status == orderEntity.OrderStatusDelivered {
 		items = append(items, dto.TimelineItem{
 			Key:         "receipt",
-			Label:       "买家确认收货",
+			Label:       receiptLabel,
 			Status:      "current",
-			Description: "等待买家确认收货并上传签收凭证。",
+			Description: receiptCurrentDesc,
 		})
 	} else {
-		receiptDesc := "买家已确认收货。"
+		receiptDesc := receiptCompletedDesc
 		if !receiptReached && !isCancelled && !isException {
-			receiptDesc = "等待买家确认收货。"
+			receiptDesc = receiptPendingDesc
 		}
-		addItem("receipt", "买家确认收货", receiptDesc, receiptReached, "buyer_received")
+		if isFinancingOrder && financePledged {
+			receiptReached = true
+		}
+		addItem("receipt", receiptLabel, receiptDesc, receiptReached, receiptEventType)
 		if receiptReached {
-			items[len(items)-1].Time = order.ReceiptAt
+			if isFinancingOrder {
+				items[len(items)-1].Time = getAnyEventTime("finance_received", "ownership_pledge_recorded")
+			}
+			if items[len(items)-1].Time == nil {
+				items[len(items)-1].Time = order.ReceiptAt
+			}
 		}
 	}
 
@@ -3641,6 +3709,80 @@ func buildOrderTimeline(order *orderEntity.Order, events []orderEntity.OrderEven
 
 func orderStatusReached(current, target orderEntity.OrderStatus) bool {
 	return orderEntity.OrderStatusReached(current, target)
+}
+
+func toPaymentInfoDTO(payment *orderEntity.PaymentInfo) *dto.PaymentInfo {
+	if payment == nil {
+		return nil
+	}
+	return &dto.PaymentInfo{
+		PaymentMethod: payment.PaymentMethod,
+		PaymentTime:   payment.PaymentTime,
+		TransactionNo: payment.TransactionNo,
+		PayeeAccount:  payment.PayeeAccount,
+		PayerAccount:  payment.PayerAccount,
+		VoucherURL:    payment.VoucherURL,
+		UploadedBy:    payment.UploadedBy,
+		UploadedAt:    payment.UploadedAt,
+		CapturedAt:    payment.CapturedAt,
+		GPSLatitude:   payment.GPSLatitude,
+		GPSLongitude:  payment.GPSLongitude,
+	}
+}
+
+func buildFinancingPaymentInfo(order *orderEntity.Order, financing *orderEntity.OrderFinancingRequest) *orderEntity.PaymentInfo {
+	if order == nil || financing == nil {
+		return nil
+	}
+	voucherURL := strings.TrimSpace(financing.DisbursementVoucher)
+	if voucherURL == "" {
+		return nil
+	}
+	paymentTime := financing.UpdatedAt
+	if financing.DisbursedAt != nil {
+		paymentTime = *financing.DisbursedAt
+	}
+	if paymentTime.IsZero() {
+		paymentTime = order.UpdatedAt
+	}
+	uploadedBy := financing.UpdatedBy
+	if uploadedBy == 0 {
+		uploadedBy = financing.CreatedBy
+	}
+	return &orderEntity.PaymentInfo{
+		PaymentMethod: "financing_disbursement",
+		PaymentTime:   paymentTime,
+		TransactionNo: fmt.Sprintf("FIN-%d", financing.ID),
+		PayeeAccount:  order.SellerName,
+		PayerAccount:  fmt.Sprintf("funding_enterprise_%d", financing.FundingEnterpriseID),
+		VoucherURL:    voucherURL,
+		UploadedBy:    uploadedBy,
+		UploadedAt:    paymentTime,
+	}
+}
+
+func (s *OrderService) fillFinancingPaymentInfo(ctx context.Context, order *orderEntity.Order) error {
+	if order == nil || (order.PaymentInfo != nil && strings.TrimSpace(order.PaymentInfo.VoucherURL) != "") {
+		return nil
+	}
+	query := database.GetDB().WithContext(ctx).
+		Where("order_id = ? AND status IN ?", order.ID, []string{
+			string(orderEntity.FinancingRequestStatusDisbursed),
+			string(orderEntity.FinancingRequestStatusPledged),
+			string(orderEntity.FinancingRequestStatusReleased),
+		})
+	if order.FinanceID > 0 {
+		query = query.Where("id = ?", order.FinanceID)
+	}
+	var financing orderEntity.OrderFinancingRequest
+	if err := query.Order("id desc").First(&financing).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return ecode.ErrDatabase.WithMessage("查询融资付款凭证失败")
+	}
+	order.PaymentInfo = buildFinancingPaymentInfo(order, &financing)
+	return nil
 }
 
 func (s *OrderService) reconcileOrderState(ctx context.Context, order *orderEntity.Order) error {
