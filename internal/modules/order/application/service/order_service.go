@@ -2102,11 +2102,11 @@ func (s *OrderService) ConfirmReceipt(ctx context.Context, id, enterpriseID, ope
 	if err := checkOrderFrozenOrException(order); err != nil {
 		return nil, err
 	}
+	if order.FinanceID > 0 {
+		return nil, ecode.ErrForbidden.WithMessage("托盘垫资订单需由资金方确认监管收货并上传凭证")
+	}
 	if order.BuyerID != enterpriseID {
-		isFunding, _ := s.isFundingParticipant(ctx, order.ID, enterpriseID)
-		if order.FinanceID == 0 || !isFunding {
-			return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
-		}
+		return nil, ecode.ErrForbidden.WithMessage("无权确认收货")
 	}
 	if order.Status != orderEntity.OrderStatusDelivering && order.Status != orderEntity.OrderStatusShipping && order.Status != orderEntity.OrderStatusDelivered {
 		return nil, ecode.ErrBadRequest.WithMessage("当前订单状态不可确认收货")

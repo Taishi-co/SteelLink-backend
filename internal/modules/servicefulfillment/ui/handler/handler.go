@@ -629,6 +629,20 @@ func (h *Handler) UpdateLogisticsOrderStatus(c *gin.Context) {
 			if err := tx.Where("id = ?", item.OrderID).First(&order).Error; err == nil {
 				if order.Status != orderEntity.OrderStatusReceived && order.Status != orderEntity.OrderStatusReconciled && order.Status != orderEntity.OrderStatusArchived && order.Status != orderEntity.OrderStatusCompleted {
 					fromStatus := order.Status
+					var receiptDoc entity.FulfillmentDocument
+					if err := tx.Where("logistics_order_id = ? AND doc_type = ?", item.ID, entity.DocTypeReceiptOrder).
+						Order("created_at DESC, id DESC").
+						First(&receiptDoc).Error; err == nil {
+						order.ReceiptVoucher = strings.TrimSpace(receiptDoc.FileURL)
+						order.ReceiptInfo = &orderEntity.VoucherEvidence{
+							VoucherURL:   strings.TrimSpace(receiptDoc.FileURL),
+							UploadedBy:   receiptDoc.UploadedBy,
+							UploadedAt:   receiptDoc.CreatedAt,
+							CapturedAt:   receiptDoc.CapturedAt,
+							GPSLatitude:  receiptDoc.GPSLatitude,
+							GPSLongitude: receiptDoc.GPSLongitude,
+						}
+					}
 					order.Status = orderEntity.OrderStatusReceived
 					order.ReceiptAt = &now
 					order.UpdatedBy = claims.UserID
@@ -825,6 +839,29 @@ func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.Lo
 		}
 		return nil
 	}
+	if targetStatus == entity.LogisticsOrderReceiptSigned {
+		requiredRole := "buyer"
+		if item != nil && item.OrderID > 0 {
+			var order orderEntity.Order
+			if err := h.db.WithContext(c.Request.Context()).First(&order, item.OrderID).Error; err == nil && order.FinanceID > 0 {
+				requiredRole = "finance"
+			}
+		}
+		var count int64
+		if err := h.db.WithContext(c.Request.Context()).
+			Model(&entity.FulfillmentDocument{}).
+			Where("logistics_order_id = ? AND doc_type = ? AND uploaded_role = ?", item.ID, entity.DocTypeReceiptOrder, requiredRole).
+			Count(&count).Error; err != nil {
+			return ecode.ErrDatabase.WithMessage("查询收货确认凭证失败")
+		}
+		if count == 0 {
+			if requiredRole == "finance" {
+				return ecode.ErrBadRequest.WithMessage("当前节点缺少资金方收货确认凭证：receipt_order")
+			}
+			return ecode.ErrBadRequest.WithMessage("当前节点缺少买方收货确认凭证：receipt_order")
+		}
+		return nil
+	}
 	requiredGroups := requiredLogisticsDocTypeGroups(targetStatus)
 	required := flattenDocTypeGroups(requiredGroups)
 	if len(required) == 0 || item == nil || item.ID == 0 {
@@ -839,6 +876,9 @@ func (h *Handler) ensureLogisticsStatusDocuments(c *gin.Context, item *entity.Lo
 	}
 	existing := make(map[string]struct{}, len(docs))
 	for _, doc := range docs {
+		if targetStatus == entity.LogisticsOrderLoadingConfirmed && doc.DocType == entity.DocTypeSealPhoto && doc.UploadedRole != "logistics" {
+			continue
+		}
 		existing[string(doc.DocType)] = struct{}{}
 	}
 	missing := make([]string, 0, len(requiredGroups))
@@ -867,7 +907,10 @@ func requiredLogisticsDocTypeGroups(status entity.LogisticsOrderStatus) [][]stri
 		groups = append(groups, []string{docType})
 	}
 	if status == entity.LogisticsOrderLoadingConfirmed {
-		return [][]string{{string(entity.DocTypeLoadingVoucher), string(entity.DocTypePickupOrder)}}
+		return [][]string{
+			{string(entity.DocTypeLoadingVoucher), string(entity.DocTypePickupOrder)},
+			{string(entity.DocTypeSealPhoto)},
+		}
 	}
 	return groups
 }
@@ -894,13 +937,13 @@ func requiredLogisticsDocTypes(status entity.LogisticsOrderStatus) []string {
 	case entity.LogisticsOrderOutboundConfirmed:
 		return []string{string(entity.DocTypeOutboundOrder), string(entity.DocTypeSealPhoto)}
 	case entity.LogisticsOrderLoadingConfirmed:
-		return []string{string(entity.DocTypeLoadingVoucher)}
+		return []string{string(entity.DocTypeLoadingVoucher), string(entity.DocTypeSealPhoto)}
 	case entity.LogisticsOrderInTransit:
 		return []string{string(entity.DocTypeGPSTrack)}
 	case entity.LogisticsOrderArrivalConfirmed:
 		return []string{string(entity.DocTypeDeliveryPhoto)}
 	case entity.LogisticsOrderReceiptSigned:
-		return nil
+		return []string{string(entity.DocTypeReceiptOrder)}
 	case entity.LogisticsOrderInboundCompleted:
 		return []string{string(entity.DocTypeSealPhoto), string(entity.DocTypeInboundOrder), string(entity.DocTypeReceiptOrder)}
 	default:
@@ -1079,23 +1122,12 @@ func logisticsOrderToInfo(item *entity.LogisticsOrder, events []entity.Logistics
 		eventInfos = append(eventInfos, trackingEventToInfo(&event))
 	}
 	requirements := make([]dto.LogisticsStatusRequirementInfo, 0, len(logisticsStatusRequirementDefinitions()))
-	satisfiedDocs := map[string]struct{}{}
+	var docs []entity.FulfillmentDocument
 	if item != nil && item.ID > 0 {
-		var docs []entity.FulfillmentDocument
 		database.GetDB().Where("logistics_order_id = ?", item.ID).Find(&docs)
-		for _, doc := range docs {
-			satisfiedDocs[string(doc.DocType)] = struct{}{}
-		}
 	}
 	for _, requirement := range logisticsStatusRequirementDefinitions() {
-		satisfied := true
-		for _, docType := range requirement.RequiredDoc {
-			if _, ok := satisfiedDocs[docType]; !ok {
-				satisfied = false
-				break
-			}
-		}
-		requirement.Satisfied = satisfied
+		requirement.Satisfied = logisticsRequirementSatisfied(item, requirement.Status, docs)
 		requirements = append(requirements, requirement)
 	}
 	return dto.LogisticsOrderInfo{
@@ -1119,13 +1151,57 @@ func logisticsStatusRequirementDefinitions() []dto.LogisticsStatusRequirementInf
 	return []dto.LogisticsStatusRequirementInfo{
 		{Status: string(entity.LogisticsOrderPickupScheduled), Label: "提货预约", Actor: "logistics", Description: "物流方查看卖方提货指令后预约提货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderPickupScheduled)},
 		{Status: string(entity.LogisticsOrderArrivalSignedIn), Label: "到场签到", Actor: "warehouse", Description: "仓储方确认车辆到场"},
-		{Status: string(entity.LogisticsOrderOutboundConfirmed), Label: "出库确认", Actor: "warehouse", Description: "仓储方上传出库单和封条照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderOutboundConfirmed)},
-		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传装车凭证并确认装货", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
+		{Status: string(entity.LogisticsOrderOutboundConfirmed), Label: "出库确认", Actor: "warehouse", Description: "仓储方上传出库单和封条/商品照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderOutboundConfirmed)},
+		{Status: string(entity.LogisticsOrderLoadingConfirmed), Label: "装货确认", Actor: "logistics", Description: "物流方上传装车凭证和封条/商品照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderLoadingConfirmed)},
 		{Status: string(entity.LogisticsOrderInTransit), Label: "运输中", Actor: "logistics", Description: "物流方上传 GPS 或在途轨迹", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInTransit)},
 		{Status: string(entity.LogisticsOrderArrivalConfirmed), Label: "到货确认", Actor: "logistics", Description: "物流方上传到货照片", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderArrivalConfirmed)},
 		{Status: string(entity.LogisticsOrderInboundCompleted), Label: "收货仓验货入库", Actor: "warehouse", Description: "收货仓上传封条照片、入库单和收货单", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderInboundCompleted)},
-		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "确认收货", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认"},
+		{Status: string(entity.LogisticsOrderReceiptSigned), Label: "确认收货", Actor: "buyer_or_finance", Description: "普通订单买方确认，融资订单资金方确认", RequiredDoc: requiredLogisticsDocTypes(entity.LogisticsOrderReceiptSigned)},
 		{Status: string(entity.LogisticsOrderCompleted), Label: "履约完成", Actor: "logistics", Description: "买方/资金方确认收货后，物流方归档物流履约"},
+	}
+}
+
+func logisticsRequirementSatisfied(item *entity.LogisticsOrder, status string, docs []entity.FulfillmentDocument) bool {
+	if item == nil || item.ID == 0 {
+		return true
+	}
+	hasDoc := func(docType entity.FulfillmentDocType, role string) bool {
+		for _, doc := range docs {
+			if doc.DocType != docType {
+				continue
+			}
+			if role != "" && doc.UploadedRole != role {
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	switch entity.LogisticsOrderStatus(status) {
+	case entity.LogisticsOrderPickupScheduled:
+		return hasDoc(entity.DocTypePickupInstruction, "seller")
+	case entity.LogisticsOrderOutboundConfirmed:
+		return hasDoc(entity.DocTypeOutboundOrder, "warehouse") && hasDoc(entity.DocTypeSealPhoto, "warehouse")
+	case entity.LogisticsOrderLoadingConfirmed:
+		return (hasDoc(entity.DocTypeLoadingVoucher, "logistics") || hasDoc(entity.DocTypePickupOrder, "logistics")) &&
+			hasDoc(entity.DocTypeSealPhoto, "logistics")
+	case entity.LogisticsOrderReceiptSigned:
+		return hasDoc(entity.DocTypeReceiptOrder, "buyer") || hasDoc(entity.DocTypeReceiptOrder, "finance")
+	default:
+		requiredGroups := requiredLogisticsDocTypeGroups(entity.LogisticsOrderStatus(status))
+		for _, group := range requiredGroups {
+			satisfied := false
+			for _, docType := range group {
+				if hasDoc(entity.FulfillmentDocType(docType), "") {
+					satisfied = true
+					break
+				}
+			}
+			if !satisfied {
+				return false
+			}
+		}
+		return true
 	}
 }
 
