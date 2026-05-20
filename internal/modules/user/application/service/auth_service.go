@@ -472,17 +472,25 @@ func authSnapshotCacheKey(userID uint64) string {
 }
 
 func canAccessPortal(target string, enterpriseRole string, serviceCapabilities []string) bool {
-	requiredService := "procurement"
-	requiredRole := "buyer"
-	if target == "seller" {
-		requiredService = "sales"
-		requiredRole = "seller"
+	targetAccess := map[string]struct {
+		service string
+		role    string
+	}{
+		"buyer":     {service: string(entity.ServiceProcurement), role: "buyer"},
+		"seller":    {service: string(entity.ServiceSales), role: "seller"},
+		"logistics": {service: string(entity.ServiceLogistics), role: "logistics"},
+		"warehouse": {service: string(entity.ServiceWarehouse), role: "warehouse"},
+		"finance":   {service: string(entity.ServiceFinance), role: "fund"},
 	}
-	if enterpriseRole == requiredRole {
+	required, ok := targetAccess[target]
+	if !ok {
+		return false
+	}
+	if enterpriseRole == required.role {
 		return true
 	}
 	for _, capability := range serviceCapabilities {
-		if capability == requiredService {
+		if capability == required.service {
 			return true
 		}
 	}
