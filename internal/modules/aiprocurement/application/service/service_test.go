@@ -157,6 +157,26 @@ func TestCreateLogisticsOrdersForAIOrdersSkipsWhenDBUnavailable(t *testing.T) {
 	}
 }
 
+func TestOrderFormWithParsedWarehouseUsesParsedDeliveryWarehouse(t *testing.T) {
+	form := orderFormWithParsedWarehouse(dto.OrderForm{}, entity.ParsedInstruction{
+		DeliveryWarehouseID: 8801,
+	})
+
+	if form.DestWarehouseServiceID != 8801 {
+		t.Fatalf("expected parsed delivery warehouse to become order destination warehouse, got %d", form.DestWarehouseServiceID)
+	}
+}
+
+func TestOrderFormWithParsedWarehouseKeepsExplicitDestinationWarehouse(t *testing.T) {
+	form := orderFormWithParsedWarehouse(dto.OrderForm{DestWarehouseServiceID: 9901}, entity.ParsedInstruction{
+		DeliveryWarehouseID: 8801,
+	})
+
+	if form.DestWarehouseServiceID != 9901 {
+		t.Fatalf("expected explicit destination warehouse to win, got %d", form.DestWarehouseServiceID)
+	}
+}
+
 func TestToProcurementInfoNormalizesEmptyCollections(t *testing.T) {
 	info := toProcurementInfo(&entity.AIProcurement{
 		ID:           1,

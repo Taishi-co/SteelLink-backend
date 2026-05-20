@@ -37,15 +37,16 @@ type GenerateOrderRequest struct {
 }
 
 type OrderForm struct {
-	Quantity        float64 `json:"quantity"`
-	ContactName     string  `json:"contact_name" binding:"required"`
-	ContactPhone    string  `json:"contact_phone" binding:"required"`
-	WarehouseName   string  `json:"warehouse_name" binding:"required"`
-	DeliveryAddress string  `json:"delivery_address" binding:"required"`
-	DeliveryMethod  string  `json:"delivery_method" binding:"required"`
-	PaymentMethod   string  `json:"payment_method" binding:"required"`
-	DeliveryNote    string  `json:"delivery_note"`
-	Remark          string  `json:"remark"`
+	Quantity               float64 `json:"quantity"`
+	ContactName            string  `json:"contact_name" binding:"required"`
+	ContactPhone           string  `json:"contact_phone" binding:"required"`
+	WarehouseName          string  `json:"warehouse_name" binding:"required"`
+	DestWarehouseServiceID uint64  `json:"dest_warehouse_service_id"`
+	DeliveryAddress        string  `json:"delivery_address" binding:"required"`
+	DeliveryMethod         string  `json:"delivery_method" binding:"required"`
+	PaymentMethod          string  `json:"payment_method" binding:"required"`
+	DeliveryNote           string  `json:"delivery_note"`
+	Remark                 string  `json:"remark"`
 }
 
 type MatchFinanceRequest struct {

@@ -193,16 +193,17 @@ func (s *ProcurementService) GenerateOrder(ctx context.Context, req *dto.Generat
 	if err != nil {
 		return nil, err
 	}
+	orderForm := orderFormWithParsedWarehouse(req.OrderForm, parsed)
 	selectedProducts = s.enrichMatchesWithLogistics(ctx, parsed, selectedProducts)
-	orderPlans, err := s.createOrdersBySeller(ctx, selectedProducts, req.OrderForm, userID, enterpriseID)
+	orderPlans, err := s.createOrdersBySeller(ctx, selectedProducts, orderForm, userID, enterpriseID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.createLogisticsOrdersForAIOrders(ctx, orderPlans, req.OrderForm, userID, enterpriseID); err != nil {
+	if err := s.createLogisticsOrdersForAIOrders(ctx, orderPlans, orderForm, userID, enterpriseID); err != nil {
 		return nil, err
 	}
 	orderInfos := orderInfosFromPlans(orderPlans)
-	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, req.OrderForm, orderInfos)
+	orderDraft := buildOrderDraftFromForm(parsed, selectedProducts, orderForm, orderInfos)
 	financePlans := entity.FinancePlans{}
 	nextStage := entity.StageReviewSubmission
 	status := entity.ProcurementStatusOrderGenerated
@@ -1131,17 +1132,18 @@ func (s *ProcurementService) createOrdersBySeller(ctx context.Context, selected 
 			})
 		}
 		orderInfo, err := s.orderSvc.Create(ctx, &orderDTO.CreateOrderRequest{
-			Items:               orderItems,
-			Source:              "ai_procurement",
-			RestoreCartOnCancel: true,
-			ContactName:         form.ContactName,
-			ContactPhone:        form.ContactPhone,
-			WarehouseName:       form.WarehouseName,
-			DeliveryAddress:     form.DeliveryAddress,
-			DeliveryMethod:      form.DeliveryMethod,
-			PaymentMethod:       form.PaymentMethod,
-			DeliveryNote:        form.DeliveryNote,
-			Remark:              form.Remark,
+			Items:                  orderItems,
+			Source:                 "ai_procurement",
+			RestoreCartOnCancel:    true,
+			ContactName:            form.ContactName,
+			ContactPhone:           form.ContactPhone,
+			WarehouseName:          form.WarehouseName,
+			DestWarehouseServiceID: form.DestWarehouseServiceID,
+			DeliveryAddress:        form.DeliveryAddress,
+			DeliveryMethod:         form.DeliveryMethod,
+			PaymentMethod:          form.PaymentMethod,
+			DeliveryNote:           form.DeliveryNote,
+			Remark:                 form.Remark,
 		}, userID, enterpriseID)
 		if err != nil {
 			return nil, err
@@ -1159,6 +1161,13 @@ func orderInfosFromPlans(plans []aiOrderPlan) []*orderDTO.OrderInfo {
 		}
 	}
 	return orders
+}
+
+func orderFormWithParsedWarehouse(form dto.OrderForm, parsed entity.ParsedInstruction) dto.OrderForm {
+	if form.DestWarehouseServiceID == 0 && parsed.DeliveryWarehouseID > 0 {
+		form.DestWarehouseServiceID = parsed.DeliveryWarehouseID
+	}
+	return form
 }
 
 func (s *ProcurementService) createLogisticsOrdersForAIOrders(ctx context.Context, plans []aiOrderPlan, form dto.OrderForm, userID, enterpriseID uint64) error {
@@ -1354,6 +1363,12 @@ func buildOrderDraftFromForm(parsed entity.ParsedInstruction, selected entity.Ma
 	orderDetail["selected_products"] = selected
 	orderDetail["product_amount"] = sumProductAmount(selected)
 	orderDetail["freight_estimate"] = sumFreightEstimate(selected)
+	if form.DestWarehouseServiceID > 0 {
+		orderDetail["dest_warehouse_service_id"] = form.DestWarehouseServiceID
+	}
+	if strings.TrimSpace(parsed.DeliveryWarehouseName) != "" {
+		orderDetail["dest_warehouse_name"] = strings.TrimSpace(parsed.DeliveryWarehouseName)
+	}
 	deliveryNote := strings.TrimSpace(form.DeliveryNote)
 	if deliveryNote == "" {
 		deliveryNote = form.DeliveryMethod + "；" + form.DeliveryAddress
