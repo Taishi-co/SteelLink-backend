@@ -15,7 +15,7 @@
 - [x] 已确认配置与环境变量变更: 无变更
 - [x] 已确认数据库影响: `favorites` 迁移前会清理重复 `user_id/product_id` 行
 - [x] 已确认 smoke test 范围: `/health` 与 `/api/v1/health`
-- [ ] GitHub PR 创建后，已执行 `./harness/lark-pr-doc.sh docs/features/SL-BE-FAVORITE-MIGRATION-DUPE --pr-url <github-pr-url> --pr-title "<pr-title>"` 并写入共享飞书 PR 记录
+- [x] GitHub PR 创建后，已执行 `./harness/lark-pr-doc.sh docs/features/SL-BE-FAVORITE-MIGRATION-DUPE --pr-url <github-pr-url> --pr-title "<pr-title>"` 并写入共享飞书 PR 记录
 
 ## 回滚信息
 
