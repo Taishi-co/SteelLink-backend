@@ -202,6 +202,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		initialDeliveryInfo.DestWarehouseDistrict = destWarehouse.District
 		initialDeliveryInfo.DestWarehouseAddress = destWarehouse.Address
 	}
+	initialStatus := initialOrderStatus(req)
 
 	sellerEnterprise, err := s.enterpriseRepo.FindByID(ctx, sellerEnterpriseID)
 	if err != nil {
@@ -251,7 +252,7 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		TotalAmount:        totalAmount,
 		TaxTotalAmount:     taxTotalAmount,
 		Currency:           currency,
-		Status:             orderEntity.OrderStatusPendingDestWarehouse,
+		Status:             initialStatus,
 		DeliveryInfo:       initialDeliveryInfo,
 		Remark: orderEntity.Remark{
 			"source":                 strings.TrimSpace(req.Source),
@@ -287,6 +288,14 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 		}); err != nil {
 			return err
 		}
+		if order.Status == orderEntity.OrderStatusPendingWarehouseConfirm {
+			if err := ensureWarehouseMovementTx(tx, order, fulfillmentEntity.WarehouseMovementOutbound, order.DeliveryInfo.WarehouseServiceID, order.DeliveryInfo.WarehouseEnterpriseID, userID, "", "主仓待确认出库安排"); err != nil {
+				return err
+			}
+			if err := ensureWarehouseMovementTx(tx, order, fulfillmentEntity.WarehouseMovementInbound, order.DeliveryInfo.DestWarehouseServiceID, order.DeliveryInfo.DestWarehouseEnterpriseID, userID, "", "目的仓待确认入库安排"); err != nil {
+				return err
+			}
+		}
 		for _, cartItemID := range cartItemIDs {
 			if err := tx.Exec("DELETE FROM cart_items WHERE id = ? AND user_id = ?", cartItemID, userID).Error; err != nil {
 				return err
@@ -306,6 +315,13 @@ func (s *OrderService) Create(ctx context.Context, req *dto.CreateOrderRequest, 
 type productOrderItem struct {
 	Product  *productEntity.Product
 	Quantity float64
+}
+
+func initialOrderStatus(req *dto.CreateOrderRequest) orderEntity.OrderStatus {
+	if req != nil && req.DestWarehouseServiceID > 0 {
+		return orderEntity.OrderStatusPendingWarehouseConfirm
+	}
+	return orderEntity.OrderStatusPendingDestWarehouse
 }
 
 func createEnterpriseNotification(tx *gorm.DB, ctx context.Context, enterpriseID, senderUserID uint64, notificationType notificationEntity.NotificationType, title, content, linkURL string, metadata notificationEntity.NotificationMetadata) error {
