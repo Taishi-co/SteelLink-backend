@@ -66,6 +66,8 @@ type PostInfo struct {
 	MatchAmount       float64   `json:"match_amount"`
 	Status            int       `json:"status"`
 	EnterpriseID      uint64    `json:"enterprise_id"`
+	PublisherType     string    `json:"publisher_type"`
+	PublisherName     string    `json:"publisher_name"`
 	CreatedBy         uint64    `json:"created_by"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
