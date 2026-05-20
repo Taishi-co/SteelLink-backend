@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/ui/dto"
 	orderDTO "github.com/Taishi-co/SteelLink-backend/internal/modules/order/ui/dto"
 	serviceOfferEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
+	"github.com/Taishi-co/SteelLink-backend/internal/pkg/database"
 )
 
 func TestAIOrderGroupKeySplitsSameSellerByWarehouse(t *testing.T) {
@@ -121,6 +123,67 @@ func TestBuildAILogisticsOrderSkipsNegotiation(t *testing.T) {
 
 	if _, ok := buildAILogisticsOrder(plan, dto.OrderForm{}, 7, 8, 0); ok {
 		t.Fatal("expected negotiated logistics to skip concrete carrier logistics order")
+	}
+}
+
+func TestCreateLogisticsOrdersForAIOrdersSkipsWhenDBUnavailable(t *testing.T) {
+	originalDB := database.DB
+	database.DB = nil
+	t.Cleanup(func() {
+		database.DB = originalDB
+	})
+
+	err := (&ProcurementService{}).createLogisticsOrdersForAIOrders(
+		context.Background(),
+		[]aiOrderPlan{
+			{
+				OrderInfo: &orderDTO.OrderInfo{ID: 99, OrderNo: "O202605092229592501"},
+				Products: entity.MatchedProducts{
+					{
+						ProductID:          1,
+						ProductName:        "热轧板卷",
+						Quantity:           1,
+						LogisticsServiceID: 9401,
+					},
+				},
+			},
+		},
+		dto.OrderForm{},
+		7,
+		8,
+	)
+	if err != nil {
+		t.Fatalf("expected nil error when db is unavailable, got %v", err)
+	}
+}
+
+func TestToProcurementInfoNormalizesEmptyCollections(t *testing.T) {
+	info := toProcurementInfo(&entity.AIProcurement{
+		ID:           1,
+		CurrentStage: entity.StageReviewSubmission,
+		Status:       entity.ProcurementStatusOrderGenerated,
+	})
+
+	if info == nil {
+		t.Fatal("expected procurement info")
+	}
+	if info.ParsedInstruction.Keywords == nil {
+		t.Fatal("expected parsed keywords to be an empty list")
+	}
+	if info.MatchedProducts == nil {
+		t.Fatal("expected matched products to be an empty list")
+	}
+	if info.OrderDraft.Orders == nil {
+		t.Fatal("expected order summaries to be an empty list")
+	}
+	if info.FinancePlans == nil {
+		t.Fatal("expected finance plans to be an empty list")
+	}
+	if info.AuditItems == nil {
+		t.Fatal("expected audit items to be an empty list")
+	}
+	if len(info.Stages) == 0 {
+		t.Fatal("expected stages to be built")
 	}
 }
 
