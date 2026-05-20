@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/realtime"
@@ -32,7 +33,7 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) Subscribe(c *gin.Context) {
-	token := c.Query("token")
+	token := accessTokenFromRequest(c)
 	if token == "" {
 		response.Unauthorized(c, "缺少访问令牌")
 		return
@@ -80,6 +81,21 @@ func (h *Handler) Subscribe(c *gin.Context) {
 			return
 		}
 	}
+}
+
+func accessTokenFromRequest(c *gin.Context) string {
+	if token := strings.TrimSpace(c.Query("token")); token != "" {
+		return token
+	}
+	if authHeader := strings.TrimSpace(c.GetHeader("Authorization")); strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	}
+	for _, name := range []string{"buyer_token", "seller_token", "finance_token", "warehouse_token", "logistics_token"} {
+		if token, err := c.Cookie(name); err == nil && strings.TrimSpace(token) != "" {
+			return strings.TrimSpace(token)
+		}
+	}
+	return ""
 }
 
 func (h *Handler) List(c *gin.Context) {

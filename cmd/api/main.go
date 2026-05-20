@@ -17,6 +17,8 @@ import (
 	aiProcurementRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/aiprocurement/infrastructure/router"
 	cartPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/persistence"
 	cartRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/router"
+	favoritePersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/favorite/infrastructure/persistence"
+	favoriteRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/favorite/infrastructure/router"
 	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
 	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
 	notificationPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/infrastructure/persistence"
@@ -123,6 +125,9 @@ func main() {
 		if err := cartPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate cart tables", zap.Error(err))
 		}
+		if err := favoritePersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate favorite tables", zap.Error(err))
+		}
 		if err := marketpersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to auto migrate market tables", zap.Error(err))
 		}
@@ -209,6 +214,9 @@ func main() {
 	logger.Info("Registering cart routes...")
 	cartRouter.RegisterRoutes(v1)
 	logger.Info("Cart routes registered")
+	logger.Info("Registering favorite routes...")
+	favoriteRouter.RegisterRoutes(v1)
+	logger.Info("Favorite routes registered")
 	logger.Info("Registering market routes...")
 	marketRouter.RegisterRoutes(v1)
 	logger.Info("Market routes registered")
