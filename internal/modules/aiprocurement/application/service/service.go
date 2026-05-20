@@ -1163,6 +1163,9 @@ func orderInfosFromPlans(plans []aiOrderPlan) []*orderDTO.OrderInfo {
 
 func (s *ProcurementService) createLogisticsOrdersForAIOrders(ctx context.Context, plans []aiOrderPlan, form dto.OrderForm, userID, enterpriseID uint64) error {
 	db := database.GetDB()
+	if db == nil {
+		return nil
+	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for idx, plan := range plans {
 			if plan.OrderInfo == nil || len(plan.Products) == 0 {
@@ -1563,6 +1566,26 @@ func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
 	if item == nil {
 		return nil
 	}
+	parsed := item.ParsedInstruction
+	if parsed.Keywords == nil {
+		parsed.Keywords = []string{}
+	}
+	matchedProducts := item.MatchedProducts
+	if matchedProducts == nil {
+		matchedProducts = entity.MatchedProducts{}
+	}
+	orderDraft := item.OrderDraft
+	if orderDraft.Orders == nil {
+		orderDraft.Orders = entity.OrderSummaries{}
+	}
+	financePlans := item.FinancePlans
+	if financePlans == nil {
+		financePlans = entity.FinancePlans{}
+	}
+	auditItems := item.AuditItems
+	if auditItems == nil {
+		auditItems = entity.AuditItems{}
+	}
 	return &dto.ProcurementInfo{
 		ID:                item.ID,
 		ProcurementNo:     item.ProcurementNo,
@@ -1575,11 +1598,11 @@ func toProcurementInfo(item *entity.AIProcurement) *dto.ProcurementInfo {
 		FinancingRequired: item.FinancingRequired,
 		CurrentStage:      item.CurrentStage,
 		Status:            item.Status,
-		ParsedInstruction: item.ParsedInstruction,
-		MatchedProducts:   item.MatchedProducts,
-		OrderDraft:        item.OrderDraft,
-		FinancePlans:      item.FinancePlans,
-		AuditItems:        item.AuditItems,
+		ParsedInstruction: parsed,
+		MatchedProducts:   matchedProducts,
+		OrderDraft:        orderDraft,
+		FinancePlans:      financePlans,
+		AuditItems:        auditItems,
 		Stages:            buildStages(item.CurrentStage, item.Status == entity.ProcurementStatusReviewSubmitted, item.FinancingRequired),
 		HistorySaved:      item.HistorySaved,
 		EnterpriseID:      item.EnterpriseID,
