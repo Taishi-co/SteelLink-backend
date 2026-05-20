@@ -19,6 +19,8 @@ import (
 	cartRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/cart/infrastructure/router"
 	marketpersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/persistence"
 	marketRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/market/infrastructure/router"
+	notificationPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/infrastructure/persistence"
+	notificationRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/infrastructure/router"
 	orderEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
 	orderPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/persistence"
 	orderRouter "github.com/Taishi-co/SteelLink-backend/internal/modules/order/infrastructure/router"
@@ -139,6 +141,9 @@ func main() {
 		if err := orderPersistence.AutoMigrate(); err != nil {
 			logger.Fatal("Failed to migrate order tables", zap.Error(err))
 		}
+		if err := notificationPersistence.AutoMigrate(); err != nil {
+			logger.Fatal("Failed to migrate notification tables", zap.Error(err))
+		}
 	}
 
 	// Initialize redis
@@ -197,6 +202,9 @@ func main() {
 	logger.Info("Registering order routes...")
 	orderRouter.RegisterRoutes(v1)
 	logger.Info("Order routes registered")
+	logger.Info("Registering notification routes...")
+	notificationRouter.RegisterRoutes(v1)
+	logger.Info("Notification routes registered")
 	logger.Info("Registering cart routes...")
 	cartRouter.RegisterRoutes(v1)
 	logger.Info("Cart routes registered")

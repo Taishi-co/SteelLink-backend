@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	notificationService "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/application/service"
+	notificationEntity "github.com/Taishi-co/SteelLink-backend/internal/modules/notification/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/entity"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/domain/repository"
 	"github.com/Taishi-co/SteelLink-backend/internal/modules/product/infrastructure/persistence"
@@ -431,8 +433,44 @@ func (s *ProductService) UpdateStatus(ctx context.Context, id uint64, status int
 		return ecode.ErrDatabase.WithMessage("更新商品状态失败")
 	}
 	invalidateProductCache(ctx)
+	if err := notifyProductAuditStatus(ctx, product, productStatus, auditRemark, operatorID); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+func notifyProductAuditStatus(ctx context.Context, product *entity.Product, status entity.ProductStatus, auditRemark string, operatorID uint64) error {
+	if product == nil {
+		return nil
+	}
+	var title string
+	switch status {
+	case entity.ProductStatusOnSale:
+		title = "商品审核通过"
+	case entity.ProductStatusRejected:
+		title = "商品审核未通过"
+	default:
+		return nil
+	}
+	content := "您的商品「" + product.Name + "」已审核通过。"
+	if status == entity.ProductStatusRejected {
+		content = "您的商品「" + product.Name + "」审核未通过。"
+	}
+	if strings.TrimSpace(auditRemark) != "" {
+		content += " 审核备注：" + strings.TrimSpace(auditRemark)
+	}
+	return notificationService.NewNotificationService().CreateForEnterprise(ctx, product.EnterpriseID, notificationService.CreateNotificationInput{
+		SenderUserID: operatorID,
+		Type:         notificationEntity.NotificationTypeAudit,
+		Title:        title,
+		Content:      content,
+		LinkURL:      "/seller/products",
+		Metadata: notificationEntity.NotificationMetadata{
+			"product_id": product.ID,
+			"status":     int(status),
+		},
+	})
 }
 
 func invalidateProductCache(ctx context.Context) {
