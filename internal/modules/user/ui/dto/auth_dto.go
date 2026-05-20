@@ -28,7 +28,7 @@ type RefreshTokenRequest struct {
 }
 
 type SwitchSessionRequest struct {
-	Target string `json:"target" binding:"required,oneof=buyer seller"`
+	Target string `json:"target" binding:"required,oneof=buyer seller logistics warehouse finance"`
 }
 
 type SwitchSessionResponse struct {
@@ -37,7 +37,7 @@ type SwitchSessionResponse struct {
 
 type ConsumeSwitchSessionRequest struct {
 	SwitchToken string `json:"switch_token" binding:"required"`
-	Target      string `json:"target" binding:"required,oneof=buyer seller"`
+	Target      string `json:"target" binding:"required,oneof=buyer seller logistics warehouse finance"`
 }
 
 // SendSmsRequest 发送验证码请求
