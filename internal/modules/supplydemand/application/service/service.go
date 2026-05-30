@@ -72,7 +72,7 @@ func (s *SupplyDemandService) Create(ctx context.Context, req *dto.CreatePostReq
 		ContactName:       req.ContactName,
 		ContactPhone:      req.ContactPhone,
 		FinancingRequired: req.FinancingRequired,
-		Status:            entity.PostStatusPublished,
+		Status:            entity.PostStatusPendingReview,
 		EnterpriseID:      publisherEnterpriseID,
 		CreatedBy:         userID,
 		UpdatedBy:         userID,
@@ -213,6 +213,9 @@ func (s *SupplyDemandService) UpdateStatus(ctx context.Context, id uint64, statu
 	if !entity.IsValidPostStatus(value) {
 		return ecode.ErrBadRequest.WithMessage("供求信息状态不支持")
 	}
+	if value != entity.PostStatusClosed {
+		return ecode.ErrBadRequest.WithMessage("用户仅可关闭自己的供求信息，发布可见状态需平台审核")
+	}
 
 	post, err := s.postRepo.FindByID(ctx, id)
 	if err != nil {
@@ -289,6 +292,9 @@ func (s *SupplyDemandService) toPostInfoWithEnterpriseCache(ctx context.Context,
 		MatchCount:        post.MatchCount,
 		MatchAmount:       post.MatchAmount,
 		Status:            int(post.Status),
+		AuditRemark:       post.AuditRemark,
+		AuditorID:         post.AuditorID,
+		AuditedAt:         post.AuditedAt,
 		EnterpriseID:      post.EnterpriseID,
 		PublisherType:     publisherType,
 		PublisherName:     publisherName,
