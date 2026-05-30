@@ -10,11 +10,14 @@
 
 - [ ] `./harness/release.sh docs/features/SL-BE-SUPPLY-DEMAND` 已通过
 - [ ] `go test ./...` 已通过
+- [ ] `cd ../SteelLink-admin/backend && go test ./...` 已通过
+- [ ] `cd ../SteelLink-admin/frontend && pnpm typecheck` 已通过
+- [ ] `cd ../SteelLink-frontend && pnpm --filter @steellink/buyer-app typecheck` 已通过
 - [ ] `CGO_ENABLED=0 go build -o /tmp/steellink-api ./cmd/api` 已通过
 - [ ] 如环境安装了 Docker Compose，`docker compose config` 已通过
 - [ ] 已确认配置与环境变量变更: 无
-- [ ] 已确认数据库影响: 新增 `supply_demand_posts` 表
-- [ ] 已确认 smoke test 范围: 公开列表、详情、统计、发布、我的发布、状态更新
+- [ ] 已确认数据库影响: `supply_demand_posts` 表新增审核字段，新发布状态默认待审核
+- [ ] 已确认 smoke test 范围: 公开列表、详情、统计、发布、我的发布、关闭发布、管理后台审核通过/驳回
 
 ## 回滚信息
 

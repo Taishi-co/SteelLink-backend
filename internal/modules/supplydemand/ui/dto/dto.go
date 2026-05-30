@@ -27,7 +27,7 @@ type PostListRequest struct {
 	Page         int    `form:"page" binding:"omitempty,min=1"`
 	PageSize     int    `form:"page_size" binding:"omitempty,min=1,max=100"`
 	Type         string `form:"type" binding:"omitempty,oneof=supply demand warehouse logistics"`
-	Status       *int   `form:"status" binding:"omitempty,oneof=0 1 2 3"`
+	Status       *int   `form:"status" binding:"omitempty,oneof=0 1 2 3 4 5"`
 	Keyword      string `form:"keyword"`
 	Category     string `form:"category"`
 	Province     string `form:"province"`
@@ -37,40 +37,43 @@ type PostListRequest struct {
 }
 
 type UpdatePostStatusRequest struct {
-	Status int `json:"status" binding:"required,oneof=0 1 2 3"`
+	Status int `json:"status" binding:"required,oneof=3"`
 }
 
 type PostInfo struct {
-	ID                uint64    `json:"id"`
-	PostNo            string    `json:"post_no"`
-	Type              string    `json:"type"`
-	Title             string    `json:"title"`
-	Category          string    `json:"category"`
-	Material          string    `json:"material"`
-	Spec              string    `json:"spec"`
-	Quantity          float64   `json:"quantity"`
-	Unit              string    `json:"unit"`
-	TargetPrice       float64   `json:"target_price"`
-	Budget            float64   `json:"budget"`
-	Currency          string    `json:"currency"`
-	Province          string    `json:"province"`
-	City              string    `json:"city"`
-	District          string    `json:"district"`
-	DeliveryAddress   string    `json:"delivery_address"`
-	Description       string    `json:"description"`
-	Tags              []string  `json:"tags"`
-	ContactName       string    `json:"contact_name"`
-	ContactPhone      string    `json:"contact_phone"`
-	FinancingRequired bool      `json:"financing_required"`
-	MatchCount        int       `json:"match_count"`
-	MatchAmount       float64   `json:"match_amount"`
-	Status            int       `json:"status"`
-	EnterpriseID      uint64    `json:"enterprise_id"`
-	PublisherType     string    `json:"publisher_type"`
-	PublisherName     string    `json:"publisher_name"`
-	CreatedBy         uint64    `json:"created_by"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                uint64     `json:"id"`
+	PostNo            string     `json:"post_no"`
+	Type              string     `json:"type"`
+	Title             string     `json:"title"`
+	Category          string     `json:"category"`
+	Material          string     `json:"material"`
+	Spec              string     `json:"spec"`
+	Quantity          float64    `json:"quantity"`
+	Unit              string     `json:"unit"`
+	TargetPrice       float64    `json:"target_price"`
+	Budget            float64    `json:"budget"`
+	Currency          string     `json:"currency"`
+	Province          string     `json:"province"`
+	City              string     `json:"city"`
+	District          string     `json:"district"`
+	DeliveryAddress   string     `json:"delivery_address"`
+	Description       string     `json:"description"`
+	Tags              []string   `json:"tags"`
+	ContactName       string     `json:"contact_name"`
+	ContactPhone      string     `json:"contact_phone"`
+	FinancingRequired bool       `json:"financing_required"`
+	MatchCount        int        `json:"match_count"`
+	MatchAmount       float64    `json:"match_amount"`
+	Status            int        `json:"status"`
+	AuditRemark       string     `json:"audit_remark"`
+	AuditorID         uint64     `json:"auditor_id"`
+	AuditedAt         *time.Time `json:"audited_at"`
+	EnterpriseID      uint64     `json:"enterprise_id"`
+	PublisherType     string     `json:"publisher_type"`
+	PublisherName     string     `json:"publisher_name"`
+	CreatedBy         uint64     `json:"created_by"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type PostListResponse struct {

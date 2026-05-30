@@ -111,7 +111,7 @@ func (r *postRepository) Stats(ctx context.Context) (*repository.PostStats, erro
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
-	if err := db.Where("created_at >= ?", today).Count(&stats.TodayNewCount).Error; err != nil {
+	if err := db.Where("status IN ? AND created_at >= ?", []entity.PostStatus{entity.PostStatusPublished, entity.PostStatusMatched}, today).Count(&stats.TodayNewCount).Error; err != nil {
 		return nil, err
 	}
 

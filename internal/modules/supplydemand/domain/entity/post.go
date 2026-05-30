@@ -23,10 +23,12 @@ const (
 type PostStatus int
 
 const (
-	PostStatusDraft     PostStatus = 0
-	PostStatusPublished PostStatus = 1
-	PostStatusMatched   PostStatus = 2
-	PostStatusClosed    PostStatus = 3
+	PostStatusDraft         PostStatus = 0
+	PostStatusPublished     PostStatus = 1
+	PostStatusMatched       PostStatus = 2
+	PostStatusClosed        PostStatus = 3
+	PostStatusPendingReview PostStatus = 4
+	PostStatusRejected      PostStatus = 5
 )
 
 type StringList []string
@@ -75,7 +77,10 @@ type SupplyDemandPost struct {
 	FinancingRequired bool           `gorm:"default:false;comment:是否需要融资" json:"financing_required"`
 	MatchCount        int            `gorm:"default:0;comment:意向/撮合数量" json:"match_count"`
 	MatchAmount       float64        `gorm:"type:decimal(14,2);default:0;comment:撮合金额" json:"match_amount"`
-	Status            PostStatus     `gorm:"type:tinyint;default:1;index;comment:状态" json:"status"`
+	Status            PostStatus     `gorm:"type:tinyint;default:4;index;comment:状态" json:"status"`
+	AuditRemark       string         `gorm:"type:varchar(500);comment:审核备注" json:"audit_remark"`
+	AuditorID         uint64         `gorm:"comment:审核人ID" json:"auditor_id"`
+	AuditedAt         *time.Time     `gorm:"comment:审核时间" json:"audited_at"`
 	EnterpriseID      uint64         `gorm:"index;comment:所属企业ID" json:"enterprise_id"`
 	CreatedBy         uint64         `gorm:"index;comment:创建者" json:"created_by"`
 	CreatedAt         time.Time      `gorm:"autoCreateTime;comment:创建时间" json:"created_at"`
@@ -99,7 +104,7 @@ func (p *SupplyDemandPost) BeforeCreate(tx *gorm.DB) error {
 		p.Unit = "吨"
 	}
 	if p.Status == 0 {
-		p.Status = PostStatusPublished
+		p.Status = PostStatusPendingReview
 	}
 	return nil
 }
@@ -119,7 +124,7 @@ func IsValidPostType(value PostType) bool {
 
 func IsValidPostStatus(value PostStatus) bool {
 	switch value {
-	case PostStatusDraft, PostStatusPublished, PostStatusMatched, PostStatusClosed:
+	case PostStatusDraft, PostStatusPublished, PostStatusMatched, PostStatusClosed, PostStatusPendingReview, PostStatusRejected:
 		return true
 	default:
 		return false
