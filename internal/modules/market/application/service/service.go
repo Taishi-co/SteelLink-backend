@@ -651,7 +651,16 @@ func (s *MarketService) RespondProcurement(ctx context.Context, userID, enterpri
 		return nil, ecode.ErrDatabase.WithMessage("处理集采申请失败")
 	}
 	invalidateMarketCache(ctx)
-	return s.GetProcurement(ctx, activityID)
+	item, err := s.GetProcurement(ctx, activityID)
+	if err != nil {
+		return nil, err
+	}
+	participants, err := s.listProcurementParticipantsForEnterprise(ctx, activityID, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	item.Participants = participants
+	return item, nil
 }
 
 func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseID, activityID uint64, req *marketdto.JoinProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
@@ -832,6 +841,21 @@ func (s *MarketService) listBiddingQuotes(ctx context.Context, biddingID uint64)
 		return nil, err
 	}
 	return quotes, nil
+}
+
+func (s *MarketService) listProcurementParticipantsForEnterprise(ctx context.Context, activityID, enterpriseID uint64) ([]marketdto.ProcurementParticipantItem, error) {
+	var participants []marketentity.ProcurementParticipant
+	if err := s.db.WithContext(ctx).
+		Where("activity_id = ? AND buyer_enterprise_id = ? AND status <> ?", activityID, enterpriseID, marketentity.ProcurementParticipantCancelled).
+		Order("id ASC").
+		Find(&participants).Error; err != nil {
+		return nil, err
+	}
+	items := make([]marketdto.ProcurementParticipantItem, 0, len(participants))
+	for _, participant := range participants {
+		items = append(items, toProcurementParticipantItem(participant))
+	}
+	return items, nil
 }
 
 func (s *MarketService) reconcileBiddingState(ctx context.Context, activity *marketentity.BiddingActivity) error {
