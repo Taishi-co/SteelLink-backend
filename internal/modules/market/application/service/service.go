@@ -31,6 +31,14 @@ type MarketService struct {
 	enterpriseRepo userRepository.EnterpriseRepository
 }
 
+var marketDefaultLocation = func() *time.Location {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.Local
+	}
+	return location
+}()
+
 func NewMarketService() *MarketService {
 	return &MarketService{
 		db:             database.GetDB(),
@@ -650,6 +658,9 @@ func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseI
 	if enterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能参与集采")
 	}
+	if req.Quantity <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("参团数量必须大于0")
+	}
 	if !req.AgreementSigned {
 		return nil, ecode.ErrBadRequest.WithMessage("请先签署集采协议")
 	}
@@ -743,6 +754,9 @@ func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseI
 func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, enterpriseID uint64, req *marketdto.CreateProcurementRequestRequest) (*marketdto.ProcurementRequestItem, error) {
 	if enterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能申请集采")
+	}
+	if req.Quantity <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("需求数量必须大于0")
 	}
 	enterprise, err := s.enterpriseRepo.FindByID(ctx, enterpriseID)
 	if err != nil {
@@ -1094,10 +1108,10 @@ func parseMarketTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 		return parsed, nil
 	}
-	if parsed, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04:05", value, marketDefaultLocation); err == nil {
 		return parsed, nil
 	}
-	return time.Parse("2006-01-02 15:04", value)
+	return time.ParseInLocation("2006-01-02 15:04", value, marketDefaultLocation)
 }
 
 func generateBiddingNo() string {
