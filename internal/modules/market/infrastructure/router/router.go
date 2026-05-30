@@ -19,5 +19,10 @@ func RegisterRoutes(r *gin.RouterGroup) {
 
 	r.GET("/procurements/stats", marketHandler.GetProcurementStats)
 	r.GET("/procurements", marketHandler.ListProcurements)
+	r.GET("/procurements/seller/mine", middleware.AuthRequired(), middleware.RequireTradeCapability("sales"), marketHandler.ListSellerProcurements)
+	r.POST("/procurements/requests", middleware.AuthRequired(), middleware.RequireTradeCapability("procurement"), marketHandler.CreateProcurementRequest)
+	r.GET("/procurements/requests/mine", middleware.AuthRequired(), middleware.RequireTradeCapability("procurement"), marketHandler.ListMyProcurementRequests)
 	r.GET("/procurements/:id", marketHandler.GetProcurement)
+	r.POST("/procurements/:id/seller-response", middleware.AuthRequired(), middleware.RequireTradeCapability("sales"), marketHandler.RespondProcurement)
+	r.POST("/procurements/:id/join", middleware.AuthRequired(), middleware.RequireTradeCapability("procurement"), marketHandler.JoinProcurement)
 }

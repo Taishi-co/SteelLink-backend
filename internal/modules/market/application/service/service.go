@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	marketentity "github.com/Taishi-co/SteelLink-backend/internal/modules/market/domain/entity"
@@ -423,7 +424,8 @@ func (s *MarketService) ListProcurements(ctx context.Context, req *marketdto.Lis
 		req.PageSize = 10
 	}
 
-	query := s.db.WithContext(ctx).Model(&marketentity.ProcurementActivity{})
+	query := s.db.WithContext(ctx).Model(&marketentity.ProcurementActivity{}).
+		Where("status NOT IN ?", []marketentity.ProcurementStatus{marketentity.ProcurementStatusPendingSeller, marketentity.ProcurementStatusSellerRejected})
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
 	}
@@ -449,8 +451,11 @@ func (s *MarketService) ListProcurements(ctx context.Context, req *marketdto.Lis
 	}
 
 	items := make([]marketdto.ProcurementActivityItem, 0, len(activities))
-	for _, activity := range activities {
-		items = append(items, toProcurementItem(activity, nil))
+	for i := range activities {
+		if err := s.reconcileProcurementState(ctx, &activities[i]); err != nil {
+			return nil, err
+		}
+		items = append(items, toProcurementItem(activities[i], nil))
 	}
 	return &marketdto.ProcurementListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
@@ -459,11 +464,298 @@ func (s *MarketService) GetProcurement(ctx context.Context, id uint64) (*marketd
 	var activity marketentity.ProcurementActivity
 	if err := s.db.WithContext(ctx).Preload("Logs", func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at ASC, id ASC")
+	}).Preload("Participants", func(db *gorm.DB) *gorm.DB {
+		return db.Where("status <> ?", marketentity.ProcurementParticipantCancelled).Order("id ASC")
 	}).First(&activity, id).Error; err != nil {
+		return nil, err
+	}
+	if err := s.reconcileProcurementState(ctx, &activity); err != nil {
 		return nil, err
 	}
 	item := toProcurementItem(activity, activity.Logs)
 	return &item, nil
+}
+
+func (s *MarketService) ListSellerProcurements(ctx context.Context, req *marketdto.ListRequest, enterpriseID uint64) (*marketdto.ProcurementListResponse, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看集采申请")
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 20
+	}
+	query := s.db.WithContext(ctx).Model(&marketentity.ProcurementActivity{}).Where("seller_enterprise_id = ?", enterpriseID)
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	if req.Category != "" {
+		query = query.Where("category = ?", req.Category)
+	}
+	if req.Keyword != "" {
+		like := "%" + req.Keyword + "%"
+		query = query.Where("title LIKE ? OR procurement_no LIKE ? OR product_name LIKE ? OR target LIKE ?", like, like, like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	var activities []marketentity.ProcurementActivity
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&activities).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	items := make([]marketdto.ProcurementActivityItem, 0, len(activities))
+	for i := range activities {
+		if err := s.reconcileProcurementState(ctx, &activities[i]); err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		items = append(items, toProcurementItem(activities[i], nil))
+	}
+	return &marketdto.ProcurementListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
+func (s *MarketService) RespondProcurement(ctx context.Context, userID, enterpriseID, activityID uint64, req *marketdto.RespondProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能处理集采申请")
+	}
+	var activity marketentity.ProcurementActivity
+	if err := s.db.WithContext(ctx).First(&activity, activityID).Error; err != nil {
+		if IsNotFound(err) {
+			return nil, ecode.ErrNotFound.WithMessage("集采活动不存在")
+		}
+		return nil, ecode.ErrDatabase
+	}
+	if activity.SellerEnterpriseID != enterpriseID {
+		return nil, ecode.ErrForbidden.WithMessage("无权处理该集采申请")
+	}
+	if activity.Status != marketentity.ProcurementStatusPendingSeller {
+		return nil, ecode.ErrBadRequest.WithMessage("当前集采状态不可响应")
+	}
+	now := time.Now()
+	updates := map[string]interface{}{
+		"seller_remark":       strings.TrimSpace(req.Remark),
+		"seller_responded_at": now,
+		"updated_by":          userID,
+		"updated_at":          now,
+	}
+	logContent := "卖家已拒绝集采申请"
+	logColor := "red"
+	if req.Accepted {
+		if req.GroupPrice <= 0 {
+			return nil, ecode.ErrBadRequest.WithMessage("集采价格必须大于0")
+		}
+		if req.MinGroupQuantity <= 0 {
+			return nil, ecode.ErrBadRequest.WithMessage("最小成团量必须大于0")
+		}
+		endedAt, err := parseMarketTime(req.EndedAt)
+		if err != nil {
+			return nil, ecode.ErrBadRequest.WithMessage("截止时间格式错误")
+		}
+		if !endedAt.After(now) {
+			return nil, ecode.ErrBadRequest.WithMessage("截止时间必须晚于当前时间")
+		}
+		deliveryDays := req.DeliveryDays
+		if deliveryDays <= 0 {
+			deliveryDays = activity.DeliveryDays
+		}
+		updates["status"] = marketentity.ProcurementStatusActive
+		updates["group_price"] = req.GroupPrice
+		updates["min_group_quantity"] = req.MinGroupQuantity
+		updates["max_group_quantity"] = req.MaxGroupQuantity
+		updates["budget_min"] = req.GroupPrice * req.MinGroupQuantity
+		updates["budget_max"] = req.GroupPrice * req.MaxGroupQuantity
+		updates["budget_display"] = formatProcurementBudget(req.GroupPrice, req.MinGroupQuantity, req.MaxGroupQuantity)
+		updates["stage"] = "买家参团"
+		updates["progress"] = 20
+		updates["qualified_suppliers"] = 1
+		updates["quote_count"] = 1
+		updates["delivery_days"] = deliveryDays
+		updates["started_at"] = now
+		updates["ended_at"] = &endedAt
+		updates["open_date"] = endedAt.Format("2006-01-02")
+		logContent = "卖家已确认集采价格和成团规则，活动已公开到商城"
+		logColor = "green"
+	} else {
+		updates["status"] = marketentity.ProcurementStatusSellerRejected
+		updates["stage"] = "卖家拒绝"
+		updates["progress"] = 100
+	}
+
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&activity).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Create(&marketentity.ProcurementLog{ActivityID: activity.ID, Content: logContent, Color: logColor}).Error
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("处理集采申请失败")
+	}
+	invalidateMarketCache(ctx)
+	return s.GetProcurement(ctx, activityID)
+}
+
+func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseID, activityID uint64, req *marketdto.JoinProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能参与集采")
+	}
+	if !req.AgreementSigned {
+		return nil, ecode.ErrBadRequest.WithMessage("请先签署集采协议")
+	}
+	contactName := strings.TrimSpace(req.ContactName)
+	contactPhone := strings.TrimSpace(req.ContactPhone)
+	deliveryAddress := strings.TrimSpace(req.DeliveryAddress)
+	if contactName == "" || contactPhone == "" || deliveryAddress == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("请填写完整收货联系人、联系电话和收货地址")
+	}
+	enterprise, err := s.enterpriseRepo.FindByID(ctx, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if enterprise == nil || !enterprise.IsApproved() {
+		return nil, ecode.ErrBadRequest.WithMessage("企业不存在或未通过审核")
+	}
+	var activity marketentity.ProcurementActivity
+	if err := s.db.WithContext(ctx).First(&activity, activityID).Error; err != nil {
+		if IsNotFound(err) {
+			return nil, ecode.ErrNotFound.WithMessage("集采活动不存在")
+		}
+		return nil, ecode.ErrDatabase
+	}
+	if err := s.reconcileProcurementState(ctx, &activity); err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if activity.Status != marketentity.ProcurementStatusActive {
+		return nil, ecode.ErrBadRequest.WithMessage("当前集采活动不可参与")
+	}
+	if activity.EndedAt != nil && !activity.EndedAt.After(time.Now()) {
+		return nil, ecode.ErrBadRequest.WithMessage("集采活动已截止")
+	}
+	if activity.GroupPrice <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("卖家尚未确认集采价格")
+	}
+	now := time.Now()
+	var businessErr error
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if activity.MaxGroupQuantity > 0 {
+			var otherDemand float64
+			if err := tx.Model(&marketentity.ProcurementParticipant{}).
+				Select("COALESCE(SUM(quantity), 0)").
+				Where("activity_id = ? AND buyer_enterprise_id <> ? AND status <> ?", activity.ID, enterpriseID, marketentity.ProcurementParticipantCancelled).
+				Scan(&otherDemand).Error; err != nil {
+				return err
+			}
+			if otherDemand+req.Quantity > activity.MaxGroupQuantity {
+				businessErr = ecode.ErrBadRequest.WithMessage("参团数量超过本次集采上限")
+				return businessErr
+			}
+		}
+		var participant marketentity.ProcurementParticipant
+		err := tx.Where("activity_id = ? AND buyer_enterprise_id = ? AND status <> ?", activity.ID, enterpriseID, marketentity.ProcurementParticipantCancelled).
+			First(&participant).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			participant = marketentity.ProcurementParticipant{
+				ActivityID:        activity.ID,
+				BuyerEnterpriseID: enterpriseID,
+				BuyerUserID:       userID,
+				BuyerName:         enterprise.Name,
+				Status:            marketentity.ProcurementParticipantJoined,
+			}
+		}
+		participant.Quantity = req.Quantity
+		participant.Unit = defaultUnit(activity.Unit)
+		participant.UnitPrice = activity.GroupPrice
+		participant.TotalAmount = req.Quantity * activity.GroupPrice
+		participant.ContactName = contactName
+		participant.ContactPhone = contactPhone
+		participant.DeliveryAddress = deliveryAddress
+		participant.AgreementSigned = true
+		participant.AgreementSignedAt = &now
+		participant.Remark = strings.TrimSpace(req.Remark)
+		if err := tx.Save(&participant).Error; err != nil {
+			return err
+		}
+		return refreshProcurementParticipantStatsTx(tx, activity.ID)
+	}); err != nil {
+		if businessErr != nil {
+			return nil, businessErr
+		}
+		return nil, ecode.ErrDatabase.WithMessage("参与集采失败")
+	}
+	invalidateMarketCache(ctx)
+	return s.GetProcurement(ctx, activityID)
+}
+
+func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, enterpriseID uint64, req *marketdto.CreateProcurementRequestRequest) (*marketdto.ProcurementRequestItem, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能申请集采")
+	}
+	enterprise, err := s.enterpriseRepo.FindByID(ctx, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if enterprise == nil || !enterprise.IsApproved() {
+		return nil, ecode.ErrBadRequest.WithMessage("企业不存在或未通过审核")
+	}
+	unit := defaultUnit(req.Unit)
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		source = "manual"
+	}
+	item := &marketentity.ProcurementRequest{
+		RequestNo:         generateProcurementRequestNo(),
+		Source:            source,
+		Category:          strings.TrimSpace(req.Category),
+		ProductName:       strings.TrimSpace(req.ProductName),
+		Quantity:          req.Quantity,
+		Unit:              unit,
+		DeliveryAddress:   strings.TrimSpace(req.DeliveryAddress),
+		BuyerEnterpriseID: enterpriseID,
+		BuyerUserID:       userID,
+		BuyerName:         enterprise.Name,
+		Status:            marketentity.ProcurementRequestPending,
+		Remark:            strings.TrimSpace(req.Remark),
+	}
+	if item.Category == "" || item.ProductName == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("品类和采购物品不能为空")
+	}
+	if err := s.db.WithContext(ctx).Create(item).Error; err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("提交集采申请失败")
+	}
+	result := toProcurementRequestItem(*item)
+	return &result, nil
+}
+
+func (s *MarketService) ListMyProcurementRequests(ctx context.Context, req *marketdto.ListRequest, enterpriseID uint64) (*marketdto.ProcurementRequestListResponse, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看集采申请")
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	query := s.db.WithContext(ctx).Model(&marketentity.ProcurementRequest{}).Where("buyer_enterprise_id = ?", enterpriseID)
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	var rows []marketentity.ProcurementRequest
+	if err := query.Order("id DESC").Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize).Find(&rows).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	items := make([]marketdto.ProcurementRequestItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toProcurementRequestItem(row))
+	}
+	return &marketdto.ProcurementRequestListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
 
 func (s *MarketService) listBiddingQuotes(ctx context.Context, biddingID uint64) ([]marketentity.BiddingQuote, error) {
@@ -499,6 +791,51 @@ func (s *MarketService) reconcileBiddingState(ctx context.Context, activity *mar
 	}
 	updates["updated_at"] = time.Now()
 	return s.db.WithContext(ctx).Model(activity).Updates(updates).Error
+}
+
+func (s *MarketService) reconcileProcurementState(ctx context.Context, activity *marketentity.ProcurementActivity) error {
+	if activity == nil {
+		return nil
+	}
+	if activity.Status != marketentity.ProcurementStatusActive || activity.EndedAt == nil || activity.EndedAt.After(time.Now()) {
+		return nil
+	}
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":     marketentity.ProcurementStatusEnded,
+		"stage":      "已截止",
+		"progress":   100,
+		"closed_at":  &now,
+		"updated_at": now,
+	}
+	activity.Status = marketentity.ProcurementStatusEnded
+	activity.Stage = "已截止"
+	activity.Progress = 100
+	activity.ClosedAt = &now
+	return s.db.WithContext(ctx).Model(activity).Updates(updates).Error
+}
+
+func refreshProcurementParticipantStatsTx(tx *gorm.DB, activityID uint64) error {
+	var agg struct {
+		ParticipantCount int
+		DemandQuantity   float64
+	}
+	if err := tx.Model(&marketentity.ProcurementParticipant{}).
+		Select("COUNT(*) AS participant_count, COALESCE(SUM(quantity), 0) AS demand_quantity").
+		Where("activity_id = ? AND status <> ?", activityID, marketentity.ProcurementParticipantCancelled).
+		Scan(&agg).Error; err != nil {
+		return err
+	}
+	progress := 35
+	if agg.DemandQuantity > 0 {
+		progress = 45
+	}
+	return tx.Model(&marketentity.ProcurementActivity{}).Where("id = ?", activityID).Updates(map[string]interface{}{
+		"participating_count": agg.ParticipantCount,
+		"demand_quantity":     agg.DemandQuantity,
+		"progress":            progress,
+		"updated_at":          time.Now(),
+	}).Error
 }
 
 func normalizeBiddingStatus(status marketentity.BiddingStatus) marketentity.BiddingStatus {
@@ -601,6 +938,10 @@ func toProcurementItem(activity marketentity.ProcurementActivity, logs []markete
 			CreatedAt: logItem.CreatedAt,
 		})
 	}
+	participantItems := make([]marketdto.ProcurementParticipantItem, 0, len(activity.Participants))
+	for _, participant := range activity.Participants {
+		participantItems = append(participantItems, toProcurementParticipantItem(participant))
+	}
 
 	return marketdto.ProcurementActivityItem{
 		ID:                 activity.ID,
@@ -608,6 +949,14 @@ func toProcurementItem(activity marketentity.ProcurementActivity, logs []markete
 		Title:              activity.Title,
 		LeaderName:         activity.LeaderName,
 		Status:             string(activity.Status),
+		ProductID:          activity.ProductID,
+		ProductNo:          activity.ProductNo,
+		ProductName:        activity.ProductName,
+		SellerEnterpriseID: activity.SellerEnterpriseID,
+		SellerName:         activity.SellerName,
+		GroupPrice:         activity.GroupPrice,
+		MinGroupQuantity:   activity.MinGroupQuantity,
+		MaxGroupQuantity:   activity.MaxGroupQuantity,
 		Category:           activity.Category,
 		Target:             activity.Target,
 		TargetQuantity:     activity.TargetQuantity,
@@ -628,9 +977,65 @@ func toProcurementItem(activity marketentity.ProcurementActivity, logs []markete
 		QuoteMode:          activity.QuoteMode,
 		EvaluationMode:     activity.EvaluationMode,
 		Documents:          []string(activity.Documents),
+		AdminRemark:        activity.AdminRemark,
+		SellerRemark:       activity.SellerRemark,
+		Source:             activity.Source,
+		StartedAt:          activity.StartedAt,
+		EndedAt:            activity.EndedAt,
+		SellerRespondedAt:  activity.SellerRespondedAt,
+		ClosedAt:           activity.ClosedAt,
+		MasterOrderID:      activity.MasterOrderID,
+		MasterOrderNo:      activity.MasterOrderNo,
+		Participants:       participantItems,
 		Logs:               logItems,
 		CreatedAt:          activity.CreatedAt,
 		UpdatedAt:          activity.UpdatedAt,
+	}
+}
+
+func toProcurementParticipantItem(participant marketentity.ProcurementParticipant) marketdto.ProcurementParticipantItem {
+	return marketdto.ProcurementParticipantItem{
+		ID:                participant.ID,
+		ActivityID:        participant.ActivityID,
+		BuyerEnterpriseID: participant.BuyerEnterpriseID,
+		BuyerUserID:       participant.BuyerUserID,
+		BuyerName:         participant.BuyerName,
+		Quantity:          participant.Quantity,
+		Unit:              participant.Unit,
+		UnitPrice:         participant.UnitPrice,
+		TotalAmount:       participant.TotalAmount,
+		ContactName:       participant.ContactName,
+		ContactPhone:      participant.ContactPhone,
+		DeliveryAddress:   participant.DeliveryAddress,
+		AgreementSigned:   participant.AgreementSigned,
+		AgreementSignedAt: participant.AgreementSignedAt,
+		Status:            string(participant.Status),
+		ChildOrderID:      participant.ChildOrderID,
+		ChildOrderNo:      participant.ChildOrderNo,
+		Remark:            participant.Remark,
+		CreatedAt:         participant.CreatedAt,
+		UpdatedAt:         participant.UpdatedAt,
+	}
+}
+
+func toProcurementRequestItem(item marketentity.ProcurementRequest) marketdto.ProcurementRequestItem {
+	return marketdto.ProcurementRequestItem{
+		ID:                item.ID,
+		RequestNo:         item.RequestNo,
+		Source:            item.Source,
+		Category:          item.Category,
+		ProductName:       item.ProductName,
+		Quantity:          item.Quantity,
+		Unit:              item.Unit,
+		DeliveryAddress:   item.DeliveryAddress,
+		BuyerEnterpriseID: item.BuyerEnterpriseID,
+		BuyerUserID:       item.BuyerUserID,
+		BuyerName:         item.BuyerName,
+		Status:            string(item.Status),
+		ActivityID:        item.ActivityID,
+		Remark:            item.Remark,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 }
 
@@ -646,6 +1051,29 @@ func parseMarketTime(value string) (time.Time, error) {
 
 func generateBiddingNo() string {
 	return fmt.Sprintf("BD%s%06d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%1000000)
+}
+
+func generateProcurementRequestNo() string {
+	return fmt.Sprintf("GPR%s%06d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%1000000)
+}
+
+func defaultUnit(unit string) string {
+	unit = strings.TrimSpace(unit)
+	if unit == "" {
+		return "吨"
+	}
+	return unit
+}
+
+func formatProcurementBudget(price, minQuantity, maxQuantity float64) string {
+	if price <= 0 || minQuantity <= 0 {
+		return ""
+	}
+	minAmount := price * minQuantity
+	if maxQuantity <= 0 {
+		return fmt.Sprintf("¥%.2f起", minAmount)
+	}
+	return fmt.Sprintf("¥%.2f~%.2f", minAmount, price*maxQuantity)
 }
 
 func calcPriceChangeRate(startPrice, currentPrice float64) float64 {
