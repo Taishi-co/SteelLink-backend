@@ -464,8 +464,6 @@ func (s *MarketService) GetProcurement(ctx context.Context, id uint64) (*marketd
 	var activity marketentity.ProcurementActivity
 	if err := s.db.WithContext(ctx).Preload("Logs", func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at ASC, id ASC")
-	}).Preload("Participants", func(db *gorm.DB) *gorm.DB {
-		return db.Where("status <> ?", marketentity.ProcurementParticipantCancelled).Order("id ASC")
 	}).First(&activity, id).Error; err != nil {
 		return nil, err
 	}
