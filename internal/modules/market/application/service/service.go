@@ -31,6 +31,14 @@ type MarketService struct {
 	enterpriseRepo userRepository.EnterpriseRepository
 }
 
+var marketDefaultLocation = func() *time.Location {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.Local
+	}
+	return location
+}()
+
 func NewMarketService() *MarketService {
 	return &MarketService{
 		db:             database.GetDB(),
@@ -464,8 +472,6 @@ func (s *MarketService) GetProcurement(ctx context.Context, id uint64) (*marketd
 	var activity marketentity.ProcurementActivity
 	if err := s.db.WithContext(ctx).Preload("Logs", func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at ASC, id ASC")
-	}).Preload("Participants", func(db *gorm.DB) *gorm.DB {
-		return db.Where("status <> ?", marketentity.ProcurementParticipantCancelled).Order("id ASC")
 	}).First(&activity, id).Error; err != nil {
 		return nil, err
 	}
@@ -645,12 +651,24 @@ func (s *MarketService) RespondProcurement(ctx context.Context, userID, enterpri
 		return nil, ecode.ErrDatabase.WithMessage("处理集采申请失败")
 	}
 	invalidateMarketCache(ctx)
-	return s.GetProcurement(ctx, activityID)
+	item, err := s.GetProcurement(ctx, activityID)
+	if err != nil {
+		return nil, err
+	}
+	participants, err := s.listProcurementParticipantsForEnterprise(ctx, activityID, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	item.Participants = participants
+	return item, nil
 }
 
 func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseID, activityID uint64, req *marketdto.JoinProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
 	if enterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能参与集采")
+	}
+	if req.Quantity <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("参团数量必须大于0")
 	}
 	if !req.AgreementSigned {
 		return nil, ecode.ErrBadRequest.WithMessage("请先签署集采协议")
@@ -746,6 +764,9 @@ func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, en
 	if enterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能申请集采")
 	}
+	if req.Quantity <= 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("需求数量必须大于0")
+	}
 	enterprise, err := s.enterpriseRepo.FindByID(ctx, enterpriseID)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -820,6 +841,21 @@ func (s *MarketService) listBiddingQuotes(ctx context.Context, biddingID uint64)
 		return nil, err
 	}
 	return quotes, nil
+}
+
+func (s *MarketService) listProcurementParticipantsForEnterprise(ctx context.Context, activityID, enterpriseID uint64) ([]marketdto.ProcurementParticipantItem, error) {
+	var participants []marketentity.ProcurementParticipant
+	if err := s.db.WithContext(ctx).
+		Where("activity_id = ? AND buyer_enterprise_id = ? AND status <> ?", activityID, enterpriseID, marketentity.ProcurementParticipantCancelled).
+		Order("id ASC").
+		Find(&participants).Error; err != nil {
+		return nil, err
+	}
+	items := make([]marketdto.ProcurementParticipantItem, 0, len(participants))
+	for _, participant := range participants {
+		items = append(items, toProcurementParticipantItem(participant))
+	}
+	return items, nil
 }
 
 func (s *MarketService) reconcileBiddingState(ctx context.Context, activity *marketentity.BiddingActivity) error {
@@ -1096,10 +1132,10 @@ func parseMarketTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 		return parsed, nil
 	}
-	if parsed, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04:05", value, marketDefaultLocation); err == nil {
 		return parsed, nil
 	}
-	return time.Parse("2006-01-02 15:04", value)
+	return time.ParseInLocation("2006-01-02 15:04", value, marketDefaultLocation)
 }
 
 func generateBiddingNo() string {
