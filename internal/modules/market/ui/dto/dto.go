@@ -105,34 +105,75 @@ type ProcurementStats struct {
 }
 
 type ProcurementActivityItem struct {
-	ID                 uint64               `json:"id"`
-	ProcurementNo      string               `json:"procurement_no"`
-	Title              string               `json:"title"`
-	LeaderName         string               `json:"leader_name"`
-	Status             string               `json:"status"`
-	Category           string               `json:"category"`
-	Target             string               `json:"target"`
-	TargetQuantity     float64              `json:"target_quantity"`
-	Unit               string               `json:"unit"`
-	BudgetMin          float64              `json:"budget_min"`
-	BudgetMax          float64              `json:"budget_max"`
-	BudgetDisplay      string               `json:"budget_display"`
-	Stage              string               `json:"stage"`
-	Progress           int                  `json:"progress"`
-	Region             string               `json:"region"`
-	OpenDate           string               `json:"open_date"`
-	ParticipatingCount int                  `json:"participating_count"`
-	DemandQuantity     float64              `json:"demand_quantity"`
-	QualifiedSuppliers int                  `json:"qualified_suppliers"`
-	QuoteCount         int                  `json:"quote_count"`
-	ContractCount      int                  `json:"contract_count"`
-	DeliveryDays       int                  `json:"delivery_days"`
-	QuoteMode          string               `json:"quote_mode"`
-	EvaluationMode     string               `json:"evaluation_mode"`
-	Documents          []string             `json:"documents"`
-	Logs               []ProcurementLogItem `json:"logs,omitempty"`
-	CreatedAt          time.Time            `json:"created_at"`
-	UpdatedAt          time.Time            `json:"updated_at"`
+	ID                 uint64                       `json:"id"`
+	ProcurementNo      string                       `json:"procurement_no"`
+	Title              string                       `json:"title"`
+	LeaderName         string                       `json:"leader_name"`
+	Status             string                       `json:"status"`
+	ProductID          uint64                       `json:"product_id"`
+	ProductNo          string                       `json:"product_no"`
+	ProductName        string                       `json:"product_name"`
+	SellerEnterpriseID uint64                       `json:"seller_enterprise_id"`
+	SellerName         string                       `json:"seller_name"`
+	GroupPrice         float64                      `json:"group_price"`
+	MinGroupQuantity   float64                      `json:"min_group_quantity"`
+	MaxGroupQuantity   float64                      `json:"max_group_quantity"`
+	Category           string                       `json:"category"`
+	Target             string                       `json:"target"`
+	TargetQuantity     float64                      `json:"target_quantity"`
+	Unit               string                       `json:"unit"`
+	BudgetMin          float64                      `json:"budget_min"`
+	BudgetMax          float64                      `json:"budget_max"`
+	BudgetDisplay      string                       `json:"budget_display"`
+	Stage              string                       `json:"stage"`
+	Progress           int                          `json:"progress"`
+	Region             string                       `json:"region"`
+	OpenDate           string                       `json:"open_date"`
+	ParticipatingCount int                          `json:"participating_count"`
+	DemandQuantity     float64                      `json:"demand_quantity"`
+	QualifiedSuppliers int                          `json:"qualified_suppliers"`
+	QuoteCount         int                          `json:"quote_count"`
+	ContractCount      int                          `json:"contract_count"`
+	DeliveryDays       int                          `json:"delivery_days"`
+	QuoteMode          string                       `json:"quote_mode"`
+	EvaluationMode     string                       `json:"evaluation_mode"`
+	Documents          []string                     `json:"documents"`
+	AdminRemark        string                       `json:"admin_remark"`
+	SellerRemark       string                       `json:"seller_remark"`
+	Source             string                       `json:"source"`
+	StartedAt          *time.Time                   `json:"started_at,omitempty"`
+	EndedAt            *time.Time                   `json:"ended_at,omitempty"`
+	SellerRespondedAt  *time.Time                   `json:"seller_responded_at,omitempty"`
+	ClosedAt           *time.Time                   `json:"closed_at,omitempty"`
+	MasterOrderID      uint64                       `json:"master_order_id"`
+	MasterOrderNo      string                       `json:"master_order_no"`
+	Participants       []ProcurementParticipantItem `json:"participants,omitempty"`
+	Logs               []ProcurementLogItem         `json:"logs,omitempty"`
+	CreatedAt          time.Time                    `json:"created_at"`
+	UpdatedAt          time.Time                    `json:"updated_at"`
+}
+
+type ProcurementParticipantItem struct {
+	ID                uint64     `json:"id"`
+	ActivityID        uint64     `json:"activity_id"`
+	BuyerEnterpriseID uint64     `json:"buyer_enterprise_id"`
+	BuyerUserID       uint64     `json:"buyer_user_id"`
+	BuyerName         string     `json:"buyer_name"`
+	Quantity          float64    `json:"quantity"`
+	Unit              string     `json:"unit"`
+	UnitPrice         float64    `json:"unit_price"`
+	TotalAmount       float64    `json:"total_amount"`
+	ContactName       string     `json:"contact_name"`
+	ContactPhone      string     `json:"contact_phone"`
+	DeliveryAddress   string     `json:"delivery_address"`
+	AgreementSigned   bool       `json:"agreement_signed"`
+	AgreementSignedAt *time.Time `json:"agreement_signed_at,omitempty"`
+	Status            string     `json:"status"`
+	ChildOrderID      uint64     `json:"child_order_id"`
+	ChildOrderNo      string     `json:"child_order_no"`
+	Remark            string     `json:"remark"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type ProcurementLogItem struct {
@@ -147,4 +188,59 @@ type ProcurementListResponse struct {
 	Total    int64                     `json:"total"`
 	Page     int                       `json:"page"`
 	PageSize int                       `json:"page_size"`
+}
+
+type JoinProcurementRequest struct {
+	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
+	ContactName     string  `json:"contact_name" binding:"required"`
+	ContactPhone    string  `json:"contact_phone" binding:"required"`
+	DeliveryAddress string  `json:"delivery_address" binding:"required"`
+	AgreementSigned bool    `json:"agreement_signed" binding:"required"`
+	Remark          string  `json:"remark"`
+}
+
+type RespondProcurementRequest struct {
+	Accepted         bool    `json:"accepted"`
+	GroupPrice       float64 `json:"group_price"`
+	MinGroupQuantity float64 `json:"min_group_quantity"`
+	MaxGroupQuantity float64 `json:"max_group_quantity"`
+	EndedAt          string  `json:"ended_at"`
+	DeliveryDays     int     `json:"delivery_days"`
+	Remark           string  `json:"remark"`
+}
+
+type CreateProcurementRequestRequest struct {
+	Source          string  `json:"source"`
+	Category        string  `json:"category" binding:"required"`
+	ProductName     string  `json:"product_name" binding:"required"`
+	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
+	Unit            string  `json:"unit"`
+	DeliveryAddress string  `json:"delivery_address"`
+	Remark          string  `json:"remark"`
+}
+
+type ProcurementRequestItem struct {
+	ID                uint64    `json:"id"`
+	RequestNo         string    `json:"request_no"`
+	Source            string    `json:"source"`
+	Category          string    `json:"category"`
+	ProductName       string    `json:"product_name"`
+	Quantity          float64   `json:"quantity"`
+	Unit              string    `json:"unit"`
+	DeliveryAddress   string    `json:"delivery_address"`
+	BuyerEnterpriseID uint64    `json:"buyer_enterprise_id"`
+	BuyerUserID       uint64    `json:"buyer_user_id"`
+	BuyerName         string    `json:"buyer_name"`
+	Status            string    `json:"status"`
+	ActivityID        uint64    `json:"activity_id"`
+	Remark            string    `json:"remark"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type ProcurementRequestListResponse struct {
+	List     []ProcurementRequestItem `json:"list"`
+	Total    int64                    `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"page_size"`
 }
