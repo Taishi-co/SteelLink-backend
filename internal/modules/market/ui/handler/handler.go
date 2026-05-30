@@ -213,6 +213,25 @@ func (h *MarketHandler) ListSellerProcurements(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *MarketHandler) ListMyJoinedProcurements(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req marketdto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+	result, err := h.service.ListMyJoinedProcurements(c.Request.Context(), &req, claims.EnterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *MarketHandler) RespondProcurement(c *gin.Context) {
 	claims := middleware.GetClaims(c)
 	if claims == nil {

@@ -516,6 +516,59 @@ func (s *MarketService) ListSellerProcurements(ctx context.Context, req *marketd
 	return &marketdto.ProcurementListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
 
+func (s *MarketService) ListMyJoinedProcurements(ctx context.Context, req *marketdto.ListRequest, enterpriseID uint64) (*marketdto.ProcurementListResponse, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看已参团集采")
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 20
+	}
+	buildQuery := func() *gorm.DB {
+		query := s.db.WithContext(ctx).Model(&marketentity.ProcurementActivity{}).
+			Joins("JOIN procurement_participants ON procurement_participants.activity_id = procurement_activities.id AND procurement_participants.deleted_at IS NULL").
+			Where("procurement_participants.buyer_enterprise_id = ? AND procurement_participants.status <> ?", enterpriseID, marketentity.ProcurementParticipantCancelled)
+		if req.Status != "" {
+			query = query.Where("procurement_activities.status = ?", req.Status)
+		}
+		if req.Category != "" {
+			query = query.Where("procurement_activities.category = ?", req.Category)
+		}
+		if req.Keyword != "" {
+			like := "%" + req.Keyword + "%"
+			query = query.Where("procurement_activities.title LIKE ? OR procurement_activities.procurement_no LIKE ? OR procurement_activities.product_name LIKE ? OR procurement_activities.target LIKE ? OR procurement_activities.seller_name LIKE ?", like, like, like, like, like)
+		}
+		return query
+	}
+
+	var total int64
+	if err := buildQuery().Distinct("procurement_activities.id").Count(&total).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	var activities []marketentity.ProcurementActivity
+	if err := buildQuery().
+		Select("procurement_activities.*").
+		Preload("Participants", func(db *gorm.DB) *gorm.DB {
+			return db.Where("buyer_enterprise_id = ? AND status <> ?", enterpriseID, marketentity.ProcurementParticipantCancelled).Order("id ASC")
+		}).
+		Order("procurement_participants.updated_at DESC, procurement_activities.id DESC").
+		Offset((req.Page - 1) * req.PageSize).
+		Limit(req.PageSize).
+		Find(&activities).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	items := make([]marketdto.ProcurementActivityItem, 0, len(activities))
+	for i := range activities {
+		if err := s.reconcileProcurementState(ctx, &activities[i]); err != nil {
+			return nil, ecode.ErrDatabase
+		}
+		items = append(items, toProcurementItem(activities[i], nil))
+	}
+	return &marketdto.ProcurementListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
 func (s *MarketService) RespondProcurement(ctx context.Context, userID, enterpriseID, activityID uint64, req *marketdto.RespondProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
 	if enterpriseID == 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能处理集采申请")
