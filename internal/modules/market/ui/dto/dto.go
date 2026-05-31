@@ -154,26 +154,37 @@ type ProcurementActivityItem struct {
 }
 
 type ProcurementParticipantItem struct {
-	ID                uint64     `json:"id"`
-	ActivityID        uint64     `json:"activity_id"`
-	BuyerEnterpriseID uint64     `json:"buyer_enterprise_id"`
-	BuyerUserID       uint64     `json:"buyer_user_id"`
-	BuyerName         string     `json:"buyer_name"`
-	Quantity          float64    `json:"quantity"`
-	Unit              string     `json:"unit"`
-	UnitPrice         float64    `json:"unit_price"`
-	TotalAmount       float64    `json:"total_amount"`
-	ContactName       string     `json:"contact_name"`
-	ContactPhone      string     `json:"contact_phone"`
-	DeliveryAddress   string     `json:"delivery_address"`
-	AgreementSigned   bool       `json:"agreement_signed"`
-	AgreementSignedAt *time.Time `json:"agreement_signed_at,omitempty"`
-	Status            string     `json:"status"`
-	ChildOrderID      uint64     `json:"child_order_id"`
-	ChildOrderNo      string     `json:"child_order_no"`
-	Remark            string     `json:"remark"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                        uint64     `json:"id"`
+	ActivityID                uint64     `json:"activity_id"`
+	BuyerEnterpriseID         uint64     `json:"buyer_enterprise_id"`
+	BuyerUserID               uint64     `json:"buyer_user_id"`
+	BuyerName                 string     `json:"buyer_name"`
+	Quantity                  float64    `json:"quantity"`
+	Unit                      string     `json:"unit"`
+	UnitPrice                 float64    `json:"unit_price"`
+	TotalAmount               float64    `json:"total_amount"`
+	ContactName               string     `json:"contact_name"`
+	ContactPhone              string     `json:"contact_phone"`
+	DeliveryAddressSource     string     `json:"delivery_address_source"`
+	DestWarehouseServiceID    uint64     `json:"dest_warehouse_service_id"`
+	DestWarehouseEnterpriseID uint64     `json:"dest_warehouse_enterprise_id"`
+	DestWarehouseName         string     `json:"dest_warehouse_name"`
+	DestWarehouseProvince     string     `json:"dest_warehouse_province"`
+	DestWarehouseCity         string     `json:"dest_warehouse_city"`
+	DestWarehouseDistrict     string     `json:"dest_warehouse_district"`
+	DestWarehouseAddress      string     `json:"dest_warehouse_address"`
+	DeliveryAddress           string     `json:"delivery_address"`
+	DeliveryMethod            string     `json:"delivery_method"`
+	PaymentMethod             string     `json:"payment_method"`
+	DeliveryNote              string     `json:"delivery_note"`
+	AgreementSigned           bool       `json:"agreement_signed"`
+	AgreementSignedAt         *time.Time `json:"agreement_signed_at,omitempty"`
+	Status                    string     `json:"status"`
+	ChildOrderID              uint64     `json:"child_order_id"`
+	ChildOrderNo              string     `json:"child_order_no"`
+	Remark                    string     `json:"remark"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
 type ProcurementLogItem struct {
@@ -191,12 +202,17 @@ type ProcurementListResponse struct {
 }
 
 type JoinProcurementRequest struct {
-	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
-	ContactName     string  `json:"contact_name" binding:"required"`
-	ContactPhone    string  `json:"contact_phone" binding:"required"`
-	DeliveryAddress string  `json:"delivery_address" binding:"required"`
-	AgreementSigned bool    `json:"agreement_signed" binding:"required"`
-	Remark          string  `json:"remark"`
+	Quantity               float64 `json:"quantity" binding:"required,gt=0"`
+	ContactName            string  `json:"contact_name" binding:"required"`
+	ContactPhone           string  `json:"contact_phone" binding:"required"`
+	DeliveryAddressSource  string  `json:"delivery_address_source"`
+	DestWarehouseServiceID uint64  `json:"dest_warehouse_service_id"`
+	DeliveryAddress        string  `json:"delivery_address"`
+	DeliveryMethod         string  `json:"delivery_method"`
+	PaymentMethod          string  `json:"payment_method"`
+	DeliveryNote           string  `json:"delivery_note"`
+	AgreementSigned        bool    `json:"agreement_signed" binding:"required"`
+	Remark                 string  `json:"remark"`
 }
 
 type RespondProcurementRequest struct {

@@ -10,6 +10,7 @@ import (
 	marketentity "github.com/Taishi-co/SteelLink-backend/internal/modules/market/domain/entity"
 	marketdto "github.com/Taishi-co/SteelLink-backend/internal/modules/market/ui/dto"
 	orderentity "github.com/Taishi-co/SteelLink-backend/internal/modules/order/domain/entity"
+	offerentity "github.com/Taishi-co/SteelLink-backend/internal/modules/serviceoffer/domain/entity"
 	userRepository "github.com/Taishi-co/SteelLink-backend/internal/modules/user/domain/repository"
 	userPersistence "github.com/Taishi-co/SteelLink-backend/internal/modules/user/infrastructure/persistence"
 	"github.com/Taishi-co/SteelLink-backend/internal/pkg/cache"
@@ -676,6 +677,29 @@ func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseI
 	contactName := strings.TrimSpace(req.ContactName)
 	contactPhone := strings.TrimSpace(req.ContactPhone)
 	deliveryAddress := strings.TrimSpace(req.DeliveryAddress)
+	deliveryAddressSource := strings.TrimSpace(req.DeliveryAddressSource)
+	if deliveryAddressSource == "" {
+		deliveryAddressSource = "manual"
+	}
+	if deliveryAddressSource != "manual" && deliveryAddressSource != "warehouse" {
+		return nil, ecode.ErrBadRequest.WithMessage("收货地址类型不正确")
+	}
+	deliveryMethod := strings.TrimSpace(req.DeliveryMethod)
+	paymentMethod := strings.TrimSpace(req.PaymentMethod)
+	deliveryNote := strings.TrimSpace(req.DeliveryNote)
+	var destWarehouse offerentity.WarehouseService
+	if deliveryAddressSource == "warehouse" && req.DestWarehouseServiceID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请选择平台收货仓库")
+	}
+	if req.DestWarehouseServiceID > 0 {
+		if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", req.DestWarehouseServiceID, offerentity.OfferStatusApproved).First(&destWarehouse).Error; err != nil {
+			return nil, ecode.ErrBadRequest.WithMessage("收货仓库不存在或未审核通过")
+		}
+		deliveryAddressSource = "warehouse"
+		if deliveryAddress == "" {
+			deliveryAddress = strings.TrimSpace(destWarehouse.Address)
+		}
+	}
 	if contactName == "" || contactPhone == "" || deliveryAddress == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("请填写完整收货联系人、联系电话和收货地址")
 	}
@@ -742,7 +766,18 @@ func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseI
 		participant.TotalAmount = req.Quantity * activity.GroupPrice
 		participant.ContactName = contactName
 		participant.ContactPhone = contactPhone
+		participant.DeliveryAddressSource = deliveryAddressSource
+		participant.DestWarehouseServiceID = req.DestWarehouseServiceID
+		participant.DestWarehouseEnterpriseID = destWarehouse.EnterpriseID
+		participant.DestWarehouseName = strings.TrimSpace(destWarehouse.WarehouseName)
+		participant.DestWarehouseProvince = strings.TrimSpace(destWarehouse.Province)
+		participant.DestWarehouseCity = strings.TrimSpace(destWarehouse.City)
+		participant.DestWarehouseDistrict = strings.TrimSpace(destWarehouse.District)
+		participant.DestWarehouseAddress = strings.TrimSpace(destWarehouse.Address)
 		participant.DeliveryAddress = deliveryAddress
+		participant.DeliveryMethod = deliveryMethod
+		participant.PaymentMethod = paymentMethod
+		participant.DeliveryNote = deliveryNote
 		participant.AgreementSigned = true
 		participant.AgreementSignedAt = &now
 		participant.Remark = strings.TrimSpace(req.Remark)
@@ -757,7 +792,16 @@ func (s *MarketService) JoinProcurement(ctx context.Context, userID, enterpriseI
 		return nil, ecode.ErrDatabase.WithMessage("参与集采失败")
 	}
 	invalidateMarketCache(ctx)
-	return s.GetProcurement(ctx, activityID)
+	item, err := s.GetProcurement(ctx, activityID)
+	if err != nil {
+		return nil, err
+	}
+	participants, err := s.listProcurementParticipantsForEnterprise(ctx, activityID, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	item.Participants = participants
+	return item, nil
 }
 
 func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, enterpriseID uint64, req *marketdto.CreateProcurementRequestRequest) (*marketdto.ProcurementRequestItem, error) {
@@ -1084,26 +1128,37 @@ func toProcurementItem(activity marketentity.ProcurementActivity, logs []markete
 
 func toProcurementParticipantItem(participant marketentity.ProcurementParticipant) marketdto.ProcurementParticipantItem {
 	return marketdto.ProcurementParticipantItem{
-		ID:                participant.ID,
-		ActivityID:        participant.ActivityID,
-		BuyerEnterpriseID: participant.BuyerEnterpriseID,
-		BuyerUserID:       participant.BuyerUserID,
-		BuyerName:         participant.BuyerName,
-		Quantity:          participant.Quantity,
-		Unit:              participant.Unit,
-		UnitPrice:         participant.UnitPrice,
-		TotalAmount:       participant.TotalAmount,
-		ContactName:       participant.ContactName,
-		ContactPhone:      participant.ContactPhone,
-		DeliveryAddress:   participant.DeliveryAddress,
-		AgreementSigned:   participant.AgreementSigned,
-		AgreementSignedAt: participant.AgreementSignedAt,
-		Status:            string(participant.Status),
-		ChildOrderID:      participant.ChildOrderID,
-		ChildOrderNo:      participant.ChildOrderNo,
-		Remark:            participant.Remark,
-		CreatedAt:         participant.CreatedAt,
-		UpdatedAt:         participant.UpdatedAt,
+		ID:                        participant.ID,
+		ActivityID:                participant.ActivityID,
+		BuyerEnterpriseID:         participant.BuyerEnterpriseID,
+		BuyerUserID:               participant.BuyerUserID,
+		BuyerName:                 participant.BuyerName,
+		Quantity:                  participant.Quantity,
+		Unit:                      participant.Unit,
+		UnitPrice:                 participant.UnitPrice,
+		TotalAmount:               participant.TotalAmount,
+		ContactName:               participant.ContactName,
+		ContactPhone:              participant.ContactPhone,
+		DeliveryAddressSource:     participant.DeliveryAddressSource,
+		DestWarehouseServiceID:    participant.DestWarehouseServiceID,
+		DestWarehouseEnterpriseID: participant.DestWarehouseEnterpriseID,
+		DestWarehouseName:         participant.DestWarehouseName,
+		DestWarehouseProvince:     participant.DestWarehouseProvince,
+		DestWarehouseCity:         participant.DestWarehouseCity,
+		DestWarehouseDistrict:     participant.DestWarehouseDistrict,
+		DestWarehouseAddress:      participant.DestWarehouseAddress,
+		DeliveryAddress:           participant.DeliveryAddress,
+		DeliveryMethod:            participant.DeliveryMethod,
+		PaymentMethod:             participant.PaymentMethod,
+		DeliveryNote:              participant.DeliveryNote,
+		AgreementSigned:           participant.AgreementSigned,
+		AgreementSignedAt:         participant.AgreementSignedAt,
+		Status:                    string(participant.Status),
+		ChildOrderID:              participant.ChildOrderID,
+		ChildOrderNo:              participant.ChildOrderNo,
+		Remark:                    participant.Remark,
+		CreatedAt:                 participant.CreatedAt,
+		UpdatedAt:                 participant.UpdatedAt,
 	}
 }
 
