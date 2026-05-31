@@ -99,27 +99,38 @@ const (
 )
 
 type ProcurementParticipant struct {
-	ID                uint64                       `gorm:"primaryKey;autoIncrement" json:"id"`
-	ActivityID        uint64                       `gorm:"index;not null;comment:集采活动ID" json:"activity_id"`
-	BuyerEnterpriseID uint64                       `gorm:"index;not null;comment:买家企业ID" json:"buyer_enterprise_id"`
-	BuyerUserID       uint64                       `gorm:"index;comment:买家用户ID" json:"buyer_user_id"`
-	BuyerName         string                       `gorm:"type:varchar(200);comment:买家企业名称" json:"buyer_name"`
-	Quantity          float64                      `gorm:"type:decimal(14,2);comment:参团数量" json:"quantity"`
-	Unit              string                       `gorm:"type:varchar(20);default:吨;comment:单位" json:"unit"`
-	UnitPrice         float64                      `gorm:"type:decimal(16,2);comment:集采单价" json:"unit_price"`
-	TotalAmount       float64                      `gorm:"type:decimal(16,2);comment:参团金额" json:"total_amount"`
-	ContactName       string                       `gorm:"type:varchar(80);comment:收货联系人" json:"contact_name"`
-	ContactPhone      string                       `gorm:"type:varchar(40);comment:收货联系电话" json:"contact_phone"`
-	DeliveryAddress   string                       `gorm:"type:varchar(500);comment:收货地址" json:"delivery_address"`
-	AgreementSigned   bool                         `gorm:"default:false;comment:是否已签集采协议" json:"agreement_signed"`
-	AgreementSignedAt *time.Time                   `gorm:"comment:协议签署时间" json:"agreement_signed_at"`
-	Status            ProcurementParticipantStatus `gorm:"type:varchar(32);index;default:joined;comment:状态" json:"status"`
-	ChildOrderID      uint64                       `gorm:"index;comment:子订单ID" json:"child_order_id"`
-	ChildOrderNo      string                       `gorm:"type:varchar(64);index;comment:子订单号" json:"child_order_no"`
-	Remark            string                       `gorm:"type:varchar(500);comment:备注" json:"remark"`
-	CreatedAt         time.Time                    `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt         time.Time                    `gorm:"autoUpdateTime" json:"updated_at"`
-	DeletedAt         gorm.DeletedAt               `gorm:"index" json:"-"`
+	ID                        uint64                       `gorm:"primaryKey;autoIncrement" json:"id"`
+	ActivityID                uint64                       `gorm:"index;not null;comment:集采活动ID" json:"activity_id"`
+	BuyerEnterpriseID         uint64                       `gorm:"index;not null;comment:买家企业ID" json:"buyer_enterprise_id"`
+	BuyerUserID               uint64                       `gorm:"index;comment:买家用户ID" json:"buyer_user_id"`
+	BuyerName                 string                       `gorm:"type:varchar(200);comment:买家企业名称" json:"buyer_name"`
+	Quantity                  float64                      `gorm:"type:decimal(14,2);comment:参团数量" json:"quantity"`
+	Unit                      string                       `gorm:"type:varchar(20);default:吨;comment:单位" json:"unit"`
+	UnitPrice                 float64                      `gorm:"type:decimal(16,2);comment:集采单价" json:"unit_price"`
+	TotalAmount               float64                      `gorm:"type:decimal(16,2);comment:参团金额" json:"total_amount"`
+	ContactName               string                       `gorm:"type:varchar(80);comment:收货联系人" json:"contact_name"`
+	ContactPhone              string                       `gorm:"type:varchar(40);comment:收货联系电话" json:"contact_phone"`
+	DeliveryAddressSource     string                       `gorm:"type:varchar(32);comment:收货地址来源 manual/warehouse" json:"delivery_address_source"`
+	DestWarehouseServiceID    uint64                       `gorm:"index;comment:目的地仓储资源ID" json:"dest_warehouse_service_id"`
+	DestWarehouseEnterpriseID uint64                       `gorm:"index;comment:目的地仓储方企业ID" json:"dest_warehouse_enterprise_id"`
+	DestWarehouseName         string                       `gorm:"type:varchar(200);comment:目的地仓库名称" json:"dest_warehouse_name"`
+	DestWarehouseProvince     string                       `gorm:"type:varchar(80);comment:目的地仓库省份" json:"dest_warehouse_province"`
+	DestWarehouseCity         string                       `gorm:"type:varchar(80);comment:目的地仓库城市" json:"dest_warehouse_city"`
+	DestWarehouseDistrict     string                       `gorm:"type:varchar(80);comment:目的地仓库区县" json:"dest_warehouse_district"`
+	DestWarehouseAddress      string                       `gorm:"type:varchar(500);comment:目的地仓库地址" json:"dest_warehouse_address"`
+	DeliveryAddress           string                       `gorm:"type:varchar(500);comment:收货地址" json:"delivery_address"`
+	DeliveryMethod            string                       `gorm:"type:varchar(60);comment:配送方式" json:"delivery_method"`
+	PaymentMethod             string                       `gorm:"type:varchar(60);comment:付款方式" json:"payment_method"`
+	DeliveryNote              string                       `gorm:"type:varchar(500);comment:配送备注" json:"delivery_note"`
+	AgreementSigned           bool                         `gorm:"default:false;comment:是否已签集采协议" json:"agreement_signed"`
+	AgreementSignedAt         *time.Time                   `gorm:"comment:协议签署时间" json:"agreement_signed_at"`
+	Status                    ProcurementParticipantStatus `gorm:"type:varchar(32);index;default:joined;comment:状态" json:"status"`
+	ChildOrderID              uint64                       `gorm:"index;comment:子订单ID" json:"child_order_id"`
+	ChildOrderNo              string                       `gorm:"type:varchar(64);index;comment:子订单号" json:"child_order_no"`
+	Remark                    string                       `gorm:"type:varchar(500);comment:备注" json:"remark"`
+	CreatedAt                 time.Time                    `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt                 time.Time                    `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt                 gorm.DeletedAt               `gorm:"index" json:"-"`
 }
 
 func (ProcurementParticipant) TableName() string {
