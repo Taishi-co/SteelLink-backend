@@ -226,32 +226,64 @@ type RespondProcurementRequest struct {
 }
 
 type CreateProcurementRequestRequest struct {
-	Source          string  `json:"source"`
-	Category        string  `json:"category" binding:"required"`
-	ProductName     string  `json:"product_name" binding:"required"`
-	Quantity        float64 `json:"quantity" binding:"required,gt=0"`
-	Unit            string  `json:"unit"`
-	DeliveryAddress string  `json:"delivery_address"`
-	Remark          string  `json:"remark"`
+	Source                 string  `json:"source"`
+	SourceProductID        uint64  `json:"source_product_id"`
+	AIProcurementID        uint64  `json:"ai_procurement_id"`
+	Category               string  `json:"category" binding:"required"`
+	SubCategory            string  `json:"sub_category"`
+	ProductName            string  `json:"product_name" binding:"required"`
+	Material               string  `json:"material"`
+	Spec                   string  `json:"spec"`
+	Quantity               float64 `json:"quantity" binding:"required,gt=0"`
+	Unit                   string  `json:"unit"`
+	TargetPrice            float64 `json:"target_price"`
+	ContactName            string  `json:"contact_name" binding:"required"`
+	ContactPhone           string  `json:"contact_phone" binding:"required"`
+	DeliveryAddressSource  string  `json:"delivery_address_source"`
+	DestWarehouseServiceID uint64  `json:"dest_warehouse_service_id"`
+	DeliveryAddress        string  `json:"delivery_address"`
+	DeliveryMethod         string  `json:"delivery_method"`
+	PaymentMethod          string  `json:"payment_method"`
+	DeliveryNote           string  `json:"delivery_note"`
+	Remark                 string  `json:"remark"`
 }
 
 type ProcurementRequestItem struct {
-	ID                uint64    `json:"id"`
-	RequestNo         string    `json:"request_no"`
-	Source            string    `json:"source"`
-	Category          string    `json:"category"`
-	ProductName       string    `json:"product_name"`
-	Quantity          float64   `json:"quantity"`
-	Unit              string    `json:"unit"`
-	DeliveryAddress   string    `json:"delivery_address"`
-	BuyerEnterpriseID uint64    `json:"buyer_enterprise_id"`
-	BuyerUserID       uint64    `json:"buyer_user_id"`
-	BuyerName         string    `json:"buyer_name"`
-	Status            string    `json:"status"`
-	ActivityID        uint64    `json:"activity_id"`
-	Remark            string    `json:"remark"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                        uint64    `json:"id"`
+	RequestNo                 string    `json:"request_no"`
+	Source                    string    `json:"source"`
+	SourceProductID           uint64    `json:"source_product_id"`
+	AIProcurementID           uint64    `json:"ai_procurement_id"`
+	Category                  string    `json:"category"`
+	SubCategory               string    `json:"sub_category"`
+	ProductName               string    `json:"product_name"`
+	Material                  string    `json:"material"`
+	Spec                      string    `json:"spec"`
+	Quantity                  float64   `json:"quantity"`
+	Unit                      string    `json:"unit"`
+	TargetPrice               float64   `json:"target_price"`
+	ContactName               string    `json:"contact_name"`
+	ContactPhone              string    `json:"contact_phone"`
+	DeliveryAddressSource     string    `json:"delivery_address_source"`
+	DestWarehouseServiceID    uint64    `json:"dest_warehouse_service_id"`
+	DestWarehouseEnterpriseID uint64    `json:"dest_warehouse_enterprise_id"`
+	DestWarehouseName         string    `json:"dest_warehouse_name"`
+	DestWarehouseProvince     string    `json:"dest_warehouse_province"`
+	DestWarehouseCity         string    `json:"dest_warehouse_city"`
+	DestWarehouseDistrict     string    `json:"dest_warehouse_district"`
+	DestWarehouseAddress      string    `json:"dest_warehouse_address"`
+	DeliveryAddress           string    `json:"delivery_address"`
+	DeliveryMethod            string    `json:"delivery_method"`
+	PaymentMethod             string    `json:"payment_method"`
+	DeliveryNote              string    `json:"delivery_note"`
+	BuyerEnterpriseID         uint64    `json:"buyer_enterprise_id"`
+	BuyerUserID               uint64    `json:"buyer_user_id"`
+	BuyerName                 string    `json:"buyer_name"`
+	Status                    string    `json:"status"`
+	ActivityID                uint64    `json:"activity_id"`
+	Remark                    string    `json:"remark"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 type ProcurementRequestListResponse struct {
@@ -259,4 +291,31 @@ type ProcurementRequestListResponse struct {
 	Total    int64                    `json:"total"`
 	Page     int                      `json:"page"`
 	PageSize int                      `json:"page_size"`
+}
+
+type ProcurementInvitationItem struct {
+	ID                uint64                   `json:"id"`
+	InvitationNo      string                   `json:"invitation_no"`
+	ActivityID        uint64                   `json:"activity_id"`
+	RequestID         uint64                   `json:"request_id"`
+	BuyerEnterpriseID uint64                   `json:"buyer_enterprise_id"`
+	BuyerUserID       uint64                   `json:"buyer_user_id"`
+	BuyerName         string                   `json:"buyer_name"`
+	Status            string                   `json:"status"`
+	ParticipantID     uint64                   `json:"participant_id"`
+	Remark            string                   `json:"remark"`
+	ExpiresAt         *time.Time               `json:"expires_at,omitempty"`
+	AcceptedAt        *time.Time               `json:"accepted_at,omitempty"`
+	DeclinedAt        *time.Time               `json:"declined_at,omitempty"`
+	Activity          *ProcurementActivityItem `json:"activity,omitempty"`
+	Request           *ProcurementRequestItem  `json:"request,omitempty"`
+	CreatedAt         time.Time                `json:"created_at"`
+	UpdatedAt         time.Time                `json:"updated_at"`
+}
+
+type ProcurementInvitationListResponse struct {
+	List     []ProcurementInvitationItem `json:"list"`
+	Total    int64                       `json:"total"`
+	Page     int                         `json:"page"`
+	PageSize int                         `json:"page_size"`
 }

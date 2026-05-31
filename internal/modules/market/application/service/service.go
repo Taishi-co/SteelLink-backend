@@ -647,6 +647,19 @@ func (s *MarketService) RespondProcurement(ctx context.Context, userID, enterpri
 		if err := tx.Model(&activity).Updates(updates).Error; err != nil {
 			return err
 		}
+		if req.Accepted {
+			if err := tx.Model(&marketentity.ProcurementInvitation{}).
+				Where("activity_id = ? AND status = ?", activity.ID, marketentity.ProcurementInvitationPending).
+				Updates(map[string]interface{}{"expires_at": updates["ended_at"], "updated_at": now}).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Model(&marketentity.ProcurementInvitation{}).
+				Where("activity_id = ? AND status = ?", activity.ID, marketentity.ProcurementInvitationPending).
+				Updates(map[string]interface{}{"status": marketentity.ProcurementInvitationExpired, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Create(&marketentity.ProcurementLog{ActivityID: activity.ID, Content: logContent, Color: logColor}).Error
 	}); err != nil {
 		return nil, ecode.ErrDatabase.WithMessage("处理集采申请失败")
@@ -811,6 +824,32 @@ func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, en
 	if req.Quantity <= 0 {
 		return nil, ecode.ErrBadRequest.WithMessage("需求数量必须大于0")
 	}
+	contactName := strings.TrimSpace(req.ContactName)
+	contactPhone := strings.TrimSpace(req.ContactPhone)
+	deliveryAddress := strings.TrimSpace(req.DeliveryAddress)
+	deliveryAddressSource := strings.TrimSpace(req.DeliveryAddressSource)
+	if deliveryAddressSource == "" {
+		deliveryAddressSource = "manual"
+	}
+	if deliveryAddressSource != "manual" && deliveryAddressSource != "warehouse" {
+		return nil, ecode.ErrBadRequest.WithMessage("收货地址类型不正确")
+	}
+	var destWarehouse offerentity.WarehouseService
+	if deliveryAddressSource == "warehouse" && req.DestWarehouseServiceID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("请选择平台收货仓库")
+	}
+	if req.DestWarehouseServiceID > 0 {
+		if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", req.DestWarehouseServiceID, offerentity.OfferStatusApproved).First(&destWarehouse).Error; err != nil {
+			return nil, ecode.ErrBadRequest.WithMessage("收货仓库不存在或未审核通过")
+		}
+		deliveryAddressSource = "warehouse"
+		if deliveryAddress == "" {
+			deliveryAddress = strings.TrimSpace(destWarehouse.Address)
+		}
+	}
+	if contactName == "" || contactPhone == "" || deliveryAddress == "" {
+		return nil, ecode.ErrBadRequest.WithMessage("请填写完整收货联系人、联系电话和收货地址")
+	}
 	enterprise, err := s.enterpriseRepo.FindByID(ctx, enterpriseID)
 	if err != nil {
 		return nil, ecode.ErrDatabase
@@ -824,18 +863,37 @@ func (s *MarketService) CreateProcurementRequest(ctx context.Context, userID, en
 		source = "manual"
 	}
 	item := &marketentity.ProcurementRequest{
-		RequestNo:         generateProcurementRequestNo(),
-		Source:            source,
-		Category:          strings.TrimSpace(req.Category),
-		ProductName:       strings.TrimSpace(req.ProductName),
-		Quantity:          req.Quantity,
-		Unit:              unit,
-		DeliveryAddress:   strings.TrimSpace(req.DeliveryAddress),
-		BuyerEnterpriseID: enterpriseID,
-		BuyerUserID:       userID,
-		BuyerName:         enterprise.Name,
-		Status:            marketentity.ProcurementRequestPending,
-		Remark:            strings.TrimSpace(req.Remark),
+		RequestNo:                 generateProcurementRequestNo(),
+		Source:                    source,
+		SourceProductID:           req.SourceProductID,
+		AIProcurementID:           req.AIProcurementID,
+		Category:                  strings.TrimSpace(req.Category),
+		SubCategory:               strings.TrimSpace(req.SubCategory),
+		ProductName:               strings.TrimSpace(req.ProductName),
+		Material:                  strings.TrimSpace(req.Material),
+		Spec:                      strings.TrimSpace(req.Spec),
+		Quantity:                  req.Quantity,
+		Unit:                      unit,
+		TargetPrice:               req.TargetPrice,
+		ContactName:               contactName,
+		ContactPhone:              contactPhone,
+		DeliveryAddressSource:     deliveryAddressSource,
+		DestWarehouseServiceID:    req.DestWarehouseServiceID,
+		DestWarehouseEnterpriseID: destWarehouse.EnterpriseID,
+		DestWarehouseName:         strings.TrimSpace(destWarehouse.WarehouseName),
+		DestWarehouseProvince:     strings.TrimSpace(destWarehouse.Province),
+		DestWarehouseCity:         strings.TrimSpace(destWarehouse.City),
+		DestWarehouseDistrict:     strings.TrimSpace(destWarehouse.District),
+		DestWarehouseAddress:      strings.TrimSpace(destWarehouse.Address),
+		DeliveryAddress:           deliveryAddress,
+		DeliveryMethod:            strings.TrimSpace(req.DeliveryMethod),
+		PaymentMethod:             strings.TrimSpace(req.PaymentMethod),
+		DeliveryNote:              strings.TrimSpace(req.DeliveryNote),
+		BuyerEnterpriseID:         enterpriseID,
+		BuyerUserID:               userID,
+		BuyerName:                 enterprise.Name,
+		Status:                    marketentity.ProcurementRequestPending,
+		Remark:                    strings.TrimSpace(req.Remark),
 	}
 	if item.Category == "" || item.ProductName == "" {
 		return nil, ecode.ErrBadRequest.WithMessage("品类和采购物品不能为空")
@@ -874,6 +932,132 @@ func (s *MarketService) ListMyProcurementRequests(ctx context.Context, req *mark
 		items = append(items, toProcurementRequestItem(row))
 	}
 	return &marketdto.ProcurementRequestListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
+func (s *MarketService) ListMyProcurementInvitations(ctx context.Context, req *marketdto.ListRequest, enterpriseID uint64) (*marketdto.ProcurementInvitationListResponse, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能查看集采邀请")
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	now := time.Now()
+	if err := s.db.WithContext(ctx).Model(&marketentity.ProcurementInvitation{}).
+		Where("buyer_enterprise_id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", enterpriseID, marketentity.ProcurementInvitationPending, now).
+		Updates(map[string]interface{}{"status": marketentity.ProcurementInvitationExpired, "updated_at": now}).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	query := s.db.WithContext(ctx).Model(&marketentity.ProcurementInvitation{}).
+		Joins("JOIN procurement_activities ON procurement_activities.id = procurement_invitations.activity_id AND procurement_activities.deleted_at IS NULL").
+		Where("procurement_invitations.buyer_enterprise_id = ?", enterpriseID).
+		Where("procurement_activities.status IN ?", []marketentity.ProcurementStatus{marketentity.ProcurementStatusActive, marketentity.ProcurementStatusEnded, marketentity.ProcurementStatusOrderCreated})
+	if req.Status != "" {
+		query = query.Where("procurement_invitations.status = ?", req.Status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	var rows []marketentity.ProcurementInvitation
+	if err := query.Select("procurement_invitations.*").Preload("Activity").Preload("Request").
+		Order("procurement_invitations.id DESC").
+		Offset((req.Page - 1) * req.PageSize).
+		Limit(req.PageSize).
+		Find(&rows).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	items := make([]marketdto.ProcurementInvitationItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toProcurementInvitationItem(row))
+	}
+	return &marketdto.ProcurementInvitationListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+}
+
+func (s *MarketService) AcceptProcurementInvitation(ctx context.Context, userID, enterpriseID, invitationID uint64, req *marketdto.JoinProcurementRequest) (*marketdto.ProcurementActivityItem, error) {
+	if enterpriseID == 0 {
+		return nil, ecode.ErrBadRequest.WithMessage("企业账号才能接受集采邀请")
+	}
+	var invitation marketentity.ProcurementInvitation
+	if err := s.db.WithContext(ctx).Preload("Request").First(&invitation, "id = ? AND buyer_enterprise_id = ?", invitationID, enterpriseID).Error; err != nil {
+		if IsNotFound(err) {
+			return nil, ecode.ErrNotFound.WithMessage("集采邀请不存在")
+		}
+		return nil, ecode.ErrDatabase
+	}
+	now := time.Now()
+	if invitation.Status != marketentity.ProcurementInvitationPending {
+		return nil, ecode.ErrBadRequest.WithMessage("当前邀请不可接受")
+	}
+	if invitation.ExpiresAt != nil && !invitation.ExpiresAt.After(now) {
+		_ = s.db.WithContext(ctx).Model(&invitation).Updates(map[string]interface{}{"status": marketentity.ProcurementInvitationExpired, "updated_at": now}).Error
+		return nil, ecode.ErrBadRequest.WithMessage("集采邀请已过期")
+	}
+	joinReq := *req
+	if joinReq.Quantity <= 0 {
+		joinReq.Quantity = invitation.Request.Quantity
+	}
+	if strings.TrimSpace(joinReq.ContactName) == "" {
+		joinReq.ContactName = invitation.Request.ContactName
+	}
+	if strings.TrimSpace(joinReq.ContactPhone) == "" {
+		joinReq.ContactPhone = invitation.Request.ContactPhone
+	}
+	if strings.TrimSpace(joinReq.DeliveryAddressSource) == "" {
+		joinReq.DeliveryAddressSource = invitation.Request.DeliveryAddressSource
+	}
+	if joinReq.DestWarehouseServiceID == 0 {
+		joinReq.DestWarehouseServiceID = invitation.Request.DestWarehouseServiceID
+	}
+	if strings.TrimSpace(joinReq.DeliveryAddress) == "" {
+		joinReq.DeliveryAddress = invitation.Request.DeliveryAddress
+	}
+	if strings.TrimSpace(joinReq.DeliveryMethod) == "" {
+		joinReq.DeliveryMethod = invitation.Request.DeliveryMethod
+	}
+	if strings.TrimSpace(joinReq.PaymentMethod) == "" {
+		joinReq.PaymentMethod = invitation.Request.PaymentMethod
+	}
+	if strings.TrimSpace(joinReq.DeliveryNote) == "" {
+		joinReq.DeliveryNote = invitation.Request.DeliveryNote
+	}
+	if strings.TrimSpace(joinReq.Remark) == "" {
+		joinReq.Remark = invitation.Request.Remark
+	}
+	item, err := s.JoinProcurement(ctx, userID, enterpriseID, invitation.ActivityID, &joinReq)
+	if err != nil {
+		return nil, err
+	}
+	var participant marketentity.ProcurementParticipant
+	if err := s.db.WithContext(ctx).
+		Where("activity_id = ? AND buyer_enterprise_id = ? AND status <> ?", invitation.ActivityID, enterpriseID, marketentity.ProcurementParticipantCancelled).
+		Order("id DESC").
+		First(&participant).Error; err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&marketentity.ProcurementInvitation{}).Where("id = ?", invitation.ID).Updates(map[string]interface{}{
+			"status":         marketentity.ProcurementInvitationAccepted,
+			"participant_id": participant.ID,
+			"accepted_at":    now,
+			"updated_at":     now,
+		}).Error; err != nil {
+			return err
+		}
+		if invitation.RequestID > 0 {
+			return tx.Model(&marketentity.ProcurementRequest{}).Where("id = ?", invitation.RequestID).Updates(map[string]interface{}{
+				"status":      marketentity.ProcurementRequestAccepted,
+				"activity_id": invitation.ActivityID,
+				"updated_at":  now,
+			}).Error
+		}
+		return nil
+	}); err != nil {
+		return nil, ecode.ErrDatabase.WithMessage("更新集采邀请状态失败")
+	}
+	return item, nil
 }
 
 func (s *MarketService) listBiddingQuotes(ctx context.Context, biddingID uint64) ([]marketentity.BiddingQuote, error) {
@@ -1164,23 +1348,71 @@ func toProcurementParticipantItem(participant marketentity.ProcurementParticipan
 
 func toProcurementRequestItem(item marketentity.ProcurementRequest) marketdto.ProcurementRequestItem {
 	return marketdto.ProcurementRequestItem{
+		ID:                        item.ID,
+		RequestNo:                 item.RequestNo,
+		Source:                    item.Source,
+		SourceProductID:           item.SourceProductID,
+		AIProcurementID:           item.AIProcurementID,
+		Category:                  item.Category,
+		SubCategory:               item.SubCategory,
+		ProductName:               item.ProductName,
+		Material:                  item.Material,
+		Spec:                      item.Spec,
+		Quantity:                  item.Quantity,
+		Unit:                      item.Unit,
+		TargetPrice:               item.TargetPrice,
+		ContactName:               item.ContactName,
+		ContactPhone:              item.ContactPhone,
+		DeliveryAddressSource:     item.DeliveryAddressSource,
+		DestWarehouseServiceID:    item.DestWarehouseServiceID,
+		DestWarehouseEnterpriseID: item.DestWarehouseEnterpriseID,
+		DestWarehouseName:         item.DestWarehouseName,
+		DestWarehouseProvince:     item.DestWarehouseProvince,
+		DestWarehouseCity:         item.DestWarehouseCity,
+		DestWarehouseDistrict:     item.DestWarehouseDistrict,
+		DestWarehouseAddress:      item.DestWarehouseAddress,
+		DeliveryAddress:           item.DeliveryAddress,
+		DeliveryMethod:            item.DeliveryMethod,
+		PaymentMethod:             item.PaymentMethod,
+		DeliveryNote:              item.DeliveryNote,
+		BuyerEnterpriseID:         item.BuyerEnterpriseID,
+		BuyerUserID:               item.BuyerUserID,
+		BuyerName:                 item.BuyerName,
+		Status:                    string(item.Status),
+		ActivityID:                item.ActivityID,
+		Remark:                    item.Remark,
+		CreatedAt:                 item.CreatedAt,
+		UpdatedAt:                 item.UpdatedAt,
+	}
+}
+
+func toProcurementInvitationItem(item marketentity.ProcurementInvitation) marketdto.ProcurementInvitationItem {
+	result := marketdto.ProcurementInvitationItem{
 		ID:                item.ID,
-		RequestNo:         item.RequestNo,
-		Source:            item.Source,
-		Category:          item.Category,
-		ProductName:       item.ProductName,
-		Quantity:          item.Quantity,
-		Unit:              item.Unit,
-		DeliveryAddress:   item.DeliveryAddress,
+		InvitationNo:      item.InvitationNo,
+		ActivityID:        item.ActivityID,
+		RequestID:         item.RequestID,
 		BuyerEnterpriseID: item.BuyerEnterpriseID,
 		BuyerUserID:       item.BuyerUserID,
 		BuyerName:         item.BuyerName,
 		Status:            string(item.Status),
-		ActivityID:        item.ActivityID,
+		ParticipantID:     item.ParticipantID,
 		Remark:            item.Remark,
+		ExpiresAt:         item.ExpiresAt,
+		AcceptedAt:        item.AcceptedAt,
+		DeclinedAt:        item.DeclinedAt,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
 	}
+	if item.Activity.ID > 0 {
+		activity := toProcurementItem(item.Activity, nil)
+		result.Activity = &activity
+	}
+	if item.Request.ID > 0 {
+		request := toProcurementRequestItem(item.Request)
+		result.Request = &request
+	}
+	return result
 }
 
 func parseMarketTime(value string) (time.Time, error) {
@@ -1199,6 +1431,10 @@ func generateBiddingNo() string {
 
 func generateProcurementRequestNo() string {
 	return fmt.Sprintf("GPR%s%06d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%1000000)
+}
+
+func generateProcurementInvitationNo() string {
+	return fmt.Sprintf("GPI%s%06d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%1000000)
 }
 
 func defaultUnit(unit string) string {

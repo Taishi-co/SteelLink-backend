@@ -316,6 +316,48 @@ func (h *MarketHandler) ListMyProcurementRequests(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *MarketHandler) ListMyProcurementInvitations(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req marketdto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+	result, err := h.service.ListMyProcurementInvitations(c.Request.Context(), &req, claims.EnterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) AcceptProcurementInvitation(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var req marketdto.JoinProcurementRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.service.AcceptProcurementInvitation(c.Request.Context(), claims.UserID, claims.EnterpriseID, id, &req)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func parseUintParam(c *gin.Context, name string) (uint64, bool) {
 	id, err := strconv.ParseUint(c.Param(name), 10, 64)
 	if err != nil {
