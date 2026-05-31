@@ -17,6 +17,8 @@ func AutoMigrate() error {
 		&marketentity.ProcurementLog{},
 		&marketentity.ProcurementParticipant{},
 		&marketentity.ProcurementRequest{},
+		&marketentity.ProcurementActivityRequest{},
+		&marketentity.ProcurementInvitation{},
 	); err != nil {
 		return err
 	}
