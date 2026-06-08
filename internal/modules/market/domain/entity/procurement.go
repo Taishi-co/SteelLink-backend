@@ -81,6 +81,7 @@ func (ProcurementActivity) TableName() string {
 type ProcurementLog struct {
 	ID         uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
 	ActivityID uint64    `gorm:"index;comment:集采活动ID" json:"activity_id"`
+	ProjectID  uint64    `gorm:"index;comment:集采项目ID" json:"project_id"`
 	Content    string    `gorm:"type:varchar(255);comment:日志内容" json:"content"`
 	Color      string    `gorm:"type:varchar(20);default:gray;comment:展示色" json:"color"`
 	CreatedAt  time.Time `gorm:"autoCreateTime" json:"created_at"`

@@ -358,6 +358,125 @@ func (h *MarketHandler) AcceptProcurementInvitation(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *MarketHandler) ListProcurementProjects(c *gin.Context) {
+	var req marketdto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+	var enterpriseID uint64
+	if claims := middleware.GetClaims(c); claims != nil {
+		enterpriseID = claims.EnterpriseID
+	}
+	result, err := h.service.ListProcurementProjects(c.Request.Context(), &req, enterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) ListMyProcurementProjects(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req marketdto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+	result, err := h.service.ListMyProcurementProjects(c.Request.Context(), &req, claims.EnterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) ListSellerProcurementProjectsV2(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	var req marketdto.ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "invalid query")
+		return
+	}
+	result, err := h.service.ListSellerProcurementProjectsV2(c.Request.Context(), &req, claims.EnterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) GetProcurementProject(c *gin.Context) {
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var enterpriseID uint64
+	if claims := middleware.GetClaims(c); claims != nil {
+		enterpriseID = claims.EnterpriseID
+	}
+	result, err := h.service.GetProcurementProject(c.Request.Context(), id, enterpriseID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) CreateProcurementProjectEnrollment(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var req marketdto.CreateProcurementProjectEnrollmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil && err.Error() != "EOF" {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.service.CreateProcurementProjectEnrollment(c.Request.Context(), claims.UserID, claims.EnterpriseID, id, &req)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *MarketHandler) SubmitProcurementProjectQuote(c *gin.Context) {
+	claims := middleware.GetClaims(c)
+	if claims == nil {
+		response.Unauthorized(c, "未登录")
+		return
+	}
+	id, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var req marketdto.CreateProcurementProjectQuoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.service.SubmitProcurementProjectQuote(c.Request.Context(), claims.UserID, claims.EnterpriseID, id, &req)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func parseUintParam(c *gin.Context, name string) (uint64, bool) {
 	id, err := strconv.ParseUint(c.Param(name), 10, 64)
 	if err != nil {
