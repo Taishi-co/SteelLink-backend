@@ -86,9 +86,13 @@ func (s *MarketService) ListMyProcurementProjects(ctx context.Context, req *mark
 		Find(&rows).Error; err != nil {
 		return nil, ecode.ErrDatabase
 	}
+	requestsByProject, err := s.loadProcurementProjectRequestsByBuyer(ctx, collectProcurementProjectIDs(rows), enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
 	items := make([]marketdto.ProcurementProjectItem, 0, len(rows))
 	for i := range rows {
-		items = append(items, toProcurementProjectItem(rows[i], nil, nil, nil, nil, enterpriseID))
+		items = append(items, toProcurementProjectItem(rows[i], requestsByProject[rows[i].ID], nil, nil, nil, enterpriseID))
 	}
 	return &marketdto.ProcurementProjectListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
@@ -129,9 +133,18 @@ func (s *MarketService) ListSellerProcurementProjectsV2(ctx context.Context, req
 		Find(&rows).Error; err != nil {
 		return nil, ecode.ErrDatabase
 	}
+	projectIDs := collectProcurementProjectIDs(rows)
+	enrollmentsByProject, err := s.loadProcurementProjectEnrollmentsBySeller(ctx, projectIDs, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
+	quotesByProject, err := s.loadProcurementProjectQuotesBySeller(ctx, projectIDs, enterpriseID)
+	if err != nil {
+		return nil, ecode.ErrDatabase
+	}
 	items := make([]marketdto.ProcurementProjectItem, 0, len(rows))
 	for i := range rows {
-		items = append(items, toProcurementProjectItem(rows[i], nil, nil, nil, nil, enterpriseID))
+		items = append(items, toProcurementProjectItem(rows[i], nil, enrollmentsByProject[rows[i].ID], quotesByProject[rows[i].ID], nil, enterpriseID))
 	}
 	return &marketdto.ProcurementProjectListResponse{List: items, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
@@ -396,6 +409,87 @@ func refreshProcurementProjectStatsTx(tx *gorm.DB, projectID uint64) error {
 	}).Error
 }
 
+func collectProcurementProjectIDs(rows []marketentity.ProcurementProject) []uint64 {
+	ids := make([]uint64, 0, len(rows))
+	for _, item := range rows {
+		if item.ID > 0 {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
+}
+
+func (s *MarketService) loadProcurementProjectRequestsByBuyer(ctx context.Context, projectIDs []uint64, buyerEnterpriseID uint64) (map[uint64][]marketentity.ProcurementRequest, error) {
+	result := make(map[uint64][]marketentity.ProcurementRequest, len(projectIDs))
+	if len(projectIDs) == 0 || buyerEnterpriseID == 0 {
+		return result, nil
+	}
+	var links []marketentity.ProcurementProjectRequest
+	if err := s.db.WithContext(ctx).
+		Where("project_id IN ?", projectIDs).
+		Find(&links).Error; err != nil {
+		return nil, err
+	}
+	requestIDs := make([]uint64, 0, len(links))
+	projectIDByRequestID := make(map[uint64][]uint64, len(links))
+	for _, item := range links {
+		requestIDs = append(requestIDs, item.RequestID)
+		projectIDByRequestID[item.RequestID] = append(projectIDByRequestID[item.RequestID], item.ProjectID)
+	}
+	if len(requestIDs) == 0 {
+		return result, nil
+	}
+	var requests []marketentity.ProcurementRequest
+	if err := s.db.WithContext(ctx).
+		Where("id IN ? AND buyer_enterprise_id = ?", requestIDs, buyerEnterpriseID).
+		Order("id ASC").
+		Find(&requests).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range requests {
+		for _, projectID := range projectIDByRequestID[item.ID] {
+			result[projectID] = append(result[projectID], item)
+		}
+	}
+	return result, nil
+}
+
+func (s *MarketService) loadProcurementProjectEnrollmentsBySeller(ctx context.Context, projectIDs []uint64, sellerEnterpriseID uint64) (map[uint64][]marketentity.ProcurementEnrollment, error) {
+	result := make(map[uint64][]marketentity.ProcurementEnrollment, len(projectIDs))
+	if len(projectIDs) == 0 || sellerEnterpriseID == 0 {
+		return result, nil
+	}
+	var enrollments []marketentity.ProcurementEnrollment
+	if err := s.db.WithContext(ctx).
+		Where("project_id IN ? AND seller_enterprise_id = ?", projectIDs, sellerEnterpriseID).
+		Order("id ASC").
+		Find(&enrollments).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range enrollments {
+		result[item.ProjectID] = append(result[item.ProjectID], item)
+	}
+	return result, nil
+}
+
+func (s *MarketService) loadProcurementProjectQuotesBySeller(ctx context.Context, projectIDs []uint64, sellerEnterpriseID uint64) (map[uint64][]marketentity.ProcurementQuote, error) {
+	result := make(map[uint64][]marketentity.ProcurementQuote, len(projectIDs))
+	if len(projectIDs) == 0 || sellerEnterpriseID == 0 {
+		return result, nil
+	}
+	var quotes []marketentity.ProcurementQuote
+	if err := s.db.WithContext(ctx).
+		Where("project_id IN ? AND seller_enterprise_id = ? AND is_latest = ?", projectIDs, sellerEnterpriseID, true).
+		Order("unit_price ASC, id ASC").
+		Find(&quotes).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range quotes {
+		result[item.ProjectID] = append(result[item.ProjectID], item)
+	}
+	return result, nil
+}
+
 func toProcurementProjectItem(project marketentity.ProcurementProject, requests []marketentity.ProcurementRequest, enrollments []marketentity.ProcurementEnrollment, quotes []marketentity.ProcurementQuote, award *marketentity.ProcurementAward, viewerEnterpriseID uint64) marketdto.ProcurementProjectItem {
 	requestItems := make([]marketdto.ProcurementRequestItem, 0, len(requests))
 	for _, item := range requests {
@@ -425,7 +519,9 @@ func toProcurementProjectItem(project marketentity.ProcurementProject, requests 
 		enrollmentItems = append(enrollmentItems, mapped)
 		if viewerEnterpriseID > 0 && item.SellerEnterpriseID == viewerEnterpriseID {
 			copy := mapped
-			viewerEnrollment = &copy
+			if viewerEnrollment == nil || enrollmentPriority(copy.Status) > enrollmentPriority(viewerEnrollment.Status) {
+				viewerEnrollment = &copy
+			}
 		}
 	}
 	for _, item := range quotes {
@@ -456,7 +552,9 @@ func toProcurementProjectItem(project marketentity.ProcurementProject, requests 
 		quoteItems = append(quoteItems, mapped)
 		if viewerEnterpriseID > 0 && item.SellerEnterpriseID == viewerEnterpriseID && item.IsLatest {
 			copy := mapped
-			viewerQuote = &copy
+			if viewerQuote == nil || copy.CreatedAt.After(viewerQuote.CreatedAt) {
+				viewerQuote = &copy
+			}
 		}
 	}
 	logItems := make([]marketdto.ProcurementLogItem, 0, len(project.Logs))
@@ -521,6 +619,19 @@ func toProcurementProjectItem(project marketentity.ProcurementProject, requests 
 		result.AwardDeliveryDays = award.DeliveryDays
 	}
 	return result
+}
+
+func enrollmentPriority(status string) int {
+	switch status {
+	case string(marketentity.ProcurementEnrollmentStatusRejected):
+		return 0
+	case string(marketentity.ProcurementEnrollmentStatusInvited):
+		return 1
+	case string(marketentity.ProcurementEnrollmentStatusApproved):
+		return 2
+	default:
+		return -1
+	}
 }
 
 func firstProjectNonEmpty(values ...string) string {
