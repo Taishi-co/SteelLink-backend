@@ -19,6 +19,11 @@ func AutoMigrate() error {
 		&marketentity.ProcurementRequest{},
 		&marketentity.ProcurementActivityRequest{},
 		&marketentity.ProcurementInvitation{},
+		&marketentity.ProcurementProject{},
+		&marketentity.ProcurementProjectRequest{},
+		&marketentity.ProcurementEnrollment{},
+		&marketentity.ProcurementQuote{},
+		&marketentity.ProcurementAward{},
 	); err != nil {
 		return err
 	}

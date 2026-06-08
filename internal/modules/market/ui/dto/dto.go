@@ -319,3 +319,112 @@ type ProcurementInvitationListResponse struct {
 	Page     int                         `json:"page"`
 	PageSize int                         `json:"page_size"`
 }
+
+type ProcurementProjectItem struct {
+	ID                   uint64                      `json:"id"`
+	ProjectNo            string                      `json:"project_no"`
+	Title                string                      `json:"title"`
+	Status               string                      `json:"status"`
+	Category             string                      `json:"category"`
+	SubCategory          string                      `json:"sub_category"`
+	ProductName          string                      `json:"product_name"`
+	Material             string                      `json:"material"`
+	Spec                 string                      `json:"spec"`
+	TargetQuantity       float64                     `json:"target_quantity"`
+	DemandQuantity       float64                     `json:"demand_quantity"`
+	Unit                 string                      `json:"unit"`
+	TargetPrice          float64                     `json:"target_price"`
+	DeliveryAddress      string                      `json:"delivery_address"`
+	BuyerRequestCount    int                         `json:"buyer_request_count"`
+	BuyerEnterpriseCount int                         `json:"buyer_enterprise_count"`
+	InvitedSupplierCount int                         `json:"invited_supplier_count"`
+	QuotedSupplierCount  int                         `json:"quoted_supplier_count"`
+	QuoteDeadline        *time.Time                  `json:"quote_deadline,omitempty"`
+	AwardedAt            *time.Time                  `json:"awarded_at,omitempty"`
+	OrderedAt            *time.Time                  `json:"ordered_at,omitempty"`
+	AwardQuoteID         uint64                      `json:"award_quote_id"`
+	AwardSupplierID      uint64                      `json:"award_supplier_id"`
+	AwardSupplierName    string                      `json:"award_supplier_name"`
+	AwardProductID       uint64                      `json:"award_product_id"`
+	AwardProductNo       string                      `json:"award_product_no"`
+	AwardProductName     string                      `json:"award_product_name"`
+	AwardUnitPrice       float64                     `json:"award_unit_price"`
+	AwardDeliveryDays    int                         `json:"award_delivery_days"`
+	OrderID              uint64                      `json:"order_id"`
+	OrderNo              string                      `json:"order_no"`
+	AdminRemark          string                      `json:"admin_remark"`
+	Requests             []ProcurementRequestItem    `json:"requests,omitempty"`
+	Enrollments          []ProcurementEnrollmentItem `json:"enrollments,omitempty"`
+	Quotes               []ProcurementQuoteItem      `json:"quotes,omitempty"`
+	Logs                 []ProcurementLogItem        `json:"logs,omitempty"`
+	ViewerEnrollment     *ProcurementEnrollmentItem  `json:"viewer_enrollment,omitempty"`
+	ViewerQuote          *ProcurementQuoteItem       `json:"viewer_quote,omitempty"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+}
+
+type ProcurementProjectListResponse struct {
+	List     []ProcurementProjectItem `json:"list"`
+	Total    int64                    `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"page_size"`
+}
+
+type ProcurementEnrollmentItem struct {
+	ID                 uint64     `json:"id"`
+	ProjectID          uint64     `json:"project_id"`
+	SellerEnterpriseID uint64     `json:"seller_enterprise_id"`
+	SellerUserID       uint64     `json:"seller_user_id"`
+	SellerName         string     `json:"seller_name"`
+	ProductID          uint64     `json:"product_id"`
+	ProductNo          string     `json:"product_no"`
+	ProductName        string     `json:"product_name"`
+	Status             string     `json:"status"`
+	Remark             string     `json:"remark"`
+	ReviewedBy         uint64     `json:"reviewed_by"`
+	ReviewedAt         *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+type ProcurementQuoteItem struct {
+	ID                 uint64    `json:"id"`
+	ProjectID          uint64    `json:"project_id"`
+	EnrollmentID       uint64    `json:"enrollment_id"`
+	SellerEnterpriseID uint64    `json:"seller_enterprise_id"`
+	SellerUserID       uint64    `json:"seller_user_id"`
+	SellerName         string    `json:"seller_name"`
+	ProductID          uint64    `json:"product_id"`
+	ProductNo          string    `json:"product_no"`
+	ProductName        string    `json:"product_name"`
+	UnitPrice          float64   `json:"unit_price"`
+	SupplyQuantity     float64   `json:"supply_quantity"`
+	Unit               string    `json:"unit"`
+	DeliveryDays       int       `json:"delivery_days"`
+	DeliveryWarehouse  string    `json:"delivery_warehouse"`
+	TaxIncluded        bool      `json:"tax_included"`
+	TaxRate            float64   `json:"tax_rate"`
+	PaymentTerms       string    `json:"payment_terms"`
+	Remark             string    `json:"remark"`
+	IsLatest           bool      `json:"is_latest"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type CreateProcurementProjectEnrollmentRequest struct {
+	Remark string `json:"remark"`
+}
+
+type CreateProcurementProjectQuoteRequest struct {
+	ProductID         uint64  `json:"product_id"`
+	UnitPrice         float64 `json:"unit_price" binding:"required,gt=0"`
+	SupplyQuantity    float64 `json:"supply_quantity" binding:"required,gt=0"`
+	Unit              string  `json:"unit"`
+	DeliveryDays      int     `json:"delivery_days" binding:"required,gt=0"`
+	DeliveryWarehouse string  `json:"delivery_warehouse"`
+	TaxIncluded       *bool   `json:"tax_included"`
+	TaxRate           float64 `json:"tax_rate"`
+	PaymentTerms      string  `json:"payment_terms"`
+	Remark            string  `json:"remark"`
+}
