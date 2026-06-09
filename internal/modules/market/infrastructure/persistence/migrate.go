@@ -10,24 +10,28 @@ import (
 
 func AutoMigrate() error {
 	db := database.GetDB()
-	if err := db.AutoMigrate(
+	if err := db.AutoMigrate(migrationModels()...); err != nil {
+		return err
+	}
+	return seedMarketData(db)
+}
+
+func migrationModels() []interface{} {
+	return []interface{}{
 		&marketentity.BiddingActivity{},
 		&marketentity.BiddingQuote{},
 		&marketentity.ProcurementActivity{},
+		&marketentity.ProcurementProject{},
 		&marketentity.ProcurementLog{},
 		&marketentity.ProcurementParticipant{},
 		&marketentity.ProcurementRequest{},
 		&marketentity.ProcurementActivityRequest{},
 		&marketentity.ProcurementInvitation{},
-		&marketentity.ProcurementProject{},
 		&marketentity.ProcurementProjectRequest{},
 		&marketentity.ProcurementEnrollment{},
 		&marketentity.ProcurementQuote{},
 		&marketentity.ProcurementAward{},
-	); err != nil {
-		return err
 	}
-	return seedMarketData(db)
 }
 
 func seedMarketData(db *gorm.DB) error {
