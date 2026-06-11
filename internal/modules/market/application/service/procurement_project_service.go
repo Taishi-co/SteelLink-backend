@@ -108,11 +108,16 @@ func (s *MarketService) ListSellerProcurementProjectsV2(ctx context.Context, req
 		req.PageSize = 10
 	}
 	buildQuery := func() *gorm.DB {
-		query := s.db.WithContext(ctx).Model(&marketentity.ProcurementProject{}).
-			Joins("JOIN procurement_supplier_enrollments ON procurement_supplier_enrollments.project_id = procurement_projects.id AND procurement_supplier_enrollments.deleted_at IS NULL").
-			Where("procurement_supplier_enrollments.seller_enterprise_id = ?", enterpriseID)
+		query := s.db.WithContext(ctx).Model(&marketentity.ProcurementProject{})
 		if req.Status != "" {
 			query = query.Where("procurement_projects.status = ?", req.Status)
+		} else {
+			query = query.Where("procurement_projects.status IN ?", []marketentity.ProcurementProjectStatus{
+				marketentity.ProcurementProjectStatusCollecting,
+				marketentity.ProcurementProjectStatusQuoting,
+				marketentity.ProcurementProjectStatusAwarded,
+				marketentity.ProcurementProjectStatusOrderCreated,
+			})
 		}
 		if req.Keyword != "" {
 			like := "%" + req.Keyword + "%"
@@ -121,12 +126,11 @@ func (s *MarketService) ListSellerProcurementProjectsV2(ctx context.Context, req
 		return query
 	}
 	var total int64
-	if err := buildQuery().Distinct("procurement_projects.id").Count(&total).Error; err != nil {
+	if err := buildQuery().Count(&total).Error; err != nil {
 		return nil, ecode.ErrDatabase
 	}
 	var rows []marketentity.ProcurementProject
 	if err := buildQuery().
-		Select("procurement_projects.*").
 		Order("procurement_projects.updated_at DESC, procurement_projects.id DESC").
 		Offset((req.Page - 1) * req.PageSize).
 		Limit(req.PageSize).
